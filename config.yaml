@@ -1,0 +1,37 @@
+# Remote Dev Bot Configuration
+# Model aliases map short names to LiteLLM model identifiers.
+# Usage: comment "/agent-<alias>" on an issue (or just "/agent" for the default).
+
+default_model: claude-small
+
+models:
+  claude-small:
+    id: anthropic/claude-haiku-4-5-20251001
+    description: "Fast and cheap — good for straightforward tasks"
+
+  claude-medium:
+    id: anthropic/claude-sonnet-4-5-20250929
+    description: "Balanced cost/capability — good default for most tasks"
+
+  claude-large:
+    id: anthropic/claude-opus-4-6
+    description: "Most capable — for complex multi-file features"
+
+  openai:
+    id: openai/gpt-4o
+    description: "OpenAI GPT-4o"
+
+  gemini:
+    id: gemini/gemini-2.0-flash
+    description: "Google Gemini 2.0 Flash"
+
+# OpenHands settings
+openhands:
+  # Pin to a specific version to avoid regressions (check for updates periodically)
+  version: "0.39.0"
+  # Max agent iterations per run (controls cost ceiling)
+  max_iterations: 50
+  # PR type: "draft" or "ready"
+  pr_type: draft
+  # Target branch for PRs
+  target_branch: main
