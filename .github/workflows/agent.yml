@@ -40,7 +40,7 @@ jobs:
             # No alias — use default from config
             ALIAS=$(python3 -c "
           import yaml
-          with open('config.yaml') as f:
+          with open('remote-dev-bot.yaml') as f:
               config = yaml.safe_load(f)
           print(config.get('default_model', 'claude-small'))
           ")
@@ -49,7 +49,7 @@ jobs:
           # Look up the model ID from config
           MODEL_ID=$(python3 -c "
           import yaml, sys
-          with open('config.yaml') as f:
+          with open('remote-dev-bot.yaml') as f:
               config = yaml.safe_load(f)
           alias = '$ALIAS'
           models = config.get('models', {})
@@ -64,14 +64,14 @@ jobs:
           # Read OpenHands settings from config
           MAX_ITER=$(python3 -c "
           import yaml
-          with open('config.yaml') as f:
+          with open('remote-dev-bot.yaml') as f:
               config = yaml.safe_load(f)
           print(config.get('openhands', {}).get('max_iterations', 50))
           ")
 
           OH_VERSION=$(python3 -c "
           import yaml
-          with open('config.yaml') as f:
+          with open('remote-dev-bot.yaml') as f:
               config = yaml.safe_load(f)
           print(config.get('openhands', {}).get('version', '0.39.0'))
           ")

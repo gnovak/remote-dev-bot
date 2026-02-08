@@ -7,14 +7,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to resolve issues and create PRs, controlled via `/agent` comments on GitHub issues.
 
 ### Key Files
-- `config.yaml` — model aliases and OpenHands settings
+- `remote-dev-bot.yaml` — model aliases and OpenHands settings
 - `runbook.md` — setup instructions (designed to be followed by humans or AI assistants)
 - `.github/workflows/agent.yml` — the GitHub Actions workflow
 - `.openhands/microagents/repo.md` — (in target repos) context for the agent
 
 ### How It Works
 1. User comments `/agent` or `/agent-<alias>` on a GitHub issue
-2. Workflow parses the alias, looks up the model in `config.yaml`
+2. Workflow parses the alias, looks up the model in `remote-dev-bot.yaml`
 3. OpenHands resolver runs with that model, reads the issue, edits code, opens a draft PR
 4. Iterative: comment `/agent` again on the PR with feedback for another pass
 

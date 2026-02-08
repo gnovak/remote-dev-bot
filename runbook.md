@@ -114,13 +114,13 @@ The workflow file should already be in this repository at `.github/workflows/age
 # From within the target repo:
 mkdir -p .github/workflows
 cp /path/to/remote-dev-bot/.github/workflows/agent.yml .github/workflows/
-cp /path/to/remote-dev-bot/config.yaml .
+cp /path/to/remote-dev-bot/remote-dev-bot.yaml .
 ```
 
 ### Step 2.2: Push and Verify
 
 ```bash
-git add .github/workflows/agent.yml config.yaml
+git add .github/workflows/agent.yml remote-dev-bot.yaml
 git commit -m "Add remote dev bot workflow and config"
 git push
 ```
@@ -177,11 +177,11 @@ Create `.openhands/microagents/repo.md` in your target repo with any context the
 
 ### Step 4.2: Adjust Model Aliases
 
-Edit `config.yaml` to add, remove, or change model aliases.
+Edit `remote-dev-bot.yaml` to add, remove, or change model aliases.
 
 ### Step 4.3: Adjust Iteration Limits
 
-The `max_iterations` setting in `config.yaml` controls how many steps the agent can take. Higher = more capable but more expensive. Default is 50.
+The `max_iterations` setting in `remote-dev-bot.yaml` controls how many steps the agent can take. Higher = more capable but more expensive. Default is 50.
 
 ---
 
