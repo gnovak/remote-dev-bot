@@ -6,24 +6,40 @@ default_model: claude-small
 
 models:
   claude-small:
-    id: anthropic/claude-haiku-4-5-20251001
+    id: anthropic/claude-haiku-4-5
     description: "Fast and cheap — good for straightforward tasks"
 
   claude-medium:
-    id: anthropic/claude-sonnet-4-5-20250929
+    id: anthropic/claude-sonnet-4-5
     description: "Balanced cost/capability — good default for most tasks"
 
   claude-large:
     id: anthropic/claude-opus-4-6
     description: "Most capable — for complex multi-file features"
 
-  openai:
-    id: openai/gpt-4o
-    description: "OpenAI GPT-4o"
+  openai-small:
+    id: openai/gpt-5-nano
+    description: "OpenAI GPT-5 Nano — cheapest"
 
-  gemini:
-    id: gemini/gemini-2.0-flash
-    description: "Google Gemini 2.0 Flash"
+  openai-medium:
+    id: openai/gpt-5.1-codex-mini
+    description: "OpenAI GPT-5.1 Codex Mini"
+
+  openai-large:
+    id: openai/gpt-5.3-codex
+    description: "OpenAI GPT-5.3 Codex — best coding model"
+
+  gemini-small:
+    id: gemini/gemini-2.5-flash-lite
+    description: "Google Gemini 2.5 Flash-Lite — cheapest"
+
+  gemini-medium:
+    id: gemini/gemini-3-flash
+    description: "Google Gemini 3 Flash"
+
+  gemini-large:
+    id: gemini/gemini-3-pro
+    description: "Google Gemini 3 Pro"
 
 # OpenHands settings
 openhands:
