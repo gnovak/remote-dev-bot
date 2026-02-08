@@ -24,13 +24,13 @@ Comment with an alias to choose the model:
 | `/agent-openai` | GPT-4o |
 | `/agent-gemini` | Gemini 2.0 Flash |
 
-Aliases are configured in `config.yaml`.
+Aliases are configured in `remote-dev-bot.yaml`.
 
 ## Architecture
 
 - **GitHub Actions workflow** (`.github/workflows/agent.yml`) — triggers on issue/PR comments, parses the model alias, runs OpenHands
 - **OpenHands** — the AI agent framework that does the actual code exploration and editing
-- **config.yaml** — model aliases and settings
+- **remote-dev-bot.yaml** — model aliases and settings
 - **runbook.md** — step-by-step setup instructions, designed to be followed by a human or by an AI assistant (like Claude Code)
 
 ## Setup
