@@ -117,6 +117,9 @@ jobs:
         env:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
           LLM_MODEL: ${{ steps.parse.outputs.model }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
           GITHUB_USERNAME: ${{ github.repository_owner }}
           GIT_USERNAME: ${{ github.repository_owner }}
