@@ -41,4 +41,4 @@ See `runbook.md` for complete setup instructions. The runbook is designed so you
 
 ## Current Status
 
-MVP in development. See `runbook.md` for what's implemented and what's planned.
+**v0.1.0** — First working version (Feb 9, 2026). End-to-end pipeline operational: `/agent` comment on an issue triggers OpenHands, which resolves the issue and opens a draft PR. Tested with Claude Sonnet (`/agent-claude-medium`).
