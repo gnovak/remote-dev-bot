@@ -122,9 +122,12 @@ jobs:
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
 
+          ISSUE_TYPE=${{ github.event.issue && 'issue' || 'pr' }}
+
           python -m openhands.resolver.resolve_issue \
-            --repo "${{ github.repository }}" \
+            --selected-repo "${{ github.repository }}" \
             --issue-number "$ISSUE_NUMBER" \
+            --issue-type "$ISSUE_TYPE" \
             --max-iterations ${{ steps.parse.outputs.max_iterations }} \
             --comment-id ${{ github.event.comment.id }}
 
@@ -136,7 +139,6 @@ jobs:
           TARGET_BRANCH=${{ github.event.pull_request.base.ref || 'main' }}
 
           python -m openhands.resolver.send_pull_request \
-            --repo "${{ github.repository }}" \
             --issue-number "$ISSUE_NUMBER" \
             --pr-type draft \
             --target-branch "$TARGET_BRANCH"
