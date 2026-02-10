@@ -1,5 +1,13 @@
-# Shim workflow — triggers the reusable workflow in this same repo.
-# Target repos use an identical shim (see examples/agent.yml).
+# Shim workflow — copy this to your target repo at .github/workflows/agent.yml
+#
+# This is all you need in each repo that uses Remote Dev Bot.
+# The real logic lives in gnovak/remote-dev-bot and updates automatically.
+#
+# Prerequisites (see runbook.md for details):
+#   - Repository secrets: at least one LLM API key + PAT_TOKEN
+#   - Actions permissions: read/write + allow PR creation
+#
+# To test against a dev branch of remote-dev-bot, change @main to @dev below.
 
 name: Remote Dev Bot
 

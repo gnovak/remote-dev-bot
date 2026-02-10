@@ -135,31 +135,65 @@ gh secret list --repo {owner}/{repo}
 
 ## Phase 2: Install the Workflow
 
-### Step 2.1: Copy Workflow Files
+### Architecture
 
-**What this does:** Adds the GitHub Actions workflow and config to your repository.
+Remote Dev Bot uses a **shim + reusable workflow** pattern:
 
-The workflow file should already be in this repository at `.github/workflows/agent.yml`. If you're setting this up in a different repo, copy it there:
+- **Reusable workflow** (`resolve.yml`) — lives in `gnovak/remote-dev-bot`. Contains all the logic: model parsing, OpenHands install, issue resolution, PR creation. You never need to copy or update this.
+- **Shim** (`agent.yml`) — a tiny file you add to each target repo. It triggers on `/agent` comments and calls the reusable workflow. Updates to `remote-dev-bot` flow to all repos automatically.
+
+### Step 2.1: Add the Shim Workflow
+
+**What this does:** Adds a small workflow file to your target repo that calls the reusable workflow from `gnovak/remote-dev-bot`.
 
 ```bash
 # From within the target repo:
 mkdir -p .github/workflows
-cp /path/to/remote-dev-bot/.github/workflows/agent.yml .github/workflows/
-cp /path/to/remote-dev-bot/remote-dev-bot.yaml .
+# Copy the example shim (or create it manually — it's ~25 lines)
+curl -o .github/workflows/agent.yml \
+  https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/examples/agent.yml
 ```
+
+Or manually create `.github/workflows/agent.yml` with:
+
+```yaml
+name: Remote Dev Bot
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  resolve:
+    if: >
+      (github.event.issue || github.event.pull_request) &&
+      startsWith(github.event.comment.body, '/agent') &&
+      contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), github.event.comment.author_association)
+    uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@main
+    secrets: inherit
+```
+
+**Note:** To test against a dev branch of remote-dev-bot, change `@main` to `@dev` (or any branch name).
 
 ### Step 2.2: Push and Verify
 
 ```bash
-git add .github/workflows/agent.yml remote-dev-bot.yaml
-git commit -m "Add remote dev bot workflow and config"
+git add .github/workflows/agent.yml
+git commit -m "Add remote dev bot shim workflow"
 git push
 ```
 
 **Verify the workflow is recognized:**
 ```bash
 gh workflow list --repo {owner}/{repo}
-# Should show "Remote Dev Bot" (or whatever the workflow is named)
+# Should show "Remote Dev Bot"
 ```
 
 ---
@@ -242,10 +276,11 @@ The `max_iterations` setting in `remote-dev-bot.yaml` controls how many steps th
 ## Troubleshooting
 
 ### Agent doesn't trigger
-- Verify the workflow file is on the default branch (usually `main`)
+- Verify the shim workflow file is on the default branch (usually `main`) of the target repo
 - Check that the commenter has collaborator/member/owner access to the repo
 - Look at the Actions tab for failed runs
 - Make sure the comment starts with exactly `/agent` (no leading spaces)
+- Verify the shim points to the correct ref (e.g., `@main` or `@dev`)
 
 ### Agent fails during setup steps (first 2 minutes)
 - Check the run log — these are usually missing dependencies or config issues
@@ -275,4 +310,5 @@ These are planned but not yet built. See GitHub issues for discussion.
 - [ ] **LLM account setup**: Walk through creating accounts, getting API keys, setting spending limits for each provider
 - [ ] **Cost reporting**: Extract cost data from agent runs and post as PR comments
 - [ ] **EC2 backend**: Run the agent on a dedicated EC2 instance instead of GitHub Actions (for longer runs, more resources, or cost optimization)
+- [x] **Reusable workflow**: Split into shim + reusable workflow so target repos auto-update (done)
 - [ ] **Testing infrastructure**: Separate test repo to avoid cluttering the main repo with test issues (see issue #5)
