@@ -72,9 +72,22 @@ gh api repos/{owner}/{repo}/actions/permissions/workflow
 5. Click "Add"
 6. **Copy the key immediately** — you won't be able to see it again
 
-**For OpenAI or Google:** Follow their respective console instructions to create an API key.
+**For OpenAI (GPT models):**
+1. Go to https://platform.openai.com/api-keys (note: this is separate from your ChatGPT account)
+2. Click "Create new secret key"
+3. Name it (e.g., "remote-dev-bot"), set permissions to "All"
+4. Click "Create secret key"
+5. **Copy the key immediately** — you won't be able to see it again
+6. **Billing:** You must add a payment method at https://platform.openai.com/settings/organization/billing/overview before the key will work. New accounts get a $100/month usage limit by default; you can adjust this in the limits page.
 
-**Tip:** Naming the key after the project helps you track costs and revoke it later if needed.
+**For Google (Gemini models):**
+1. Go to https://aistudio.google.com/app/apikey
+2. Sign in with your Google account and accept the Terms of Service if prompted
+3. Click "Create API Key", then select or create a Google Cloud project
+4. **Copy the key immediately** (it starts with `AIza`)
+5. **Billing:** The free tier works for testing (5-15 requests/minute depending on model). For production use, enable billing on your Google Cloud project. Paid tier (Tier 1) unlocks 150-300 RPM.
+
+**Tip:** Name each key after the project (e.g., "remote-dev-bot") to track costs and revoke later if needed. Store keys in a password manager.
 
 ### Step 1.3: Add Repository Secrets
 
