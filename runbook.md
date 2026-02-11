@@ -109,7 +109,7 @@ We use a **fine-grained** token (not classic) because it can be scoped to a sing
 3. **Token name:** Something like "remote-dev-bot" (or "remote-dev-bot-myrepo" if you plan to have multiple)
 4. **Expiration:** Your choice. "No expiration" is convenient for a fine-grained token scoped to one repo; 90 days is more conservative (set a calendar reminder to rotate). The security risk is low since fine-grained tokens are limited to specific repos and permissions.
 5. **Resource owner:** Your GitHub account
-6. **Repository access:** Select "Only select repositories" and choose the repo where the bot will run
+6. **Repository access:** Select "All repositories" (recommended — the bot needs access to both the target repo and `gnovak/remote-dev-bot` for config). Alternatively, select "Only select repositories" and choose both repos.
 7. **Permissions** — under "Repository permissions", set these four to **Read and write**:
    - Contents (to push branches)
    - Issues (to read issues and post comments)
@@ -141,6 +141,8 @@ Remote Dev Bot uses a **shim + reusable workflow** pattern:
 
 - **Reusable workflow** (`resolve.yml`) — lives in `gnovak/remote-dev-bot`. Contains all the logic: model parsing, OpenHands install, issue resolution, PR creation. You never need to copy or update this.
 - **Shim** (`agent.yml`) — a tiny file you add to each target repo. It triggers on `/agent` comments and calls the reusable workflow. Updates to `remote-dev-bot` flow to all repos automatically.
+
+**Using your own fork:** If you want full control over the reusable workflow (recommended for organizations), fork `gnovak/remote-dev-bot` and point the shim at your fork instead. Replace `gnovak/remote-dev-bot` with your fork's `{owner}/{repo}` everywhere in this runbook — in the shim's `uses:` line, and in the `resolve.yml` config checkout step. You'll also need to set the Actions access level on your fork (see Troubleshooting: Cross-repo reusable workflow access).
 
 ### Step 2.1: Add the Shim Workflow
 
@@ -254,6 +256,9 @@ gh pr list --repo {owner}/{repo}
 | `Agent reached maximum iteration` | Agent loops instead of finishing | Try `/agent-claude-medium` instead of `/agent` |
 | `429 Too Many Requests` | GitHub API rate limit | Wait a few minutes and try again |
 | `KeyError: 'LLM_API_KEY'` in PR creation step | Missing env vars in PR step | Update workflow to pass `LLM_API_KEY` and `LLM_MODEL` to both steps |
+| Workflow file issue (instant failure, 0s) | Reusable workflow not accessible | Set Actions access to `user` level on remote-dev-bot (see below) |
+| `Not Found` on config checkout step | PAT can't access remote-dev-bot repo | PAT must include remote-dev-bot in its repository scope |
+| `404 Not Found` on issues API (Resolve step) | PAT doesn't cover the target repo | Update PAT to "All repositories" or add the target repo to its scope |
 
 ---
 
@@ -274,6 +279,20 @@ The `max_iterations` setting in `remote-dev-bot.yaml` controls how many steps th
 ---
 
 ## Troubleshooting
+
+### Cross-repo reusable workflow access
+
+The shim in your target repo calls `resolve.yml` from `gnovak/remote-dev-bot`. For this to work with a private repo, you must enable Actions access sharing on `remote-dev-bot`:
+
+```bash
+gh api repos/gnovak/remote-dev-bot/actions/permissions/access \
+  --method PUT \
+  --field access_level=user
+```
+
+This allows all repos owned by the same user to call reusable workflows in `remote-dev-bot`. Without this, the shim will fail instantly with "workflow file issue."
+
+Also ensure your PAT token covers all repos involved — both the target repo and `remote-dev-bot`. The simplest approach is to set the PAT to "All repositories" scope in your GitHub token settings.
 
 ### Agent doesn't trigger
 - Verify the shim workflow file is on the default branch (usually `main`) of the target repo
@@ -311,4 +330,4 @@ These are planned but not yet built. See GitHub issues for discussion.
 - [ ] **Cost reporting**: Extract cost data from agent runs and post as PR comments
 - [ ] **EC2 backend**: Run the agent on a dedicated EC2 instance instead of GitHub Actions (for longer runs, more resources, or cost optimization)
 - [x] **Reusable workflow**: Split into shim + reusable workflow so target repos auto-update (done)
-- [ ] **Testing infrastructure**: Separate test repo to avoid cluttering the main repo with test issues (see issue #5)
+- [x] **Testing infrastructure**: Separate test repo (`remote-dev-bot-test`) with shim pointed at `@dev` branch (done)

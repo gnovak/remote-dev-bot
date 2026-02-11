@@ -31,7 +31,7 @@ Aliases are configured in `remote-dev-bot.yaml`.
 The system has two parts:
 
 - **Shim workflow** (`.github/workflows/agent.yml`) — a thin trigger that lives in each target repo. Fires on `/agent` comments and calls the reusable workflow. See `examples/agent.yml` for the template.
-- **Reusable workflow** (`.github/workflows/resolve.yml`) — all the logic: parses model aliases, installs OpenHands, resolves the issue, creates a draft PR. Lives in this repo and is called by shims in target repos.
+- **Reusable workflow** (`.github/workflows/resolve.yml`) — all the logic: parses model aliases, installs OpenHands, resolves the issue, creates a draft PR. Lives in this repo and is called by shims in target repos. Organizations or individuals who want full control can fork this repo and point their shims at the fork instead.
 - **OpenHands** — the AI agent framework that does the actual code exploration and editing
 - **`remote-dev-bot.yaml`** — model aliases and OpenHands settings (version, max iterations, PR type)
 - **`runbook.md`** — step-by-step setup instructions, designed to be followed by a human or by an AI assistant (like Claude Code)
