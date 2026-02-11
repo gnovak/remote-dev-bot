@@ -9,14 +9,24 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 ### Key Files
 - `remote-dev-bot.yaml` — model aliases and OpenHands settings
 - `runbook.md` — setup instructions (designed to be followed by humans or AI assistants)
-- `.github/workflows/agent.yml` — the GitHub Actions workflow
+- `.github/workflows/resolve.yml` — the reusable workflow (all the real logic)
+- `.github/workflows/agent.yml` — thin shim that calls resolve.yml
+- `examples/agent.yml` — shim template for target repos to copy
 - `.openhands/microagents/repo.md` — (in target repos) context for the agent
 
 ### How It Works
-1. User comments `/agent` or `/agent-<alias>` on a GitHub issue
-2. Workflow parses the alias, looks up the model in `remote-dev-bot.yaml`
-3. OpenHands resolver runs with that model, reads the issue, edits code, opens a draft PR
-4. Iterative: comment `/agent` again on the PR with feedback for another pass
+1. User comments `/agent` or `/agent-<alias>` on a GitHub issue in a target repo
+2. Target repo's shim workflow calls `resolve.yml` from this repo
+3. Reusable workflow parses the alias, looks up the model in `remote-dev-bot.yaml`
+4. OpenHands resolver runs with that model, reads the issue, edits code, opens a draft PR
+5. Iterative: comment `/agent` again on the PR with feedback for another pass
+
+### Dev Workflow
+- Push changes to a `dev` branch in this repo
+- Point test repo's shim at `@dev` instead of `@main`
+- Test via `/agent` on a test issue
+- When working: squash commits, merge to main, delete `dev`
+- All target repos automatically get updates (they point at `@main`)
 
 ## Git Workflow Preferences
 
