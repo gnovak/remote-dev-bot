@@ -61,4 +61,6 @@ This keeps test issues out of the main repo and lets you iterate on workflow cha
 
 ## Current Status
 
-**v0.1.0** — First working version (Feb 9, 2026). End-to-end pipeline operational: `/agent` comment on an issue triggers OpenHands, which resolves the issue and opens a draft PR. Tested with Claude Sonnet (`/agent-claude-medium`).
+**v0.2.0** — Shim + reusable workflow (Feb 11, 2026). Refactored into a thin shim (`agent.yml`) per target repo that calls a shared reusable workflow (`resolve.yml`). Cross-repo support tested with separate test repo. Dev cycle infrastructure in place.
+
+**v0.1.0** — First working version (Feb 9, 2026). End-to-end pipeline operational: `/agent` comment on an issue triggers OpenHands, which resolves the issue and opens a draft PR.
