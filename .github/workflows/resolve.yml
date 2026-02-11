@@ -1,0 +1,171 @@
+name: Resolve Issue
+
+# Reusable workflow — called by thin shims in target repos.
+# See examples/agent.yml for the shim template.
+
+on:
+  workflow_call:
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
+      GEMINI_API_KEY:
+        required: false
+      PAT_TOKEN:
+        required: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+
+      - name: Checkout remote-dev-bot config
+        uses: actions/checkout@v4
+        with:
+          repository: gnovak/remote-dev-bot
+          path: .remote-dev-bot
+          sparse-checkout: remote-dev-bot.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install PyYAML
+
+      - name: Parse model alias from comment
+        id: parse
+        run: |
+          CONFIG=".remote-dev-bot/remote-dev-bot.yaml"
+          COMMENT="${{ github.event.comment.body }}"
+          # Extract alias: "/agent-claude-large do X" -> "claude-large", "/agent" -> ""
+          ALIAS=$(echo "$COMMENT" | grep -oP '^/agent-?\K[a-z0-9-]*' || echo "")
+
+          if [ -z "$ALIAS" ]; then
+            # No alias — use default from config
+            ALIAS=$(python3 -c "
+          import yaml
+          with open('$CONFIG') as f:
+              config = yaml.safe_load(f)
+          print(config.get('default_model', 'claude-small'))
+          ")
+          fi
+
+          # Look up the model ID from config
+          MODEL_ID=$(python3 -c "
+          import yaml, sys
+          with open('$CONFIG') as f:
+              config = yaml.safe_load(f)
+          alias = '$ALIAS'
+          models = config.get('models', {})
+          if alias in models:
+              print(models[alias]['id'])
+          else:
+              print(f'ERROR: Unknown model alias: {alias}', file=sys.stderr)
+              print(f'Available aliases: {list(models.keys())}', file=sys.stderr)
+              sys.exit(1)
+          ")
+
+          # Read OpenHands settings from config
+          MAX_ITER=$(python3 -c "
+          import yaml
+          with open('$CONFIG') as f:
+              config = yaml.safe_load(f)
+          print(config.get('openhands', {}).get('max_iterations', 50))
+          ")
+
+          OH_VERSION=$(python3 -c "
+          import yaml
+          with open('$CONFIG') as f:
+              config = yaml.safe_load(f)
+          print(config.get('openhands', {}).get('version', '0.39.0'))
+          ")
+
+          echo "model=$MODEL_ID" >> "$GITHUB_OUTPUT"
+          echo "alias=$ALIAS" >> "$GITHUB_OUTPUT"
+          echo "max_iterations=$MAX_ITER" >> "$GITHUB_OUTPUT"
+          echo "oh_version=$OH_VERSION" >> "$GITHUB_OUTPUT"
+
+          echo "Model alias: $ALIAS"
+          echo "Model ID: $MODEL_ID"
+
+      - name: Determine API key
+        id: apikey
+        run: |
+          MODEL="${{ steps.parse.outputs.model }}"
+          if [[ "$MODEL" == anthropic/* ]]; then
+            echo "key=${{ secrets.ANTHROPIC_API_KEY }}" >> "$GITHUB_OUTPUT"
+          elif [[ "$MODEL" == openai/* ]]; then
+            echo "key=${{ secrets.OPENAI_API_KEY }}" >> "$GITHUB_OUTPUT"
+          elif [[ "$MODEL" == gemini/* ]]; then
+            echo "key=${{ secrets.GEMINI_API_KEY }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Unknown model provider for: $MODEL"
+            exit 1
+          fi
+
+      - name: React to comment
+        run: |
+          gh api repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions \
+            --method POST --field content=rocket
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Install OpenHands
+        run: |
+          pip install "openhands-ai==${{ steps.parse.outputs.oh_version }}" PyYAML
+
+      - name: Clean up config checkout
+        run: rm -rf .remote-dev-bot
+
+      - name: Resolve issue
+        env:
+          LLM_API_KEY: ${{ steps.apikey.outputs.key }}
+          LLM_MODEL: ${{ steps.parse.outputs.model }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_USERNAME: ${{ github.repository_owner }}
+          GIT_USERNAME: ${{ github.repository_owner }}
+        run: |
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+
+          ISSUE_TYPE=${{ github.event.issue && 'issue' || 'pr' }}
+
+          python -m openhands.resolver.resolve_issue \
+            --selected-repo "${{ github.repository }}" \
+            --issue-number "$ISSUE_NUMBER" \
+            --issue-type "$ISSUE_TYPE" \
+            --max-iterations ${{ steps.parse.outputs.max_iterations }} \
+            --comment-id ${{ github.event.comment.id }}
+
+      - name: Create pull request
+        env:
+          LLM_API_KEY: ${{ steps.apikey.outputs.key }}
+          LLM_MODEL: ${{ steps.parse.outputs.model }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_USERNAME: ${{ github.repository_owner }}
+          GIT_USERNAME: ${{ github.repository_owner }}
+        run: |
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          TARGET_BRANCH=${{ github.event.pull_request.base.ref || 'main' }}
+
+          python -m openhands.resolver.send_pull_request \
+            --issue-number "$ISSUE_NUMBER" \
+            --pr-type draft \
+            --target-branch "$TARGET_BRANCH"
+
+      - name: Upload output artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-output
+          path: output.jsonl
+          retention-days: 30
