@@ -1,6 +1,8 @@
 # Remote Dev Bot
 
-An AI-powered development workflow where GitHub issues get resolved autonomously via pull requests — like having a remote colleague who checks GitHub between surf sessions.
+An AI-powered development workflow where GitHub issues get resolved autonomously via pull requests — like having a remote colleague who checks GitHub between surf sessions. Using shell-based agents feels like pair programming, which is a valuable mode of collaboration, but sometimes you want something that feels more like delegating work to an experienced coworker. This system aims to provide that alternative.
+
+There are already excellent vendor-specific implementations of this pattern (GitHub Copilot Workspace, Cursor, etc.), so this project isn't necessarily better than those. However, it's intentionally cross-platform and was built as a learning exercise — a way to understand the agent tooling space and explore how to design agents that can autonomously handle real development tasks.
 
 ## How It Works
 
