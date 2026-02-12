@@ -9,6 +9,7 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 ### Key Files
 - `remote-dev-bot.yaml` — model aliases and OpenHands settings
 - `runbook.md` — setup instructions (designed to be followed by humans or AI assistants)
+- `how-it-works.md` — architecture docs: what files live where, how repos connect
 - `.github/workflows/resolve.yml` — the reusable workflow (all the real logic)
 - `.github/workflows/agent.yml` — thin shim that calls resolve.yml
 - `.github/workflows/test.yml` — CI: runs pytest on PRs to main
