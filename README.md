@@ -61,6 +61,20 @@ GitHub Actions only runs workflows from the default branch (main), so developing
 
 This keeps test issues out of the main repo and lets you iterate on workflow changes before they hit `main`.
 
+## LLM Provider Quick Reference
+
+Dashboard, billing, and API key management links for each supported provider.
+
+**Anthropic (Claude)**
+- [Dashboard](https://console.anthropic.com/dashboard) · [API keys](https://console.anthropic.com/settings/keys) · [Usage](https://console.anthropic.com/settings/usage) · [Limits](https://console.anthropic.com/settings/limits) · [Billing](https://console.anthropic.com/settings/billing)
+
+**OpenAI (GPT)**
+- [Dashboard](https://platform.openai.com/settings/organization/billing/overview) · [API keys](https://platform.openai.com/api-keys) · [Usage](https://platform.openai.com/account/usage) · [Limits](https://platform.openai.com/account/billing/limits) · [Billing](https://platform.openai.com/settings/organization/billing/overview)
+
+**Google (Gemini)**
+- [API keys](https://aistudio.google.com/app/apikey) · [Usage & rate limits](https://aistudio.google.com/app/usage) · [Projects](https://aistudio.google.com/app/projects)
+- Google AI Studio is the simplest way to manage Gemini API keys. It's a lightweight frontend to the same API available through Google Cloud Console.
+
 ## Current Status
 
 **v0.2.0** — Shim + reusable workflow (Feb 11, 2026). Refactored into a thin shim (`agent.yml`) per target repo that calls a shared reusable workflow (`resolve.yml`). Cross-repo support tested with separate test repo. Dev cycle infrastructure in place.
