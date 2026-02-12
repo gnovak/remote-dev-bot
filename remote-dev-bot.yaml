@@ -2,7 +2,7 @@
 # Model aliases map short names to LiteLLM model identifiers.
 # Usage: comment "/agent-<alias>" on an issue (or just "/agent" for the default).
 
-default_model: claude-small
+default_model: claude-medium
 
 models:
   claude-small:
