@@ -61,6 +61,8 @@ GitHub Actions only runs workflows from the default branch (main), so developing
 
 This keeps test issues out of the main repo and lets you iterate on workflow changes before they hit `main`.
 
+For detailed dev cycle instructions (especially for AI assistants like Claude Code), see `CLAUDE.md`.
+
 ## LLM Provider Quick Reference
 
 Dashboard, billing, and API key management links for each supported provider.
