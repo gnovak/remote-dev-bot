@@ -34,12 +34,12 @@ models:
     description: "Google Gemini 2.5 Flash-Lite — cheapest"
 
   gemini-medium:
-    id: gemini/gemini-3-flash
-    description: "Google Gemini 3 Flash"
+    id: gemini/gemini-2.5-flash
+    description: "Google Gemini 2.5 Flash"
 
   gemini-large:
-    id: gemini/gemini-3-pro
-    description: "Google Gemini 3 Pro"
+    id: gemini/gemini-2.5-pro
+    description: "Google Gemini 2.5 Pro"
 
 # OpenHands settings
 openhands:
