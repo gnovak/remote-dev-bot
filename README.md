@@ -14,6 +14,13 @@ There are already excellent vendor-specific implementations of this pattern (Git
    - Opens a draft PR
 4. Review the PR. If changes are needed, comment `/agent` on the PR with feedback and the agent runs again.
 
+## Example
+
+New to Remote Dev Bot? See these examples to understand the workflow:
+
+- **[Example Issue](examples/example-issue.md)** — What a typical issue looks like and how to invoke the agent
+- **[Example PR](examples/example-pr.md)** — What the resulting pull request looks like and how to iterate
+
 ## Model Selection
 
 Comment with an alias to choose the model:
