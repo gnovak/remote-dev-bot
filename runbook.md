@@ -19,16 +19,104 @@ Before starting, make sure you have:
 - [ ] A GitHub account
 - [ ] A GitHub repository where you want the bot to operate
 
-- [ ] **`gh` CLI installed and authenticated.** This is the GitHub command-line tool used throughout this runbook.
-  - Install: `brew install gh` (macOS) or see https://cli.github.com/ for other platforms
-  - Authenticate: `gh auth login` (follow the prompts — choose HTTPS and authenticate via browser)
-  - Add workflow scope: `gh auth refresh --hostname github.com --scopes workflow`
-  - Set up git credential helper: `gh auth setup-git`
-  - Verify: `gh auth status` should show you logged in with the `workflow` scope
-
-- [ ] API key for at least one LLM provider (Anthropic, OpenAI, or Google) — see Step 1.2
-
 Throughout this runbook, replace `{owner}/{repo}` with your actual GitHub owner and repo name (e.g., `myuser/myproject`).
+
+---
+
+## Phase 0: Install and Configure GitHub CLI
+
+### Step 0.1: Check if GitHub CLI is Already Installed
+
+**What this does:** Verifies if you already have the GitHub command-line tool installed. If it's already installed, you can skip the installation step.
+
+```bash
+gh --version
+```
+
+If this command succeeds and shows a version number, you already have `gh` installed. Skip to Step 0.2.
+
+If the command fails (command not found), proceed with the installation:
+
+**On macOS:**
+```bash
+brew install gh
+```
+
+**On Linux (Debian/Ubuntu):**
+```bash
+type -p curl >/dev/null || sudo apt install curl -y
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+sudo apt update
+sudo apt install gh -y
+```
+
+**On Linux (Fedora/RHEL/CentOS):**
+```bash
+sudo dnf install gh
+```
+
+**On Windows:**
+Download and install from https://cli.github.com/ or use:
+```bash
+winget install --id GitHub.cli
+```
+
+**Other platforms:** See https://cli.github.com/ for installation instructions.
+
+After installation, verify:
+```bash
+gh --version
+```
+
+### Step 0.2: Authenticate with GitHub
+
+**What this does:** Logs you into GitHub through the command line so you can manage repositories, secrets, and workflows.
+
+```bash
+gh auth login
+```
+
+Follow the prompts:
+- Choose **HTTPS** as your preferred protocol
+- Choose **Login with a web browser**
+- Copy the one-time code shown in your terminal
+- Press Enter to open the browser (or manually go to https://github.com/login/device)
+- Paste the code and authorize the GitHub CLI
+
+### Step 0.3: Add Required Scopes
+
+**What this does:** Grants the GitHub CLI permission to manage workflows and set up Git authentication.
+
+```bash
+# Add workflow scope (required to manage Actions workflows)
+gh auth refresh --hostname github.com --scopes workflow
+
+# Set up git credential helper (allows git commands to use gh authentication)
+gh auth setup-git
+```
+
+### Step 0.4: Verify Authentication
+
+**What this does:** Confirms that authentication is working correctly and you have the necessary permissions.
+
+```bash
+# Check authentication status
+gh auth status
+# Should show you logged in with the `workflow` scope
+
+# Test by listing your repositories
+gh repo list --limit 5
+# Should show a list of your repositories
+
+# Test by viewing info about your target repository
+gh repo view {owner}/{repo}
+# Replace {owner}/{repo} with your actual repo (e.g., myuser/myproject)
+# Should show repository information including description and stats
+```
+
+If all these commands succeed, your GitHub CLI is properly configured!
 
 ---
 
