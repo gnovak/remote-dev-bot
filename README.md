@@ -20,7 +20,7 @@ Comment with an alias to choose the model:
 
 | Command | Model |
 |---------|-------|
-| `/agent` | Default (Claude Haiku — fast and cheap) |
+| `/agent` | Default (Claude Sonnet — balanced cost/capability) |
 | `/agent-claude-small` | Claude Haiku |
 | `/agent-claude-large` | Claude Opus |
 | `/agent-openai` | GPT-4o |
