@@ -14,7 +14,7 @@ models:
     description: "Balanced cost/capability — good default for most tasks"
 
   claude-large:
-    id: anthropic/claude-opus-4-6
+    id: anthropic/claude-opus-4-5
     description: "Most capable — for complex multi-file features"
 
   openai-small:
