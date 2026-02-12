@@ -36,9 +36,10 @@ This project has an unusual dev cycle because GitHub Actions only runs workflows
 - Only one feature can be tested at a time (since there's only one `dev` pointer).
 
 **Important: config vs workflow code:**
-- The workflow CODE comes from the `dev` branch (resolve.yml)
-- The CONFIG file (remote-dev-bot.yaml) is checked out separately and comes from `main` by default (the config checkout step doesn't specify a ref)
-- This means config changes on your feature branch won't take effect in tests unless you also push them to `main`, or until config layering is implemented (target repo config overrides remote-dev-bot config)
+- The shim (`agent.yml`) determines which branch of `resolve.yml` to use (`@main` or `@dev`)
+- But `resolve.yml` checks out `remote-dev-bot.yaml` in a separate step that always pulls from `main` — GitHub Actions doesn't expose which ref a reusable workflow was called with, so there's no way to say "use the same branch as myself"
+- This means config changes on your feature branch won't take effect in tests unless you also push them to `main`
+- Workaround: with config layering, you can put a `remote-dev-bot.yaml` in the target repo (remote-dev-bot-test) to override specific values during testing
 
 **Full dev cycle:**
 1. Create a feature branch from `main`: `git checkout -b my-feature main`
