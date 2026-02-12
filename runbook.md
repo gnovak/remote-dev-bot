@@ -12,6 +12,24 @@ When following this runbook with an AI assistant, the assistant should:
 
 ---
 
+## Overview
+
+This runbook will guide you through setting up Remote Dev Bot on your GitHub repository. By the end, you'll have an AI-powered bot that can automatically resolve issues and create pull requests when triggered by a `/agent` comment.
+
+**How the bot works:** When you comment `/agent` on an issue, a GitHub Actions workflow starts. It spins up [OpenHands](https://github.com/All-Hands-AI/OpenHands) (an open-source AI coding agent) in a sandboxed container, points it at your issue, and lets it work. The agent reads the issue, explores your codebase, writes code, runs tests, and iterates until it has a solution. Then it pushes a branch and opens a draft PR for your review.
+
+**What you'll set up:**
+
+1. **Phase 0: Install and Configure GitHub CLI** — Install the `gh` command-line tool and authenticate with GitHub
+2. **Phase 1: GitHub Repository Settings** — Configure repository permissions, create API keys for your chosen LLM provider(s), and store them as GitHub secrets
+3. **Phase 2: Install the Workflow** — Add a small workflow file to your repository that connects to the Remote Dev Bot system
+4. **Phase 3: Test It** — Create a test issue and trigger the bot to verify everything works
+5. **Phase 4: Customize (Optional)** — Add repository context, adjust model settings, and tune iteration limits
+
+**Time estimate:** 15-30 minutes for initial setup, depending on whether you already have the GitHub CLI installed and authenticated.
+
+---
+
 ## Prerequisites
 
 Before starting, make sure you have:
