@@ -48,6 +48,6 @@ openhands:
   # Max agent iterations per run (controls cost ceiling)
   max_iterations: 50
   # PR type: "draft" or "ready"
-  pr_type: draft
+  pr_type: ready
   # Target branch for PRs
   target_branch: main

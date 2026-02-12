@@ -40,61 +40,77 @@ jobs:
       - name: Install PyYAML
         run: pip install PyYAML
 
-      - name: Parse model alias from comment
+      - name: Parse config and model alias
         id: parse
         run: |
-          CONFIG=".remote-dev-bot/remote-dev-bot.yaml"
           COMMENT="${{ github.event.comment.body }}"
           # Extract alias: "/agent-claude-large do X" -> "claude-large", "/agent" -> ""
           ALIAS=$(echo "$COMMENT" | grep -oP '^/agent-?\K[a-z0-9-]*' || echo "")
 
-          if [ -z "$ALIAS" ]; then
-            # No alias — use default from config
-            ALIAS=$(python3 -c "
-          import yaml
-          with open('$CONFIG') as f:
-              config = yaml.safe_load(f)
-          print(config.get('default_model', 'claude-small'))
-          ")
-          fi
+          python3 << PYEOF
+          import yaml, sys, os
 
-          # Look up the model ID from config
-          MODEL_ID=$(python3 -c "
-          import yaml, sys
-          with open('$CONFIG') as f:
-              config = yaml.safe_load(f)
+          def deep_merge(base, override):
+              """Merge override into base, recursively for dicts."""
+              result = base.copy()
+              for key, value in override.items():
+                  if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                      result[key] = deep_merge(result[key], value)
+                  else:
+                      result[key] = value
+              return result
+
+          # Read base config from remote-dev-bot
+          base_config = {}
+          base_path = '.remote-dev-bot/remote-dev-bot.yaml'
+          if os.path.exists(base_path):
+              with open(base_path) as f:
+                  base_config = yaml.safe_load(f) or {}
+
+          # Read override config from target repo (if it exists)
+          override_config = {}
+          override_path = 'remote-dev-bot.yaml'
+          if os.path.exists(override_path):
+              with open(override_path) as f:
+                  override_config = yaml.safe_load(f) or {}
+
+          # Merge: target repo overrides remote-dev-bot defaults
+          config = deep_merge(base_config, override_config)
+
+          # Resolve model alias
           alias = '$ALIAS'
+          if not alias:
+              alias = config.get('default_model', 'claude-small')
+
           models = config.get('models', {})
-          if alias in models:
-              print(models[alias]['id'])
-          else:
+          if alias not in models:
               print(f'ERROR: Unknown model alias: {alias}', file=sys.stderr)
               print(f'Available aliases: {list(models.keys())}', file=sys.stderr)
               sys.exit(1)
-          ")
 
-          # Read OpenHands settings from config
-          MAX_ITER=$(python3 -c "
-          import yaml
-          with open('$CONFIG') as f:
-              config = yaml.safe_load(f)
-          print(config.get('openhands', {}).get('max_iterations', 50))
-          ")
+          model_id = models[alias]['id']
 
-          OH_VERSION=$(python3 -c "
-          import yaml
-          with open('$CONFIG') as f:
-              config = yaml.safe_load(f)
-          print(config.get('openhands', {}).get('version', '0.39.0'))
-          ")
+          # Read OpenHands settings
+          oh = config.get('openhands', {})
+          max_iter = oh.get('max_iterations', 50)
+          oh_version = oh.get('version', '0.39.0')
+          pr_type = oh.get('pr_type', 'ready')
 
-          echo "model=$MODEL_ID" >> "$GITHUB_OUTPUT"
-          echo "alias=$ALIAS" >> "$GITHUB_OUTPUT"
-          echo "max_iterations=$MAX_ITER" >> "$GITHUB_OUTPUT"
-          echo "oh_version=$OH_VERSION" >> "$GITHUB_OUTPUT"
+          # Write outputs
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'model={model_id}\n')
+              f.write(f'alias={alias}\n')
+              f.write(f'max_iterations={max_iter}\n')
+              f.write(f'oh_version={oh_version}\n')
+              f.write(f'pr_type={pr_type}\n')
 
-          echo "Model alias: $ALIAS"
-          echo "Model ID: $MODEL_ID"
+          # Log for visibility
+          has_override = bool(override_config)
+          print(f'Config: base=remote-dev-bot, override={"target repo" if has_override else "none"}')
+          print(f'Model alias: {alias}')
+          print(f'Model ID: {model_id}')
+          print(f'PR type: {pr_type}')
+          PYEOF
 
       - name: Determine API key
         id: apikey
@@ -161,7 +177,7 @@ jobs:
 
           python -m openhands.resolver.send_pull_request \
             --issue-number "$ISSUE_NUMBER" \
-            --pr-type draft \
+            --pr-type ${{ steps.parse.outputs.pr_type }} \
             --target-branch "$TARGET_BRANCH"
 
       - name: Upload output artifact
