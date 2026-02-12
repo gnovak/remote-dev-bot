@@ -1,4 +1,4 @@
-"""Tests for lib/config.py — config parsing and model resolution."""
+"""Tests for lib/config.py — config parsing, command parsing, and model resolution."""
 
 import os
 import tempfile
@@ -6,7 +6,7 @@ import tempfile
 import pytest
 import yaml
 
-from lib.config import deep_merge, detect_api_provider, resolve_config
+from lib.config import deep_merge, detect_api_provider, parse_command, resolve_config
 
 
 # --- deep_merge ---
@@ -68,12 +68,55 @@ def test_detect_api_provider_unknown():
         detect_api_provider("mistral/mixtral-8x7b")
 
 
+# --- parse_command ---
+
+KNOWN_MODES = {"resolve", "design"}
+
+
+def test_parse_command_resolve():
+    assert parse_command("resolve", KNOWN_MODES) == ("resolve", "")
+
+
+def test_parse_command_resolve_with_model():
+    assert parse_command("resolve-claude-large", KNOWN_MODES) == ("resolve", "claude-large")
+
+
+def test_parse_command_design():
+    assert parse_command("design", KNOWN_MODES) == ("design", "")
+
+
+def test_parse_command_design_with_model():
+    assert parse_command("design-claude-large", KNOWN_MODES) == ("design", "claude-large")
+
+
+def test_parse_command_multi_segment_model():
+    """Model aliases with hyphens should be preserved."""
+    assert parse_command("resolve-openai-small", KNOWN_MODES) == ("resolve", "openai-small")
+
+
+def test_parse_command_bare_agent_errors():
+    """Empty command string (bare /agent) should raise ValueError."""
+    with pytest.raises(ValueError, match="Bare /agent is not supported"):
+        parse_command("", KNOWN_MODES)
+
+
+def test_parse_command_unknown_mode():
+    with pytest.raises(ValueError, match="Unknown mode"):
+        parse_command("frobnicate", KNOWN_MODES)
+
+
+def test_parse_command_unknown_mode_with_model():
+    """Even with a model suffix, an unknown verb is an error."""
+    with pytest.raises(ValueError, match="Unknown mode"):
+        parse_command("frobnicate-claude-large", KNOWN_MODES)
+
+
 # --- resolve_config ---
 
 
 @pytest.fixture
 def config_dir(tmp_path):
-    """Create a temp dir with base config files."""
+    """Create a temp dir with base config files including modes."""
     base = tmp_path / "base"
     base.mkdir()
     config = {
@@ -82,6 +125,17 @@ def config_dir(tmp_path):
             "claude-small": {"id": "anthropic/claude-haiku-4-5"},
             "claude-medium": {"id": "anthropic/claude-sonnet-4-5"},
             "openai-small": {"id": "openai/gpt-5-nano"},
+        },
+        "modes": {
+            "resolve": {
+                "action": "pr",
+                "default_model": "claude-medium",
+            },
+            "design": {
+                "action": "comment",
+                "default_model": "claude-medium",
+                "prompt_prefix": "You are analyzing this issue.",
+            },
         },
         "openhands": {
             "version": "1.3.0",
@@ -93,24 +147,57 @@ def config_dir(tmp_path):
     return tmp_path, str(base / "remote-dev-bot.yaml")
 
 
-def test_resolve_config_default_alias(config_dir):
+def test_resolve_config_resolve_default_model(config_dir):
     tmp_path, base_path = config_dir
-    result = resolve_config(base_path, "nonexistent.yaml", "")
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["mode"] == "resolve"
+    assert result["action"] == "pr"
     assert result["alias"] == "claude-medium"
     assert result["model"] == "anthropic/claude-sonnet-4-5"
 
 
-def test_resolve_config_explicit_alias(config_dir):
+def test_resolve_config_resolve_explicit_model(config_dir):
     tmp_path, base_path = config_dir
-    result = resolve_config(base_path, "nonexistent.yaml", "claude-small")
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve-claude-small")
+    assert result["mode"] == "resolve"
     assert result["alias"] == "claude-small"
     assert result["model"] == "anthropic/claude-haiku-4-5"
 
 
-def test_resolve_config_unknown_alias(config_dir):
+def test_resolve_config_design_mode(config_dir):
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "design")
+    assert result["mode"] == "design"
+    assert result["action"] == "comment"
+    assert result["alias"] == "claude-medium"
+    assert "prompt_prefix" in result
+    assert "analyzing" in result["prompt_prefix"]
+
+
+def test_resolve_config_design_with_model(config_dir):
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "design-claude-small")
+    assert result["mode"] == "design"
+    assert result["alias"] == "claude-small"
+    assert result["model"] == "anthropic/claude-haiku-4-5"
+
+
+def test_resolve_config_unknown_model(config_dir):
     tmp_path, base_path = config_dir
     with pytest.raises(KeyError, match="Unknown model alias"):
-        resolve_config(base_path, "nonexistent.yaml", "does-not-exist")
+        resolve_config(base_path, "nonexistent.yaml", "resolve-does-not-exist")
+
+
+def test_resolve_config_bare_agent_errors(config_dir):
+    tmp_path, base_path = config_dir
+    with pytest.raises(ValueError, match="Bare /agent is not supported"):
+        resolve_config(base_path, "nonexistent.yaml", "")
+
+
+def test_resolve_config_unknown_mode(config_dir):
+    tmp_path, base_path = config_dir
+    with pytest.raises(ValueError, match="Unknown mode"):
+        resolve_config(base_path, "nonexistent.yaml", "frobnicate")
 
 
 def test_resolve_config_override_wins(config_dir):
@@ -118,12 +205,15 @@ def test_resolve_config_override_wins(config_dir):
     override_path = str(tmp_path / "override.yaml")
     override = {
         "default_model": "openai-small",
+        "modes": {
+            "resolve": {"default_model": "openai-small"},
+        },
         "openhands": {"max_iterations": 10},
     }
     with open(override_path, "w") as f:
         yaml.dump(override, f)
 
-    result = resolve_config(base_path, override_path, "")
+    result = resolve_config(base_path, override_path, "resolve")
     assert result["alias"] == "openai-small"
     assert result["model"] == "openai/gpt-5-nano"
     assert result["max_iterations"] == 10
@@ -132,31 +222,57 @@ def test_resolve_config_override_wins(config_dir):
     assert result["has_override"] is True
 
 
-def test_resolve_config_openhands_defaults():
-    """When base config has no openhands section, defaults kick in."""
+def test_resolve_config_mode_default_model_differs():
+    """Each mode can have its own default model."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         yaml.dump(
-            {"default_model": "m", "models": {"m": {"id": "anthropic/test"}}}, f
+            {
+                "default_model": "m1",
+                "models": {
+                    "m1": {"id": "anthropic/test-1"},
+                    "m2": {"id": "anthropic/test-2"},
+                },
+                "modes": {
+                    "resolve": {"action": "pr", "default_model": "m1"},
+                    "design": {"action": "comment", "default_model": "m2"},
+                },
+            },
+            f,
         )
         path = f.name
     try:
-        result = resolve_config(path, "nonexistent.yaml", "")
-        assert result["max_iterations"] == 50
-        assert result["oh_version"] == "0.39.0"
-        assert result["pr_type"] == "ready"
+        r1 = resolve_config(path, "nonexistent.yaml", "resolve")
+        r2 = resolve_config(path, "nonexistent.yaml", "design")
+        assert r1["alias"] == "m1"
+        assert r2["alias"] == "m2"
     finally:
         os.unlink(path)
 
 
-def test_resolve_config_missing_base():
-    """Missing base config file should still work (empty base)."""
+def test_resolve_config_no_prompt_prefix_for_resolve(config_dir):
+    """Resolve mode should not have a prompt_prefix."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert "prompt_prefix" not in result
+
+
+def test_resolve_config_openhands_defaults():
+    """When base config has no openhands section, defaults kick in."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        yaml.dump({"models": {"x": {"id": "anthropic/test"}}}, f)
+        yaml.dump(
+            {
+                "default_model": "m",
+                "models": {"m": {"id": "anthropic/test"}},
+                "modes": {"resolve": {"action": "pr"}},
+            },
+            f,
+        )
         path = f.name
     try:
-        # Use the override as the only config source, base doesn't exist
-        result = resolve_config("nonexistent_base.yaml", path, "x")
-        assert result["model"] == "anthropic/test"
+        result = resolve_config(path, "nonexistent.yaml", "resolve")
+        assert result["max_iterations"] == 50
+        assert result["oh_version"] == "0.39.0"
+        assert result["pr_type"] == "ready"
     finally:
         os.unlink(path)
 
@@ -166,4 +282,4 @@ def test_resolve_config_malformed_yaml(tmp_path):
     bad_yaml = tmp_path / "bad.yaml"
     bad_yaml.write_text(": this is not valid yaml\n  - broken:\nindent")
     with pytest.raises(yaml.YAMLError):
-        resolve_config(str(bad_yaml), "nonexistent.yaml", "")
+        resolve_config(str(bad_yaml), "nonexistent.yaml", "resolve")
