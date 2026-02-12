@@ -179,6 +179,62 @@ gh api repos/{owner}/{repo}/actions/permissions/workflow
 
 **Tip:** Name each key after the project (e.g., "remote-dev-bot") to track costs and revoke later if needed. Store keys in a password manager.
 
+### Step 1.2.1: Set Cost Limits (Recommended)
+
+**What this does:** Configures spending limits on your LLM provider accounts to prevent unexpected charges. Each provider handles this differently.
+
+**For OpenAI:**
+
+OpenAI provides two types of limits:
+- **Usage limits** — caps how much you can spend per month
+- **Charge limits** — caps how much can be charged to your payment method per month
+
+1. Go to https://platform.openai.com/settings/organization/limits
+2. Under "Usage limits":
+   - Set a monthly budget (e.g., $20 for testing, $100 for regular use)
+   - You'll receive email notifications at 50%, 75%, and 100% of your limit
+   - API calls will be rejected once you hit the limit
+3. Under "Charge limits" (if available):
+   - This caps the actual charges to your payment method
+   - Useful as a secondary safeguard
+
+**Recommended starting point:** Set usage limit to $20-50 while testing. Increase as needed once you understand your usage patterns.
+
+**For Anthropic:**
+
+Anthropic provides usage limits that cap your monthly spending.
+
+1. Go to https://console.anthropic.com/settings/limits
+2. Set your monthly spend limit (e.g., $20 for testing, $100 for regular use)
+3. You'll receive email notifications as you approach the limit
+4. API calls will be rejected once you hit the limit
+
+**Recommended starting point:** Set limit to $20-50 while testing. Increase as needed.
+
+**For Google (Gemini):**
+
+⚠️ **Important:** Google's billing model makes it difficult to set hard spending limits. Unlike OpenAI and Anthropic, Google is post-paid and does not offer dollar-based caps that stop API calls.
+
+**What you can do:**
+
+1. **Use the free tier** (recommended for testing): Stay on the free tier and your costs are capped at $0. The free tier has rate limits (5-15 RPM depending on model) but works fine for testing.
+
+2. **Set up budget alerts** (advisory only — does NOT stop spending):
+   - Go to https://console.cloud.google.com/billing/budgets
+   - Create a budget (e.g., $100)
+   - Configure email alerts at 50%, 90%, and 100%
+   - **Note:** This only sends emails — it does NOT stop API calls when exceeded
+
+3. **Set API quotas** (rate limits, not dollar limits):
+   - Go to https://console.cloud.google.com/apis/api/generativelanguage.googleapis.com/quotas
+   - The most relevant quotas to limit are:
+     - `GenerateContent requests per minute per region` — e.g., set to 3-10
+     - `Request limit per model per day per project` — e.g., set to 100-500
+     - `GenerateContent input token count per model per minute` — e.g., set to 20,000-100,000
+   - **Note:** These limit API calls, not dollars. A few expensive calls can still add up.
+
+**Recommended approach for Google:** If you need hard cost limits, consider using OpenAI or Anthropic instead. If you must use Google with billing enabled, set conservative API quotas and monitor your budget alerts closely. The free tier is the only way to guarantee $0 spend.
+
 ### Step 1.3: Add Repository Secrets
 
 **What this does:** Stores your API keys securely as GitHub repository secrets so the workflow can use them. Secret values are encrypted and never exposed in logs.
@@ -429,7 +485,7 @@ Also ensure your PAT token covers all repos involved — both the target repo an
 
 These are planned but not yet built. See GitHub issues for discussion.
 
-- [ ] **LLM account setup**: Walk through creating accounts, getting API keys, setting spending limits for each provider
+- [x] **LLM account setup**: Walk through creating accounts, getting API keys, setting spending limits for each provider (done — see Step 1.2 and Step 1.2.1)
 - [ ] **Cost reporting**: Extract cost data from agent runs and post as PR comments
 - [ ] **EC2 backend**: Run the agent on a dedicated EC2 instance instead of GitHub Actions (for longer runs, more resources, or cost optimization)
 - [x] **Reusable workflow**: Split into shim + reusable workflow so target repos auto-update (done)
