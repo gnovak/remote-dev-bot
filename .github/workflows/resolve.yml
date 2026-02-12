@@ -155,7 +155,12 @@ jobs:
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
 
-          ISSUE_TYPE=${{ github.event.issue && 'issue' || 'pr' }}
+          # Detect if this is a PR comment. Regular PR comments come through
+          # issue_comment (PRs are issues), so github.event.issue exists but
+          # github.event.issue.pull_request is only set for PRs. Review comments
+          # come through pull_request_review_comment where github.event.issue
+          # doesn't exist at all.
+          ISSUE_TYPE=${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}
 
           python -m openhands.resolver.resolve_issue \
             --selected-repo "${{ github.repository }}" \
