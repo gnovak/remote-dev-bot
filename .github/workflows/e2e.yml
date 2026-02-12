@@ -1,0 +1,52 @@
+name: E2E Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to test"
+        required: false
+        default: "main"
+      provider:
+        description: "Provider to test (all, claude, openai, gemini)"
+        required: false
+        default: "all"
+      all_models:
+        description: "Test every model alias (expensive!)"
+        type: boolean
+        required: false
+        default: false
+      test:
+        description: "Specific test name (blank for all)"
+        required: false
+        default: ""
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Install PyYAML
+        if: ${{ inputs.all_models }}
+        run: pip install PyYAML
+
+      - name: Run E2E tests
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          ARGS="--branch ${{ inputs.branch }}"
+          if [[ -n "${{ inputs.provider }}" && "${{ inputs.provider }}" != "all" ]]; then
+            ARGS="$ARGS --provider ${{ inputs.provider }}"
+          fi
+          if [[ "${{ inputs.all_models }}" == "true" ]]; then
+            ARGS="$ARGS --all-models"
+          fi
+          if [[ -n "${{ inputs.test }}" ]]; then
+            ARGS="$ARGS --test ${{ inputs.test }}"
+          fi
+          ./tests/e2e.sh $ARGS

@@ -29,8 +29,7 @@ jobs:
           repository: gnovak/remote-dev-bot
           token: ${{ secrets.PAT_TOKEN || github.token }}
           path: .remote-dev-bot
-          sparse-checkout: remote-dev-bot.yaml
-          sparse-checkout-cone-mode: false
+          sparse-checkout: lib
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -47,70 +46,7 @@ jobs:
           # Extract alias: "/agent-claude-large do X" -> "claude-large", "/agent" -> ""
           ALIAS=$(echo "$COMMENT" | grep -oP '^/agent-?\K[a-z0-9-]*' || echo "")
 
-          python3 << PYEOF
-          import yaml, sys, os
-
-          def deep_merge(base, override):
-              """Merge override into base, recursively for dicts."""
-              result = base.copy()
-              for key, value in override.items():
-                  if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-                      result[key] = deep_merge(result[key], value)
-                  else:
-                      result[key] = value
-              return result
-
-          # Read base config from remote-dev-bot
-          base_config = {}
-          base_path = '.remote-dev-bot/remote-dev-bot.yaml'
-          if os.path.exists(base_path):
-              with open(base_path) as f:
-                  base_config = yaml.safe_load(f) or {}
-
-          # Read override config from target repo (if it exists)
-          override_config = {}
-          override_path = 'remote-dev-bot.yaml'
-          if os.path.exists(override_path):
-              with open(override_path) as f:
-                  override_config = yaml.safe_load(f) or {}
-
-          # Merge: target repo overrides remote-dev-bot defaults
-          config = deep_merge(base_config, override_config)
-
-          # Resolve model alias
-          alias = '$ALIAS'
-          if not alias:
-              alias = config.get('default_model', 'claude-small')
-
-          models = config.get('models', {})
-          if alias not in models:
-              print(f'ERROR: Unknown model alias: {alias}', file=sys.stderr)
-              print(f'Available aliases: {list(models.keys())}', file=sys.stderr)
-              sys.exit(1)
-
-          model_id = models[alias]['id']
-
-          # Read OpenHands settings
-          oh = config.get('openhands', {})
-          max_iter = oh.get('max_iterations', 50)
-          oh_version = oh.get('version', '0.39.0')
-          pr_type = oh.get('pr_type', 'ready')
-
-          # Write outputs
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f'model={model_id}\n')
-              f.write(f'alias={alias}\n')
-              f.write(f'max_iterations={max_iter}\n')
-              f.write(f'oh_version={oh_version}\n')
-              f.write(f'pr_type={pr_type}\n')
-
-          # Log for visibility
-          has_override = bool(override_config)
-          print(f'Config: base=remote-dev-bot, override={"target repo" if has_override else "none"}')
-          print(f'Model alias: {alias}')
-          print(f'Model ID: {model_id}')
-          print(f'PR type: {pr_type}')
-          PYEOF
+          python3 .remote-dev-bot/lib/config.py "$ALIAS"
 
       - name: Determine API key
         id: apikey
