@@ -21,12 +21,47 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 4. OpenHands resolver runs with that model, reads the issue, edits code, opens a draft PR
 5. Iterative: comment `/agent` again on the PR with feedback for another pass
 
-### Dev Workflow
-- Push changes to a `dev` branch in this repo
-- Point test repo's shim at `@dev` instead of `@main`
-- Test via `/agent` on a test issue
-- When working: squash commits, merge to main, delete `dev`
-- All target repos automatically get updates (they point at `@main`)
+### Dev Cycle (detailed)
+
+This project has an unusual dev cycle because GitHub Actions only runs workflows from the default branch. You can't just push a feature branch and test it — the workflow won't trigger. Instead, we use a two-repo setup with a `dev` pointer branch.
+
+**Repos:**
+- `remote-dev-bot` — the reusable workflow, config, and docs (this repo)
+- `remote-dev-bot-test` — a test repo whose shim points at `resolve.yml@dev` (not `@main`)
+
+**How the `dev` branch works:**
+- `dev` is NOT a long-lived development branch. It's a pointer.
+- Before testing, force-set `dev` to your feature branch: `git branch -f dev my-feature && git push --force-with-lease origin dev`
+- The test repo's shim calls `resolve.yml@dev`, so it picks up whatever `dev` points to.
+- Only one feature can be tested at a time (since there's only one `dev` pointer).
+
+**Important: config vs workflow code:**
+- The workflow CODE comes from the `dev` branch (resolve.yml)
+- The CONFIG file (remote-dev-bot.yaml) is checked out separately and comes from `main` by default (the config checkout step doesn't specify a ref)
+- This means config changes on your feature branch won't take effect in tests unless you also push them to `main`, or until config layering is implemented (target repo config overrides remote-dev-bot config)
+
+**Full dev cycle:**
+1. Create a feature branch from `main`: `git checkout -b my-feature main`
+2. Make changes, commit freely (work log mode)
+3. Point dev at your branch: `git branch -f dev my-feature && git push --force-with-lease origin dev`
+4. In `remote-dev-bot-test`: create an issue, comment `/agent-claude-medium`
+5. Monitor: `gh run list --repo gnovak/remote-dev-bot-test --workflow=agent.yml --limit 3`
+6. If it fails: check logs, fix, commit, push dev again, re-trigger
+7. If it works: clean up git history (rebase), open a PR (dev → main), merge
+
+**Triggering a test:**
+```bash
+# Create issue
+gh issue create --repo gnovak/remote-dev-bot-test \
+  --title "Test: description" --body "What to do"
+# Trigger agent
+gh issue comment ISSUE_NUM --repo gnovak/remote-dev-bot-test \
+  --body "/agent-claude-medium"
+# Monitor
+gh run list --repo gnovak/remote-dev-bot-test --workflow=agent.yml --limit 3
+# Check logs on failure
+gh run view RUN_ID --repo gnovak/remote-dev-bot-test --log | tail -40
+```
 
 ## Git Workflow Preferences
 
