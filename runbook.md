@@ -202,23 +202,93 @@ gh secret list --repo {owner}/{repo}
 
 ### Step 1.4: Create a Personal Access Token (PAT)
 
-**What this does:** GitHub Actions workflows get a default `GITHUB_TOKEN`, but it has limited permissions — it can't reliably create branches and open PRs across all scenarios. A Personal Access Token (PAT) gives the bot explicit permission to do these things.
+#### Why a PAT is Needed
 
-We use a **fine-grained** token (not classic) because it can be scoped to a single repository with only the permissions the bot needs. This limits the blast radius if the token is ever compromised.
+GitHub Actions workflows automatically get a `GITHUB_TOKEN`, but it has limitations that prevent the bot from working reliably:
 
-**Instructions:**
+1. **Cross-repository access:** The default token only has access to the repository where the workflow runs. Remote Dev Bot needs to access both your target repo AND the `gnovak/remote-dev-bot` repo (to fetch configuration). The default token can't do this.
+
+2. **Workflow trigger restrictions:** When the default `GITHUB_TOKEN` creates a commit or PR, it won't trigger other workflows (like CI checks). This is a security feature to prevent infinite loops, but it means PRs created by the bot won't run your test suite automatically.
+
+3. **Fork limitations:** In fork-based workflows, the default token has even more restricted permissions.
+
+A Personal Access Token (PAT) bypasses these limitations by authenticating as you (the user) rather than as the workflow itself.
+
+#### Fine-Grained vs Classic Tokens
+
+GitHub offers two types of PATs:
+
+| Aspect | Fine-Grained | Classic |
+|--------|--------------|---------|
+| Repository scope | Can limit to specific repos | All repos or public-only |
+| Permission granularity | Individual permissions (Contents, Issues, etc.) | Broad scopes (repo, workflow) |
+| Expiration | Required (max 1 year) or no expiration | Optional |
+| Audit visibility | Better audit logs | Basic audit logs |
+| Organization support | Full support | Full support |
+
+**We recommend fine-grained tokens** because:
+- You can scope them to only the repositories the bot needs
+- You grant only the specific permissions required (not broad "repo" access)
+- If compromised, the blast radius is limited to those specific repos and permissions
+
+Classic tokens are simpler to set up but grant broader access than necessary. Use them only if fine-grained tokens don't work for your organization's setup.
+
+#### One PAT Per Repo vs Shared PAT
+
+You have two options for managing PATs across multiple repositories:
+
+**Option A: One PAT per repo (more secure)**
+- Create a separate fine-grained PAT for each target repository
+- Each PAT is scoped to only that repo (plus `gnovak/remote-dev-bot` for config)
+- If one token is compromised, only that repo is affected
+- More tokens to manage and rotate
+
+**Option B: Shared PAT across repos (more convenient)**
+- Create one fine-grained PAT with access to all your target repositories
+- Easier to manage — one token to rotate
+- If compromised, all repos using it are affected
+- Good for repos with similar trust levels (e.g., all personal projects)
+
+**Our recommendation:** Start with one PAT per repo for maximum security. If managing multiple tokens becomes burdensome, consolidate to a shared PAT for repos with similar trust levels.
+
+#### Expiration Policy
+
+Fine-grained tokens can be set to expire or have no expiration:
+
+- **No expiration:** Convenient — set it and forget it. Acceptable for fine-grained tokens because they're already scoped to specific repos and permissions. The risk is limited.
+- **90 days:** More conservative. Set a calendar reminder to rotate before expiration. Good practice for shared tokens or high-value repos.
+- **Custom (up to 1 year):** Balance between convenience and security hygiene.
+
+**Our recommendation:** No expiration is fine for a fine-grained token scoped to one repo. Use 90-day expiration for shared tokens or if your organization requires regular rotation.
+
+#### Required Permissions
+
+The bot needs these four permissions (all Read and write):
+
+| Permission | Why Needed |
+|------------|------------|
+| **Contents** | Push branches with the agent's code changes |
+| **Issues** | Read issue descriptions, post status comments |
+| **Pull requests** | Create draft PRs, read PR comments for feedback |
+| **Workflows** | Trigger workflow runs (e.g., CI on the created PR) |
+
+Metadata (Read-only) is added automatically — that's expected.
+
+#### Instructions
+
 1. Go to https://github.com/settings/tokens?type=beta (Fine-grained tokens)
 2. Click "Generate new token"
-3. **Token name:** Something like "remote-dev-bot" (or "remote-dev-bot-myrepo" if you plan to have multiple)
-4. **Expiration:** Your choice. "No expiration" is convenient for a fine-grained token scoped to one repo; 90 days is more conservative (set a calendar reminder to rotate). The security risk is low since fine-grained tokens are limited to specific repos and permissions.
-5. **Resource owner:** Your GitHub account
-6. **Repository access:** Select "All repositories" (recommended — the bot needs access to both the target repo and `gnovak/remote-dev-bot` for config). Alternatively, select "Only select repositories" and choose both repos.
+3. **Token name:** Something like "remote-dev-bot-myrepo" (include the repo name if using one PAT per repo)
+4. **Expiration:** No expiration (for single-repo tokens) or 90 days (for shared tokens — set a calendar reminder)
+5. **Resource owner:** Your GitHub account (or organization if applicable)
+6. **Repository access:**
+   - For one PAT per repo: Select "Only select repositories" and choose your target repo plus `gnovak/remote-dev-bot`
+   - For shared PAT: Select "All repositories" or select all your target repos plus `gnovak/remote-dev-bot`
 7. **Permissions** — under "Repository permissions", set these four to **Read and write**:
-   - Contents (to push branches)
-   - Issues (to read issues and post comments)
-   - Pull requests (to create draft PRs)
-   - Workflows (to trigger workflow runs)
-   - Metadata will be added automatically as Read-only — that's fine
+   - Contents
+   - Issues
+   - Pull requests
+   - Workflows
 8. Click "Generate token"
 9. **Copy the token immediately** — you won't be able to see it again
 
@@ -233,6 +303,17 @@ gh secret set PAT_TOKEN --repo {owner}/{repo}
 gh secret list --repo {owner}/{repo}
 # Should now show PAT_TOKEN alongside your API key(s)
 ```
+
+#### Security Summary
+
+| Choice | Security | Convenience |
+|--------|----------|-------------|
+| Fine-grained + one per repo + no expiration | ★★★★☆ | ★★★☆☆ |
+| Fine-grained + shared + 90-day expiration | ★★★☆☆ | ★★★★☆ |
+| Fine-grained + shared + no expiration | ★★☆☆☆ | ★★★★★ |
+| Classic token | ★☆☆☆☆ | ★★★★★ |
+
+The default recommendation (fine-grained, one per repo, no expiration) balances security and convenience for most users.
 
 ---
 
