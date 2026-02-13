@@ -78,3 +78,32 @@ def test_openhands_has_version(bot_config):
 def test_openhands_has_max_iterations(bot_config):
     assert "max_iterations" in bot_config["openhands"]
     assert isinstance(bot_config["openhands"]["max_iterations"], int)
+
+
+# --- Security checks ---
+
+
+@pytest.fixture
+def resolve_yml():
+    return (REPO_ROOT / ".github/workflows/resolve.yml").read_text()
+
+
+def test_resolve_yml_injects_security_guardrails(resolve_yml):
+    """Verify the security microagent step exists in resolve.yml."""
+    assert "Inject security guardrails" in resolve_yml
+    assert "remote-dev-bot-security.md" in resolve_yml
+    assert "NEVER output, print, log, echo" in resolve_yml
+
+
+def test_agent_yml_has_author_association_gate():
+    """Verify the shim requires trusted author_association."""
+    for path in [
+        REPO_ROOT / ".github/workflows/agent.yml",
+        REPO_ROOT / "examples/agent.yml",
+    ]:
+        content = path.read_text()
+        assert "author_association" in content
+        assert "OWNER" in content
+        # Ensure it's a restrictive check, not just a comment
+        assert 'fromJson(' in content
+        assert 'github.event.comment.author_association' in content
