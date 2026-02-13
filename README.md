@@ -38,6 +38,8 @@ The system has two parts:
 - **`remote-dev-bot.yaml`** — model aliases and OpenHands settings (version, max iterations, PR type)
 - **`runbook.md`** — step-by-step setup instructions, designed to be followed by a human or by an AI assistant (like Claude Code)
 
+For a detailed explanation of what files live where and how the pieces connect, see `how-it-works.md`.
+
 ## Setup
 
 See `runbook.md` for complete setup instructions. The runbook is designed so you (or an AI assistant) can follow it step-by-step to get this running in your own GitHub account.
