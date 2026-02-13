@@ -4,6 +4,8 @@ An AI-powered development workflow where GitHub issues get resolved autonomously
 
 There are already excellent vendor-specific implementations of this pattern (GitHub Copilot Workspace, Cursor, etc.), so this project isn't necessarily better than those. However, it's intentionally cross-platform and was built as a learning exercise — a way to understand the agent tooling space and explore how to design agents that can autonomously handle real development tasks.
 
+> **📱 Code by Voice** — Use the GitHub mobile app with your phone's dictation to describe features or bugs, then say "/agent" to trigger implementation. No keyboard required — delegate coding tasks while walking, commuting, or anywhere inspiration strikes.
+
 ## How It Works
 
 1. Create a GitHub issue describing a feature or bug
