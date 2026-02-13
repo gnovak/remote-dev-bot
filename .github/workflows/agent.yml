@@ -21,5 +21,5 @@ jobs:
       (github.event.issue || github.event.pull_request) &&
       startsWith(github.event.comment.body, '/agent') &&
       contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), github.event.comment.author_association)
-    uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@dev
+    uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@main
     secrets: inherit
