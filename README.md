@@ -44,6 +44,13 @@ See `runbook.md` for complete setup instructions. The runbook is designed so you
 
 **Quick version:** You need a GitHub repo, API keys for your preferred LLM provider(s), and about 10 minutes.
 
+**AI-assisted install:** If you want an AI coding agent to guide you through the setup, you'll need one of the following installed:
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` CLI)
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini` CLI)
+- [OpenAI Codex CLI](https://github.com/openai/codex) (`codex` CLI)
+
+Then run a command like: `claude "Follow runbook.md to set up remote-dev-bot for my repo owner/repo"`
+
 ## Development
 
 GitHub Actions only runs workflows from the default branch (main), so developing remote-dev-bot requires a non-standard workflow.
