@@ -25,6 +25,8 @@ Throughout this runbook, replace `{owner}/{repo}` with your actual GitHub owner 
 
 ## Phase 0: Install and Configure GitHub CLI
 
+> **Note for humans:** This phase is optional if you prefer using the web interface. Throughout this runbook, most steps provide both web interface and command line options. If you skip this phase, just use the "Via web interface" instructions in later steps. The CLI is useful for automation and scripting, but not required.
+
 ### Step 0.1: Check if GitHub CLI is Already Installed
 
 **What this does:** Verifies if you already have the GitHub command-line tool installed. If it's already installed, you can skip the installation step.
@@ -126,15 +128,14 @@ If all these commands succeed, your GitHub CLI is properly configured!
 
 **What this does:** Allows GitHub Actions workflows to create branches and pull requests in your repository.
 
-**Instructions:**
-1. Go to your repository on GitHub
-2. Navigate to Settings → Actions → General
-3. Under "Workflow permissions":
-   - Select "Read and write permissions"
-   - Check "Allow GitHub Actions to create and approve pull requests"
-4. Click Save
+**Via web interface:**
+1. Go to `https://github.com/{owner}/{repo}/settings/actions`
+2. Scroll down to "Workflow permissions"
+3. Select "Read and write permissions"
+4. Check "Allow GitHub Actions to create and approve pull requests"
+5. Click "Save"
 
-**With `gh` CLI:**
+**Via command line:**
 ```bash
 gh api repos/{owner}/{repo}/actions/permissions/workflow \
   --method PUT \
@@ -143,6 +144,10 @@ gh api repos/{owner}/{repo}/actions/permissions/workflow \
 ```
 
 **Verify:**
+
+*Via web:* Go to `https://github.com/{owner}/{repo}/settings/actions` and check that the settings are as described above.
+
+*Via command line:*
 ```bash
 gh api repos/{owner}/{repo}/actions/permissions/workflow
 # Should show: default_workflow_permissions: "write", can_approve_pull_request_reviews: true
@@ -183,6 +188,16 @@ gh api repos/{owner}/{repo}/actions/permissions/workflow
 
 **What this does:** Stores your API keys securely as GitHub repository secrets so the workflow can use them. Secret values are encrypted and never exposed in logs.
 
+**Via web interface:**
+1. Go to `https://github.com/{owner}/{repo}/settings/secrets/actions`
+2. Click "New repository secret"
+3. For the Name, enter `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY` or `GEMINI_API_KEY` depending on your provider)
+4. Paste your API key in the Secret field
+5. Click "Add secret"
+6. Repeat for any additional API keys you need
+
+**Via command line:**
+
 **Important:** The `gh secret set` command reads the secret value from your terminal interactively. You must run these commands yourself (not through an AI assistant's shell) so you can paste the key when prompted.
 
 ```bash
@@ -195,6 +210,10 @@ gh secret set GEMINI_API_KEY --repo {owner}/{repo}
 ```
 
 **Verify:**
+
+*Via web:* Go to `https://github.com/{owner}/{repo}/settings/secrets/actions` — you should see your secrets listed (values are hidden).
+
+*Via command line:*
 ```bash
 gh secret list --repo {owner}/{repo}
 # Should list the secrets you just set (values are hidden)
@@ -222,6 +241,16 @@ We use a **fine-grained** token (not classic) because it can be scoped to a sing
 8. Click "Generate token"
 9. **Copy the token immediately** — you won't be able to see it again
 
+Now store the token as a repository secret:
+
+**Via web interface:**
+1. Go to `https://github.com/{owner}/{repo}/settings/secrets/actions`
+2. Click "New repository secret"
+3. Name: `PAT_TOKEN`
+4. Secret: Paste the token you just copied
+5. Click "Add secret"
+
+**Via command line:**
 ```bash
 # Store it as a repo secret (run this yourself, not through an AI shell):
 gh secret set PAT_TOKEN --repo {owner}/{repo}
@@ -229,6 +258,10 @@ gh secret set PAT_TOKEN --repo {owner}/{repo}
 ```
 
 **Verify:**
+
+*Via web:* Go to `https://github.com/{owner}/{repo}/settings/secrets/actions` — you should see `PAT_TOKEN` alongside your API key(s).
+
+*Via command line:*
 ```bash
 gh secret list --repo {owner}/{repo}
 # Should now show PAT_TOKEN alongside your API key(s)
@@ -296,6 +329,10 @@ git push
 ```
 
 **Verify the workflow is recognized:**
+
+*Via web:* Go to `https://github.com/{owner}/{repo}/actions` — you should see "Remote Dev Bot" listed in the left sidebar under "All workflows".
+
+*Via command line:*
 ```bash
 gh workflow list --repo {owner}/{repo}
 # Should show "Remote Dev Bot"
@@ -307,6 +344,13 @@ gh workflow list --repo {owner}/{repo}
 
 ### Step 3.1: Create a Test Issue
 
+**Via web interface:**
+1. Go to `https://github.com/{owner}/{repo}/issues/new`
+2. Title: `Test: Add a hello world script`
+3. Body: `Create a simple hello.py that prints 'Hello from Remote Dev Bot'`
+4. Click "Submit new issue"
+
+**Via command line:**
 ```bash
 gh issue create --repo {owner}/{repo} \
   --title "Test: Add a hello world script" \
@@ -317,12 +361,26 @@ gh issue create --repo {owner}/{repo} \
 
 Comment on the issue to trigger the agent. For your first test, use `claude-medium` (Sonnet) — it handles the task lifecycle more reliably than `claude-small` (Haiku).
 
+**Via web interface:**
+1. Go to `https://github.com/{owner}/{repo}/issues/{issue-number}` (or click on the issue you just created)
+2. Scroll to the comment box at the bottom
+3. Type `/agent-claude-medium`
+4. Click "Comment"
+
+**Via command line:**
 ```bash
 gh issue comment {issue-number} --repo {owner}/{repo} --body "/agent-claude-medium"
 ```
 
 ### Step 3.3: Monitor the Run
 
+**Via web interface:**
+1. Go to `https://github.com/{owner}/{repo}/actions`
+2. Click on "Remote Dev Bot" in the left sidebar to filter to just this workflow
+3. Click on the most recent run to see its status and logs
+4. Click on the "resolve" job to see detailed step-by-step logs
+
+**Via command line:**
 ```bash
 # Check the Actions tab for runs:
 gh run list --repo {owner}/{repo} --workflow=agent.yml
@@ -343,6 +401,11 @@ If successful, you should see:
 - A draft PR linked to the issue
 - A rocket emoji reaction on your `/agent` comment
 
+**Via web interface:**
+- Go to `https://github.com/{owner}/{repo}/pulls` to see the new draft PR
+- Or check the issue page — it should have a link to the PR in the sidebar
+
+**Via command line:**
 ```bash
 gh pr list --repo {owner}/{repo}
 ```
@@ -355,13 +418,13 @@ gh pr list --repo {owner}/{repo}
 | `ImportError: cannot import name 'WorkspaceState'` | Old OpenHands version | Update `openhands.version` in `remote-dev-bot.yaml` to latest (currently 1.3.0) |
 | `error: the following arguments are required: --selected-repo` | OpenHands 1.x API change | Update workflow — `--repo` was renamed to `--selected-repo` |
 | `ValueError: Username is required` | Missing env vars | Workflow needs `GITHUB_USERNAME` and `GIT_USERNAME` |
-| `Missing Anthropic API Key` or `x-api-key header is required` | API key not set or set empty | Re-run `gh secret set` interactively from your terminal |
+| `Missing Anthropic API Key` or `x-api-key header is required` | API key not set or set empty | Re-set the secret via web (`https://github.com/{owner}/{repo}/settings/secrets/actions`) or `gh secret set` |
 | `Agent reached maximum iteration` | Agent loops instead of finishing | Try `/agent-claude-medium` instead of `/agent` |
 | `429 Too Many Requests` | GitHub API rate limit | Wait a few minutes and try again |
 | `KeyError: 'LLM_API_KEY'` in PR creation step | Missing env vars in PR step | Update workflow to pass `LLM_API_KEY` and `LLM_MODEL` to both steps |
 | Workflow file issue (instant failure, 0s) | Reusable workflow not accessible | Set Actions access to `user` level on remote-dev-bot (see below) |
-| `Not Found` on config checkout step | PAT can't access remote-dev-bot repo | PAT must include remote-dev-bot in its repository scope |
-| `404 Not Found` on issues API (Resolve step) | PAT doesn't cover the target repo | Update PAT to "All repositories" or add the target repo to its scope |
+| `Not Found` on config checkout step | PAT can't access remote-dev-bot repo | PAT must include remote-dev-bot in its repository scope (update at `https://github.com/settings/tokens`) |
+| `404 Not Found` on issues API (Resolve step) | PAT doesn't cover the target repo | Update PAT to "All repositories" or add the target repo to its scope (at `https://github.com/settings/tokens`) |
 
 ---
 
@@ -387,6 +450,13 @@ The `max_iterations` setting in `remote-dev-bot.yaml` controls how many steps th
 
 The shim in your target repo calls `resolve.yml` from `gnovak/remote-dev-bot`. For this to work with a private repo, you must enable Actions access sharing on `remote-dev-bot`:
 
+**Via web interface:**
+1. Go to `https://github.com/gnovak/remote-dev-bot/settings/actions`
+2. Scroll down to "Access" section
+3. Select "Accessible from repositories owned by the user 'gnovak'" (or your fork's owner)
+4. Click "Save"
+
+**Via command line:**
 ```bash
 gh api repos/gnovak/remote-dev-bot/actions/permissions/access \
   --method PUT \
@@ -395,12 +465,12 @@ gh api repos/gnovak/remote-dev-bot/actions/permissions/access \
 
 This allows all repos owned by the same user to call reusable workflows in `remote-dev-bot`. Without this, the shim will fail instantly with "workflow file issue."
 
-Also ensure your PAT token covers all repos involved — both the target repo and `remote-dev-bot`. The simplest approach is to set the PAT to "All repositories" scope in your GitHub token settings.
+Also ensure your PAT token covers all repos involved — both the target repo and `remote-dev-bot`. The simplest approach is to set the PAT to "All repositories" scope in your GitHub token settings (at `https://github.com/settings/tokens`).
 
 ### Agent doesn't trigger
 - Verify the shim workflow file is on the default branch (usually `main`) of the target repo
 - Check that the commenter has collaborator/member/owner access to the repo
-- Look at the Actions tab for failed runs
+- Look at the Actions tab for failed runs (go to `https://github.com/{owner}/{repo}/actions`)
 - Make sure the comment starts with exactly `/agent` (no leading spaces)
 - Verify the shim points to the correct ref (e.g., `@main` or `@dev`)
 
