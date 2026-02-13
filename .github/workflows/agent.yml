@@ -16,7 +16,10 @@ permissions:
 
 jobs:
   resolve:
-    # Only run if comment starts with /agent and commenter has repo access
+    # Security gate: only allow trusted users to trigger agent runs.
+    # OWNER = repo owner, COLLABORATOR = explicitly invited, MEMBER = org member.
+    # This prevents arbitrary users from triggering runs that consume API credits.
+    # To restrict further, remove roles from the list (e.g., '["OWNER"]' for owner-only).
     if: >
       (github.event.issue || github.event.pull_request) &&
       startsWith(github.event.comment.body, '/agent') &&
