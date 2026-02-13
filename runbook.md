@@ -1,17 +1,5 @@
 # Remote Dev Bot — Setup Runbook
 
-This file is both documentation and executable instructions. It's designed to be followed by:
-- **A human** reading step-by-step
-- **An AI assistant** (like Claude Code) that can execute steps, ask for confirmation, and handle errors
-
-When following this runbook with an AI assistant, the assistant should:
-- Explain what each step does before executing it
-- Ask for confirmation before modifying external services (GitHub settings, API accounts)
-- Verify each step succeeded before moving to the next
-- If a step fails, diagnose the issue and suggest recovery options
-
----
-
 ## Overview
 
 This runbook will guide you through setting up Remote Dev Bot on your GitHub repository. By the end, you'll have an AI-powered bot that can automatically resolve issues and create pull requests when triggered by a `/agent` comment.
@@ -27,6 +15,20 @@ This runbook will guide you through setting up Remote Dev Bot on your GitHub rep
 5. **Phase 4: Customize (Optional)** — Add repository context, adjust model settings, and tune iteration limits
 
 **Time estimate:** 15-30 minutes for initial setup, depending on whether you already have the GitHub CLI installed and authenticated.
+
+---
+
+## How to Use This Runbook
+
+This file is both documentation and executable instructions. It's designed to be followed by:
+- **A human** reading step-by-step
+- **An AI assistant** (like Claude Code) that can execute steps, ask for confirmation, and handle errors
+
+When following this runbook with an AI assistant, the assistant should:
+- Explain what each step does before executing it
+- Ask for confirmation before modifying external services (GitHub settings, API accounts)
+- Verify each step succeeded before moving to the next
+- If a step fails, diagnose the issue and suggest recovery options
 
 ---
 
