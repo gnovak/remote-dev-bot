@@ -18,8 +18,36 @@ Before starting, make sure you have:
 
 - [ ] A GitHub account
 - [ ] A GitHub repository where you want the bot to operate
+- [ ] **(For AI-assisted install)** An AI coding agent installed and configured. Supported options include:
+  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` CLI)
+  - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini` CLI)
+  - [OpenAI Codex CLI](https://github.com/openai/codex) (`codex` CLI)
+  - Or any other AI coding assistant that can execute shell commands
 
 Throughout this runbook, replace `{owner}/{repo}` with your actual GitHub owner and repo name (e.g., `myuser/myproject`).
+
+---
+
+## Using This Runbook with an AI Coding Agent
+
+If you have an AI coding agent installed, you can have it guide you through the setup process. Here are example commands to get started:
+
+**With Claude Code:**
+```bash
+claude "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. Ask me before making any changes to GitHub settings or creating API keys."
+```
+
+**With Gemini CLI:**
+```bash
+gemini "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. Ask me before making any changes to GitHub settings or creating API keys."
+```
+
+**With Codex CLI:**
+```bash
+codex "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. Ask me before making any changes to GitHub settings or creating API keys."
+```
+
+The AI agent will read the runbook, execute the necessary commands, and prompt you when it needs your input (like pasting API keys or confirming GitHub settings changes).
 
 ---
 
