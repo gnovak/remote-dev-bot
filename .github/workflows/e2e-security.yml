@@ -1,0 +1,34 @@
+name: E2E Security Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to test"
+        required: false
+        default: "main"
+      test:
+        description: "Test to run (all, exfiltration, gating)"
+        required: false
+        default: "all"
+
+jobs:
+  e2e-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
+      - name: Run security E2E tests
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          TESTER_PAT: ${{ secrets.TESTER_PAT_TOKEN }}
+        run: |
+          ARGS="--branch ${{ inputs.branch }}"
+          if [[ -n "${{ inputs.test }}" && "${{ inputs.test }}" != "all" ]]; then
+            ARGS="$ARGS --test ${{ inputs.test }}"
+          fi
+          ./tests/e2e-security.sh $ARGS
