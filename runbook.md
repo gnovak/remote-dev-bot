@@ -4,11 +4,15 @@ This file is both documentation and executable instructions. It's designed to be
 - **A human** reading step-by-step
 - **An AI assistant** (like Claude Code) that can execute steps, ask for confirmation, and handle errors
 
-When following this runbook with an AI assistant, the assistant should:
-- Explain what each step does before executing it
-- Ask for confirmation before modifying external services (GitHub settings, API accounts)
-- Verify each step succeeded before moving to the next
+When following this runbook with an AI assistant, the assistant should **default to the guided experience** unless the user asks to go faster:
+- Explain what each step does and why it's needed **before** executing it
+- Ask for confirmation before each action (not just secrets — all steps)
+- Ask whether the user already has API keys, PATs, etc. before creating new ones
+- After each step, confirm it succeeded and explain what happened
 - If a step fails, diagnose the issue and suggest recovery options
+- Keep the user oriented: "We just finished X. Next is Y, which does Z."
+
+Experienced users can ask for a faster pace (see prompt examples below), in which case the assistant should skip explanations and only pause for secrets and confirmations that require user input.
 
 ---
 
@@ -30,22 +34,19 @@ Throughout this runbook, replace `{owner}/{repo}` with your actual GitHub owner 
 
 ## Using This Runbook with an AI Coding Agent
 
-If you have an AI coding agent installed, you can have it guide you through the setup process. Here are example commands to get started:
+If you have an AI coding agent installed, you can have it guide you through the setup process.
 
-**With Claude Code:**
+**First time? Use the guided setup** (recommended):
 ```bash
-claude "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. Ask me before making any changes to GitHub settings or creating API keys."
+claude "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. This is my first time — walk me through each step, explain what's happening, and ask before doing anything."
 ```
 
-**With Gemini CLI:**
+**Done this before? Use the fast setup:**
 ```bash
-gemini "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. Ask me before making any changes to GitHub settings or creating API keys."
+claude "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. I'm familiar with the process — go fast, just ask me for secrets and confirmations."
 ```
 
-**With Codex CLI:**
-```bash
-codex "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. Ask me before making any changes to GitHub settings or creating API keys."
-```
+These examples use Claude Code, but the same prompts work with any AI coding agent (Gemini CLI, Codex CLI, etc.) — just replace `claude` with your agent's command.
 
 The AI agent will read the runbook, execute the necessary commands, and prompt you when it needs your input (like pasting API keys or confirming GitHub settings changes).
 
