@@ -186,10 +186,14 @@ gh api repos/{owner}/{repo}/actions/permissions/workflow
 
 **What this does:** The agent needs an API key to call the LLM. You need at least one key for whichever provider you want to use.
 
+> **Already have an API key?** One API key works across all your repos — just set the same key as a secret on each repo (Step 1.3). You don't need a separate key per repo. Skip ahead to Step 1.3.
+>
+> **Per-repo keys (optional):** If you want to track API costs per repo, create a separate key for each one and name it after the repo (e.g., "remote-dev-bot-myrepo"). This is optional — most users share one key.
+
 **For Anthropic (Claude models):**
 1. Go to https://console.anthropic.com/settings/keys
 2. Click "+ Create Key"
-3. Name it something identifiable (e.g., "remote-dev-bot" or "remote-dev-bot-myrepo")
+3. Name it "remote-dev-bot" (or "remote-dev-bot-myrepo" if using per-repo keys)
 4. Leave the workspace as "Default" (unless you have a specific workspace)
 5. Click "Add"
 6. **Copy the key immediately** — you won't be able to see it again
@@ -197,7 +201,7 @@ gh api repos/{owner}/{repo}/actions/permissions/workflow
 **For OpenAI (GPT models):**
 1. Go to https://platform.openai.com/api-keys (note: this is separate from your ChatGPT account)
 2. Click "Create new secret key"
-3. Name it (e.g., "remote-dev-bot"), set permissions to "All"
+3. Name it "remote-dev-bot", set permissions to "All"
 4. Click "Create secret key"
 5. **Copy the key immediately** — you won't be able to see it again
 6. **Billing:** You must add a payment method at https://platform.openai.com/settings/organization/billing/overview before the key will work. New accounts get a $100/month usage limit by default; you can adjust this in the limits page.
@@ -205,15 +209,13 @@ gh api repos/{owner}/{repo}/actions/permissions/workflow
 **For Google (Gemini models):**
 1. Go to https://aistudio.google.com/app/apikey (this is Google AI Studio — much simpler than the Google Cloud Console, but uses the same underlying API)
 2. Sign in with your Google account and accept the Terms of Service if prompted
-3. Click "Create API Key", name it (e.g., "remote-dev-bot"), then select or create a Google Cloud project
+3. Click "Create API Key", name it "remote-dev-bot", then select or create a Google Cloud project
 4. **Copy the key immediately** (it starts with `AIza`)
 5. **Billing:** The free tier works for testing and light use (5-15 RPM depending on model). On the free tier, a compromised key can't cost you money — it's just rate-limited. For production use, enable billing on the underlying Google Cloud project. Paid tier (Tier 1) unlocks 150-300 RPM.
 6. **Note:** Google AI Studio is separate from a Google One AI Premium subscription ($20/mo). The subscription gives access to the Gemini chatbot; it does not provide API credits or affect API billing.
 7. **Useful links:** [API keys](https://aistudio.google.com/app/apikey) · [Usage & rate limits](https://aistudio.google.com/app/usage) · [Projects](https://aistudio.google.com/app/projects)
 
-**Tip:** Name each key after the project (e.g., "remote-dev-bot") to track costs and revoke later if needed. Store keys in a password manager.
-
-> **Already have an API key?** If you've already created an API key for another repo using Remote Dev Bot, you can reuse the same key. Skip to Step 1.3 and set the same key as a secret on your new repo.
+**Tip:** Store your API key in a password manager. Name it "remote-dev-bot" so you can find it later when adding it to other repos.
 
 ### Step 1.2.1: Set Cost Limits (Recommended)
 
