@@ -4,11 +4,15 @@ This file is both documentation and executable instructions. It's designed to be
 - **A human** reading step-by-step
 - **An AI assistant** (like Claude Code) that can execute steps, ask for confirmation, and handle errors
 
-When following this runbook with an AI assistant, the assistant should:
-- Explain what each step does before executing it
-- Ask for confirmation before modifying external services (GitHub settings, API accounts)
-- Verify each step succeeded before moving to the next
+When following this runbook with an AI assistant, the assistant should **default to the guided experience** unless the user asks to go faster:
+- Explain what each step does and why it's needed **before** executing it
+- Ask for confirmation before each action (not just secrets — all steps)
+- Ask whether the user already has API keys, PATs, etc. before creating new ones
+- After each step, confirm it succeeded and explain what happened
 - If a step fails, diagnose the issue and suggest recovery options
+- Keep the user oriented: "We just finished X. Next is Y, which does Z."
+
+Experienced users can ask for a faster pace (see prompt examples below), in which case the assistant should skip explanations and only pause for secrets and confirmations that require user input.
 
 ---
 
@@ -30,22 +34,19 @@ Throughout this runbook, replace `{owner}/{repo}` with your actual GitHub owner 
 
 ## Using This Runbook with an AI Coding Agent
 
-If you have an AI coding agent installed, you can have it guide you through the setup process. Here are example commands to get started:
+If you have an AI coding agent installed, you can have it guide you through the setup process.
 
-**With Claude Code:**
+**First time? Use the guided setup** (recommended):
 ```bash
-claude "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. Ask me before making any changes to GitHub settings or creating API keys."
+claude "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. This is my first time — walk me through each step, explain what's happening, and ask before doing anything."
 ```
 
-**With Gemini CLI:**
+**Done this before? Use the fast setup:**
 ```bash
-gemini "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. Ask me before making any changes to GitHub settings or creating API keys."
+claude "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. I'm familiar with the process — go fast, just ask me for secrets and confirmations."
 ```
 
-**With Codex CLI:**
-```bash
-codex "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. Ask me before making any changes to GitHub settings or creating API keys."
-```
+These examples use Claude Code, but the same prompts work with any AI coding agent (Gemini CLI, Codex CLI, etc.) — just replace `claude` with your agent's command.
 
 The AI agent will read the runbook, execute the necessary commands, and prompt you when it needs your input (like pasting API keys or confirming GitHub settings changes).
 
@@ -212,6 +213,8 @@ gh api repos/{owner}/{repo}/actions/permissions/workflow
 
 **Tip:** Name each key after the project (e.g., "remote-dev-bot") to track costs and revoke later if needed. Store keys in a password manager.
 
+> **Already have an API key?** If you've already created an API key for another repo using Remote Dev Bot, you can reuse the same key. Skip to Step 1.3 and set the same key as a secret on your new repo.
+
 ### Step 1.2.1: Set Cost Limits (Recommended)
 
 **What this does:** Configures spending limits on your LLM provider accounts to prevent unexpected charges. Each provider handles this differently.
@@ -377,6 +380,8 @@ The bot needs these four permissions (all Read and write):
 
 Metadata (Read-only) is added automatically — that's expected.
 
+> **Already have a PAT?** If you already have a PAT scoped to "All repositories" (or one that includes both your target repo and `gnovak/remote-dev-bot`), you can reuse it. Skip the token creation steps below and go straight to storing it as a secret: `gh secret set PAT_TOKEN --repo {owner}/{repo}`.
+
 #### Instructions
 
 1. Go to https://github.com/settings/tokens?type=beta (Fine-grained tokens)
@@ -457,6 +462,8 @@ curl -o .github/workflows/agent.yml \
   https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/examples/agent.yml
 ```
 
+> **Note:** The `curl` command above only works when `gnovak/remote-dev-bot` is a public repository. If you're testing with a private copy, create the file manually using the YAML below instead.
+
 Or manually create `.github/workflows/agent.yml` with:
 
 ```yaml
@@ -492,6 +499,8 @@ git add .github/workflows/agent.yml
 git commit -m "Add remote dev bot shim workflow"
 git push
 ```
+
+> **New empty repo?** If your repository has no commits yet, you'll need to set the branch name before pushing: `git branch -M main` before `git push -u origin main`.
 
 **Verify the workflow is recognized:**
 
