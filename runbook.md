@@ -212,6 +212,8 @@ gh api repos/{owner}/{repo}/actions/permissions/workflow
 
 **Tip:** Name each key after the project (e.g., "remote-dev-bot") to track costs and revoke later if needed. Store keys in a password manager.
 
+> **Already have an API key?** If you've already created an API key for another repo using Remote Dev Bot, you can reuse the same key. Skip to Step 1.3 and set the same key as a secret on your new repo.
+
 ### Step 1.2.1: Set Cost Limits (Recommended)
 
 **What this does:** Configures spending limits on your LLM provider accounts to prevent unexpected charges. Each provider handles this differently.
@@ -377,6 +379,8 @@ The bot needs these four permissions (all Read and write):
 
 Metadata (Read-only) is added automatically — that's expected.
 
+> **Already have a PAT?** If you already have a PAT scoped to "All repositories" (or one that includes both your target repo and `gnovak/remote-dev-bot`), you can reuse it. Skip the token creation steps below and go straight to storing it as a secret: `gh secret set PAT_TOKEN --repo {owner}/{repo}`.
+
 #### Instructions
 
 1. Go to https://github.com/settings/tokens?type=beta (Fine-grained tokens)
@@ -457,6 +461,8 @@ curl -o .github/workflows/agent.yml \
   https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/examples/agent.yml
 ```
 
+> **Note:** The `curl` command above only works when `gnovak/remote-dev-bot` is a public repository. If you're testing with a private copy, create the file manually using the YAML below instead.
+
 Or manually create `.github/workflows/agent.yml` with:
 
 ```yaml
@@ -492,6 +498,8 @@ git add .github/workflows/agent.yml
 git commit -m "Add remote dev bot shim workflow"
 git push
 ```
+
+> **New empty repo?** If your repository has no commits yet, you'll need to set the branch name before pushing: `git branch -M main` before `git push -u origin main`.
 
 **Verify the workflow is recognized:**
 
