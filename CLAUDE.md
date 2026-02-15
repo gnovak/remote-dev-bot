@@ -15,6 +15,7 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 - `.github/workflows/test.yml` — CI: runs pytest on PRs to main
 - `.github/workflows/e2e.yml` — manual trigger for E2E tests
 - `lib/config.py` — config parsing logic (used by resolve.yml and unit tests)
+- `scripts/compile.py` — compiles a single-file workflow from the shim + reusable workflow
 - `tests/` — pytest unit tests and E2E test script
 - `examples/agent.yml` — shim template for target repos to copy
 - `.openhands/microagents/repo.md` — (in target repos) context for the agent
@@ -147,6 +148,12 @@ git merge --no-ff feature-branch -m "Merge feature: column visibility"
 - Use distinct branch names that won't be confused with existing branches
 - Avoid names that differ by only one character (e.g., `add-config` vs `add-configs`)
 - Check existing branches before creating a new one to avoid similar names
+
+## Compiler Constraint: resolve.yml step ordering
+
+`scripts/compile.py` references steps in `resolve.yml` by **hardcoded index** (e.g., `steps[2]`, `steps[5]`, `steps[10]`). If you add, remove, or reorder steps in resolve.yml, the compiler will silently grab the wrong steps.
+
+**Rule: any change to resolve.yml steps requires updating compile.py to match.** Run `pytest tests/test_compile.py -v` after changes — the unit tests check for specific content in the compiled output and will catch most mismatches.
 
 ## Code Style
 - Follow existing patterns in the codebase
