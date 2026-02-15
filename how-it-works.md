@@ -55,7 +55,7 @@ This is the "engine" — the shared infrastructure that all target repos use.
 | `lib/config.py` | Config parsing logic. Loads base config, merges with target repo overrides, resolves aliases. Used by resolve.yml at runtime. |
 | `examples/agent.yml` | Template shim workflow. Copy this to target repos at `.github/workflows/agent.yml`. |
 | `runbook.md` | Step-by-step setup instructions for humans or AI assistants. |
-| `CLAUDE.md` | Development guidance for AI assistants working on this repo. |
+| `AGENTS.md` | Development guidance for AI assistants working on this repo. |
 
 **Who maintains this:** You (if you forked it) or the upstream maintainer (gnovak). Updates here automatically flow to all target repos that reference it.
 
@@ -160,7 +160,7 @@ The recommended dev cycle uses two repos:
 - `remote-dev-bot` — the main repo with the reusable workflow
 - `remote-dev-bot-test` — a test repo whose shim points at `resolve.yml@dev`
 
-See `CLAUDE.md` for the full dev cycle, including how the `dev` branch works as a pointer.
+See `AGENTS.md` for the full dev cycle, including how the `dev` branch works as a pointer.
 
 ## Quick Reference: What Goes Where
 
@@ -190,7 +190,7 @@ Config: base=remote-dev-bot, override=none
 
 - If you changed `remote-dev-bot.yaml` in the target repo: changes should work immediately
 - If you changed `remote-dev-bot.yaml` in remote-dev-bot: the target repo's shim must reference the branch with your changes (e.g., `@dev` instead of `@main`)
-- If you changed `lib/config.py`: this is checked out from `main` at runtime, so changes must be merged to main first (see CLAUDE.md for details)
+- If you changed `lib/config.py`: this is checked out from `main` at runtime, so changes must be merged to main first (see AGENTS.md for details)
 
 **"I'm confused about which repo I'm in"**
 
