@@ -16,6 +16,8 @@ There are already excellent vendor-specific implementations of this pattern (Git
 
 Or use `/agent-design` to get AI design analysis posted as a comment (no code changes).
 
+**See it in action:** [Issue #33](https://github.com/gnovak/remote-dev-bot/issues/33) asked for model name documentation → [PR #52](https://github.com/gnovak/remote-dev-bot/pull/52) was created and merged autonomously.
+
 ## Commands
 
 | Command | What it does |
