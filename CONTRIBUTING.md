@@ -44,7 +44,7 @@ Secrets stored on `gnovak/remote-dev-bot-test`:
 
 ## Dev Cycle
 
-See [CLAUDE.md](CLAUDE.md) for the full dev cycle documentation, including how the `dev` branch pointer works and how to trigger test runs.
+See [AGENTS.md](AGENTS.md) for the full dev cycle documentation, including how the `dev` branch pointer works and how to trigger test runs.
 
 ## Test Infrastructure
 
