@@ -89,6 +89,10 @@ gh run view RUN_ID --repo gnovak/remote-dev-bot-test --log | tail -40
 - Merging into `main` (whether via `git merge` on main or `git push origin feature:main`)
 - `git push --force` (without `--with-lease`) to any branch — always use `--force-with-lease` instead
 
+### PR Policy
+
+- Treat `runbook.md` changes as code changes — always use a PR, not direct commits to main.
+
 ### Two Modes of Git Usage
 Git serves **two different purposes** depending on the phase of work:
 
