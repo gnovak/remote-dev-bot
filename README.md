@@ -30,6 +30,47 @@ Comment with an alias to choose the model:
 
 Aliases are configured in `remote-dev-bot.yaml`.
 
+### Understanding Model Names
+
+Model aliases (like `claude-medium`) map to **LiteLLM model identifiers** in `remote-dev-bot.yaml`. LiteLLM is the library OpenHands uses to talk to different LLM providers through a unified interface.
+
+**Model ID format:** `provider/model-name`
+
+| Provider | Prefix | Example |
+|----------|--------|---------|
+| Anthropic (Claude) | `anthropic/` | `anthropic/claude-sonnet-4-5` |
+| OpenAI (GPT) | `openai/` | `openai/gpt-5.1-codex-mini` |
+| Google (Gemini) | `gemini/` | `gemini/gemini-2.5-flash` |
+
+### Finding Valid Model Names
+
+OpenHands uses LiteLLM, so the model strings must be valid LiteLLM identifiers. Browse available models at **[models.litellm.ai](https://models.litellm.ai)** — search by name, filter by provider, and see context windows and pricing.
+
+Prefix the model string with the provider name in `remote-dev-bot.yaml` (e.g., `anthropic/claude-sonnet-4-5`).
+
+### Choosing a Model
+
+**For most tasks:** Use the default (`/agent` or `/agent-claude-medium`). Claude Sonnet offers a good balance of capability and cost.
+
+**For complex multi-file features:** Use `/agent-claude-large` (Opus) or `/agent-openai-large` (GPT Codex). These models handle larger contexts and more intricate reasoning.
+
+**For simple, well-defined tasks:** Use `/agent-claude-small` (Haiku) or `/agent-gemini-small`. Faster and cheaper, but may struggle with ambiguous requirements.
+
+**For coding-heavy tasks:** Models with "codex" in the name (e.g., `openai/gpt-5.1-codex-mini`) are specifically tuned for code generation and may perform better on implementation tasks.
+
+### Customizing Models
+
+To add or modify model aliases, edit `remote-dev-bot.yaml`:
+
+```yaml
+models:
+  my-custom-alias:
+    id: anthropic/claude-sonnet-4-5
+    description: "My custom model configuration"
+```
+
+You can also create a `remote-dev-bot.yaml` in your target repo to override the defaults. See `runbook.md` Phase 4 for details.
+
 ## Architecture
 
 The system has two parts:
