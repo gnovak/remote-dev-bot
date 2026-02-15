@@ -1,27 +1,24 @@
 #!/usr/bin/env python3
-"""Compile a single-file workflow from the reusable workflow + shim setup.
+"""Compile two self-contained workflows from the reusable workflow + shim.
 
-This script reads the reusable workflow (resolve.yml), the shim (agent.yml),
-config parsing logic (lib/config.py), and model aliases (remote-dev-bot.yaml),
-then produces a self-contained workflow file that users can drop into their repo.
+Reads the reusable workflow (resolve.yml), the shim (agent.yml), and config
+(remote-dev-bot.yaml), then produces two compiled files:
 
-Output is a single agent.yml that:
-- Triggers on issue_comment and pull_request_review_comment
-- Has the same author_association security gate as the shim
-- Inlines all config (model aliases, OpenHands settings) directly
-- Inlines config parsing logic (no cross-repo checkout needed)
-- Uses github.token as default (PAT_TOKEN optional)
-- Injects the security microagent
-- Runs OpenHands resolver and creates PRs
+  dist/agent-resolve.yml  — triggers on /agent-resolve[-<model>]
+  dist/agent-design.yml   — triggers on /agent-design[-<model>]
+
+Each compiled file is self-contained: inlined config, no cross-repo checkout,
+uses github.token by default (PAT_TOKEN optional).
 
 Usage:
-    python scripts/compile.py [output_path]
-
-Default output path is dist/agent.yml
+    python scripts/compile.py                  # writes to dist/
+    python scripts/compile.py output_dir/      # custom output dir
 """
 
 import os
+import re
 import sys
+
 import yaml
 from pathlib import Path
 
@@ -46,50 +43,54 @@ def load_yaml(path):
         print(f"ERROR: Required file not found: {path}", file=sys.stderr)
         sys.exit(1)
     with open(path) as f:
-        content = f.read()
+        data = yaml.safe_load(f.read())
         # Handle 'on:' being parsed as boolean True by PyYAML
-        # We need to load it in a way that preserves the 'on' key
-        data = yaml.safe_load(content)
-        # Fix the 'on' key if it was parsed as True
         if True in data and 'on' not in data:
             data['on'] = data.pop(True)
         return data
 
 
+def find_step(steps, name):
+    """Find a step by name. Raises KeyError if not found."""
+    for step in steps:
+        if step.get("name") == name:
+            return step
+    raise KeyError(f"Step not found: '{name}'")
+
+
 def extract_security_gate(shim):
     """Extract the author_association list from the shim's if condition."""
-    # The shim has: contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), ...)
-    # We extract this list
     if_condition = shim.get("jobs", {}).get("resolve", {}).get("if", "")
-    # Parse out the JSON array from the condition
-    import re
     match = re.search(r'fromJson\(\'(\[.*?\])\'\)', if_condition)
     if match:
         return match.group(1)
-    # Default fallback
     return '["OWNER","COLLABORATOR","MEMBER"]'
 
 
-def inline_config_parsing(config_yaml):
-    """Generate shell script that includes Python code for parsing config inline.
+def inline_config_parsing(config_yaml, mode):
+    """Generate inline Python for parsing config, specialized for a known mode.
 
-    Returns shell script that extracts alias from comment and resolves model.
+    Since mode is known at compile time, we just strip the known prefix
+    (e.g., /agent-resolve- or /agent-design-) to get the model alias.
     """
+    modes_config = config_yaml.get("modes", {})
+    mode_config = modes_config.get(mode, {})
+    default_model = mode_config.get("default_model",
+                                     config_yaml.get("default_model", "claude-medium"))
+
     models = config_yaml.get("models", {})
-    default_model = config_yaml.get("default_model", "claude-medium")
     oh = config_yaml.get("openhands", {})
     max_iterations = oh.get("max_iterations", 50)
     oh_version = oh.get("version", "1.3.0")
     pr_type = oh.get("pr_type", "ready")
 
-    # Build the models dictionary as Python code
+    # Build models dict as Python code
     models_dict_lines = []
     for alias, model_info in models.items():
         model_id = model_info["id"]
         models_dict_lines.append(f'    "{alias}": "{model_id}",')
     models_dict = "\n".join(models_dict_lines)
 
-    # Use a shell script that invokes Python
     code = f'''python3 << 'PYTHON_EOF'
 import os
 import sys
@@ -111,10 +112,10 @@ OH_VERSION = "{oh_version}"
 # --- PR_STYLE: "draft" or "ready" ---
 PR_TYPE = "{pr_type}"
 
-# Parse alias from comment
+# Parse alias from comment — mode is known at compile time
 comment = os.environ.get("COMMENT", "")
-# Extract alias: "/agent-claude-large do X" -> "claude-large", "/agent" -> ""
-match = re.match(r'^/agent-?([a-z0-9-]*)', comment)
+# Strip the known prefix: "/agent-{mode}-claude-large do X" -> "claude-large"
+match = re.match(r'^/agent-{mode}-?([a-z0-9-]*)', comment)
 alias = match.group(1) if match else ""
 
 if not alias:
@@ -137,6 +138,7 @@ if output_file:
         f.write(f"pr_type={{PR_TYPE}}\\n")
 
 # Log for visibility
+print(f"Mode: {mode}")
 print(f"Model alias: {{alias}}")
 print(f"Model ID: {{model}}")
 print(f"PR type: {{PR_TYPE}}")
@@ -145,136 +147,10 @@ PYTHON_EOF
     return code
 
 
-def compile_workflow(shim_path, workflow_path, config_path, output_path):
-    """Compile the single-file workflow."""
-    # Load source files
-    shim = load_yaml(shim_path)
-    workflow = load_yaml(workflow_path)
-    config_yaml = load_yaml(config_path)
-
-    # Extract security gate from shim
-    security_roles = extract_security_gate(shim)
-
-    # Build the compiled workflow
-    compiled = {
-        "name": "Remote Dev Bot (Compiled)",
-    }
-
-    # Add on triggers from shim
-    compiled["on"] = shim["on"]
-
-    # Add permissions from shim
-    compiled["permissions"] = shim["permissions"]
-
-    # Build the job
-    job = {
-        "runs-on": "ubuntu-latest",
-    }
-
-    # Add security gate as if condition
-    # --- SECURITY_GATE: change who can trigger the agent ---
-    job["if"] = (
-        f"(github.event.issue || github.event.pull_request) && "
-        f"startsWith(github.event.comment.body, '/agent') && "
-        f"contains(fromJson('{security_roles}'), github.event.comment.author_association)"
-    )
-
-    # Get steps from reusable workflow
-    resolve_job = workflow["jobs"]["resolve"]
-    steps = resolve_job["steps"]
-
-    # Build new steps list (filtering and modifying)
-    new_steps = []
-
-    # Step 1: Checkout (keep, but update comment)
-    checkout_step = steps[0].copy()
-    checkout_step["name"] = "Checkout repository"
-    # Add PAT_TOKEN comment
-    new_steps.append({
-        "name": "Checkout repository",
-        "uses": "actions/checkout@v4",
-        "with": {
-            "token": "${{ secrets.PAT_TOKEN || github.token }}"
-        }
-    })
-
-    # Skip step 2: "Checkout remote-dev-bot config" - we're inlining it
-
-    # Step 3: Set up Python (keep)
-    new_steps.append(steps[2])
-
-    # Skip step 4: "Install PyYAML" - compiled version doesn't need it
-
-    # Step 5: Parse config and model alias (replace with inline version)
-    config_parse_code = inline_config_parsing(config_yaml)
-    new_steps.append({
-        "name": "Parse config and model alias",
-        "id": "parse",
-        "env": {
-            "COMMENT": "${{ github.event.comment.body }}"
-        },
-        "run": config_parse_code
-    })
-
-    # Step 6: Determine API key (keep)
-    new_steps.append(steps[5])
-
-    # Step 7: React to comment (keep, but update token)
-    react_step = steps[6].copy()
-    react_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
-    new_steps.append(react_step)
-
-    # Step 8: Install OpenHands (keep)
-    new_steps.append(steps[7])
-
-    # Skip step 9: "Clean up config checkout" - not needed
-
-    # Step 10: Inject security guardrails (keep)
-    new_steps.append(steps[9])
-
-    # Step 11: Resolve issue (keep, update token, remove internal test secrets)
-    resolve_step = steps[10].copy()
-    resolve_step["env"] = {k: v for k, v in resolve_step["env"].items()
-                           if k != "E2E_TEST_SECRET"}
-    resolve_step["env"]["GITHUB_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
-    new_steps.append(resolve_step)
-
-    # Step 12: Create pull request (keep, update token)
-    pr_step = steps[11].copy()
-    pr_step["env"]["GITHUB_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
-    new_steps.append(pr_step)
-
-    # Step 13: Upload artifact (keep)
-    new_steps.append(steps[12])
-
-    # Convert multi-line run: values to block scalars for readability
-    for step in new_steps:
-        if "run" in step and "\n" in step["run"]:
-            step["run"] = BlockScalarStr(step["run"])
-
-    job["steps"] = new_steps
-
-    compiled["jobs"] = {
-        "resolve": job
-    }
-
-    # Generate the YAML output
-    output = generate_output_yaml(compiled, security_roles, config_yaml)
-
-    # Write to file
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "w") as f:
-        f.write(output)
-
-    return output_path
-
-
-def generate_output_yaml(compiled, security_roles, config_yaml):
-    """Generate the final YAML with configuration comments."""
-
-    # Build configuration header
-    header = """# ============================================================
-# CONFIGURATION - Single-File Remote Dev Bot
+def make_header(mode):
+    """Generate the configuration header comment for a compiled file."""
+    return f"""# ============================================================
+# CONFIGURATION - Remote Dev Bot ({mode.title()} Mode)
 # ============================================================
 #
 # This is a compiled, self-contained workflow. To customize:
@@ -298,15 +174,31 @@ def generate_output_yaml(compiled, security_roles, config_yaml):
 
 """
 
-    # Convert to YAML
+
+def build_base_job(security_roles, trigger_prefix):
+    """Build the base job dict with security gate for a specific trigger prefix."""
+    return {
+        "runs-on": "ubuntu-latest",
+        "if": (
+            f"(github.event.issue || github.event.pull_request) && "
+            f"startsWith(github.event.comment.body, '{trigger_prefix}') && "
+            f"contains(fromJson('{security_roles}'), "
+            f"github.event.comment.author_association)"
+        ),
+    }
+
+
+def apply_block_scalars(steps):
+    """Convert multi-line run: values to block scalars for readability."""
+    for step in steps:
+        if "run" in step and "\n" in step["run"]:
+            step["run"] = BlockScalarStr(step["run"])
+
+
+def generate_output_yaml(compiled, security_roles):
+    """Generate the final YAML string with SECURITY_GATE comments."""
     yaml_str = yaml.dump(compiled, default_flow_style=False, sort_keys=False, width=1000)
-
-    # Fix the quoted 'on' key to be unquoted
     yaml_str = yaml_str.replace("'on':", "on:")
-
-    # Insert comment markers for searchability
-    # We need to be careful here - the MODEL_CONFIG is in the Python code
-    # So we'll add comments around it
 
     # Add SECURITY_GATE marker before the if condition
     yaml_str = yaml_str.replace(
@@ -318,32 +210,242 @@ def generate_output_yaml(compiled, security_roles, config_yaml):
         "    if: (github.event.issue"
     )
 
-    return header + yaml_str
+    return yaml_str
+
+
+def compile_resolve(shim, workflow, config_yaml, output_path):
+    """Compile the resolve mode workflow (agent-resolve.yml)."""
+    security_roles = extract_security_gate(shim)
+    resolve_steps = workflow["jobs"]["resolve"]["steps"]
+
+    steps = []
+
+    # Checkout
+    steps.append({
+        "name": "Checkout repository",
+        "uses": "actions/checkout@v4",
+        "with": {"token": "${{ secrets.PAT_TOKEN || github.token }}"},
+    })
+
+    # Set up Python
+    steps.append(find_step(resolve_steps, "Set up Python").copy())
+
+    # Parse config (inline, resolve mode)
+    steps.append({
+        "name": "Parse config and model alias",
+        "id": "parse",
+        "env": {"COMMENT": "${{ github.event.comment.body }}"},
+        "run": inline_config_parsing(config_yaml, "resolve"),
+    })
+
+    # Determine API key
+    steps.append(find_step(resolve_steps, "Determine API key").copy())
+
+    # React to comment (from parse job — the shared setup)
+    parse_steps = workflow["jobs"]["parse"]["steps"]
+    react_step = find_step(parse_steps, "React to comment").copy()
+    react_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    steps.append(react_step)
+
+    # Install OpenHands
+    steps.append(find_step(resolve_steps, "Install OpenHands").copy())
+
+    # Inject security guardrails
+    steps.append(find_step(resolve_steps, "Inject security guardrails").copy())
+
+    # Resolve issue (remove E2E_TEST_SECRET, update token)
+    resolve_step = find_step(resolve_steps, "Resolve issue").copy()
+    resolve_step["env"] = {k: v for k, v in resolve_step["env"].items()
+                           if k != "E2E_TEST_SECRET"}
+    resolve_step["env"]["GITHUB_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    steps.append(resolve_step)
+
+    # Create pull request (update token)
+    pr_step = find_step(resolve_steps, "Create pull request").copy()
+    pr_step["env"]["GITHUB_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    steps.append(pr_step)
+
+    # Upload artifact
+    steps.append(find_step(resolve_steps, "Upload output artifact").copy())
+
+    # Fix needs.parse.outputs -> steps.parse.outputs (compiled is single-job)
+    _rewrite_needs_refs(steps)
+
+    apply_block_scalars(steps)
+
+    job = build_base_job(security_roles, "/agent-resolve")
+    job["steps"] = steps
+
+    compiled = {
+        "name": "Remote Dev Bot — Resolve (Compiled)",
+        "on": shim["on"],
+        "permissions": shim["permissions"],
+        "jobs": {"resolve": job},
+    }
+
+    header = make_header("resolve")
+    yaml_str = generate_output_yaml(compiled, security_roles)
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as f:
+        f.write(header + yaml_str)
+
+    return output_path
+
+
+def compile_design(shim, workflow, config_yaml, output_path):
+    """Compile the design mode workflow (agent-design.yml)."""
+    security_roles = extract_security_gate(shim)
+    design_steps = workflow["jobs"]["design"]["steps"]
+
+    # Build the prompt_prefix as a Python string for inlining
+    modes_config = config_yaml.get("modes", {})
+    design_config = modes_config.get("design", {})
+    prompt_prefix = design_config.get("prompt_prefix", "")
+
+    steps = []
+
+    # Checkout
+    steps.append({
+        "name": "Checkout repository",
+        "uses": "actions/checkout@v4",
+        "with": {"token": "${{ secrets.PAT_TOKEN || github.token }}"},
+    })
+
+    # Set up Python
+    steps.append(find_step(design_steps, "Set up Python").copy())
+
+    # Parse config (inline, design mode)
+    steps.append({
+        "name": "Parse config and model alias",
+        "id": "parse",
+        "env": {"COMMENT": "${{ github.event.comment.body }}"},
+        "run": inline_config_parsing(config_yaml, "design"),
+    })
+
+    # Determine API key
+    steps.append(find_step(design_steps, "Determine API key").copy())
+
+    # React to comment — design mode doesn't have its own, use from parse job
+    # Actually the parse job has the react step. Let's add it.
+    parse_steps = workflow["jobs"]["parse"]["steps"]
+    react_step = find_step(parse_steps, "React to comment").copy()
+    react_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    steps.append(react_step)
+
+    # Install dependencies (PyYAML + litellm)
+    steps.append(find_step(design_steps, "Install dependencies").copy())
+
+    # Gather issue context
+    gather_step = find_step(design_steps, "Gather issue context").copy()
+    gather_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    steps.append(gather_step)
+
+    # Call LLM for design analysis — rewrite to inline prompt_prefix
+    llm_step = find_step(design_steps, "Call LLM for design analysis").copy()
+    # The step reads prompt_prefix from config files on disk. In compiled mode,
+    # we inline it. Replace the config-loading Python code.
+    if prompt_prefix:
+        escaped_prefix = prompt_prefix.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+    else:
+        escaped_prefix = ""
+    llm_run = llm_step.get("run", "")
+    # Replace the config-loading block with a simple variable assignment
+    llm_run = re.sub(
+        r'# Load prompt_prefix from config.*?break\n',
+        f'prompt_prefix = "{escaped_prefix}"\n',
+        llm_run,
+        flags=re.DOTALL,
+    )
+    # Remove the remote-dev-bot checkout reference
+    llm_run = llm_run.replace(
+        'config_path = ".remote-dev-bot/lib/../remote-dev-bot.yaml"\n', ''
+    )
+    llm_step["run"] = llm_run
+    steps.append(llm_step)
+
+    # Post comment
+    post_step = find_step(design_steps, "Post comment").copy()
+    post_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    steps.append(post_step)
+
+    # Fix needs.parse.outputs -> steps.parse.outputs
+    _rewrite_needs_refs(steps)
+
+    apply_block_scalars(steps)
+
+    job = build_base_job(security_roles, "/agent-design")
+    job["steps"] = steps
+
+    compiled = {
+        "name": "Remote Dev Bot — Design (Compiled)",
+        "on": shim["on"],
+        "permissions": shim["permissions"],
+        "jobs": {"design": job},
+    }
+
+    header = make_header("design")
+    yaml_str = generate_output_yaml(compiled, security_roles)
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as f:
+        f.write(header + yaml_str)
+
+    return output_path
+
+
+def _rewrite_needs_refs(steps):
+    """Rewrite needs.parse.outputs.X -> steps.parse.outputs.X in step values.
+
+    The reusable workflow uses multi-job with needs; compiled is single-job
+    so outputs come from prior steps instead.
+    """
+    def rewrite(obj):
+        if isinstance(obj, str):
+            return obj.replace("needs.parse.outputs.", "steps.parse.outputs.")
+        elif isinstance(obj, dict):
+            return {k: rewrite(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [rewrite(v) for v in obj]
+        return obj
+
+    for i, step in enumerate(steps):
+        steps[i] = rewrite(step)
 
 
 def main():
     """Main entry point."""
-    # Determine paths
     workspace = Path(__file__).parent.parent
     shim_path = workspace / "examples" / "agent.yml"
     workflow_path = workspace / ".github" / "workflows" / "resolve.yml"
     config_path = workspace / "remote-dev-bot.yaml"
 
-    # Output path
+    # Output directory
     if len(sys.argv) > 1:
-        output_path = sys.argv[1]
+        output_dir = sys.argv[1]
     else:
-        output_path = str(workspace / "dist" / "agent.yml")
+        output_dir = str(workspace / "dist")
 
-    # Compile
-    result_path = compile_workflow(
-        str(shim_path),
-        str(workflow_path),
-        str(config_path),
-        output_path
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Load source files
+    shim = load_yaml(str(shim_path))
+    workflow = load_yaml(str(workflow_path))
+    config_yaml = load_yaml(str(config_path))
+
+    # Compile both modes
+    resolve_path = compile_resolve(
+        shim, workflow, config_yaml,
+        os.path.join(output_dir, "agent-resolve.yml")
     )
+    print(f"Compiled resolve workflow: {resolve_path}")
 
-    print(f"Compiled workflow written to: {result_path}")
+    design_path = compile_design(
+        shim, workflow, config_yaml,
+        os.path.join(output_dir, "agent-design.yml")
+    )
+    print(f"Compiled design workflow: {design_path}")
+
     return 0
 
 
