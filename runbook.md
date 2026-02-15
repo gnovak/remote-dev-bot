@@ -8,11 +8,11 @@ This runbook will guide you through setting up Remote Dev Bot on your GitHub rep
 
 **What you'll set up:**
 
-1. **Phase 0: Install and Configure GitHub CLI** — Install the `gh` command-line tool and authenticate with GitHub
-2. **Phase 1: GitHub Repository Settings** — Configure repository permissions, create API keys for your chosen LLM provider(s), and store them as GitHub secrets
-3. **Phase 2: Install the Workflow** — Add a small workflow file to your repository that connects to the Remote Dev Bot system
-4. **Phase 3: Test It** — Create a test issue and trigger the bot to verify everything works
-5. **Phase 4: Customize (Optional)** — Add repository context, adjust model settings, and tune iteration limits
+1. **Phase 1: Install and Configure GitHub CLI** — Install the `gh` command-line tool and authenticate with GitHub
+2. **Phase 2: GitHub Repository Settings** — Configure repository permissions, create API keys for your chosen LLM provider(s), and store them as GitHub secrets
+3. **Phase 3: Install the Workflow** — Add a small workflow file to your repository that connects to the Remote Dev Bot system
+4. **Phase 4: Test It** — Create a test issue and trigger the bot to verify everything works
+5. **Phase 5: Customize (Optional)** — Add repository context, adjust model settings, and tune iteration limits
 
 **Time estimate:** 15-30 minutes for initial setup, depending on whether you already have the GitHub CLI installed and authenticated.
 
@@ -72,11 +72,11 @@ The AI agent will read the runbook, execute the necessary commands, and prompt y
 
 ---
 
-## Phase 0: Install and Configure GitHub CLI
+## Phase 1: Install and Configure GitHub CLI
 
 > **Note for humans:** This phase is optional if you prefer using the web interface. Throughout this runbook, most steps provide both web interface and command line options. If you skip this phase, just use the "Via web interface" instructions in later steps. The CLI is useful for automation and scripting, but not required.
 
-### Step 0.1: Check if GitHub CLI is Already Installed
+### Step 1.1: Check if GitHub CLI is Already Installed
 
 **What this does:** Verifies if you already have the GitHub command-line tool installed. If it's already installed, you can skip the installation step.
 
@@ -84,7 +84,7 @@ The AI agent will read the runbook, execute the necessary commands, and prompt y
 gh --version
 ```
 
-If this command succeeds and shows a version number, you already have `gh` installed. Skip to Step 0.2.
+If this command succeeds and shows a version number, you already have `gh` installed. Skip to Step 1.2.
 
 If the command fails (command not found), proceed with the installation:
 
@@ -121,7 +121,7 @@ After installation, verify:
 gh --version
 ```
 
-### Step 0.2: Authenticate with GitHub
+### Step 1.2: Authenticate with GitHub
 
 **What this does:** Logs you into GitHub through the command line so you can manage repositories, secrets, and workflows.
 
@@ -136,7 +136,7 @@ Follow the prompts:
 - Press Enter to open the browser (or manually go to https://github.com/login/device)
 - Paste the code and authorize the GitHub CLI
 
-### Step 0.3: Add Required Scopes
+### Step 1.3: Add Required Scopes
 
 **What this does:** Grants the GitHub CLI permission to manage workflows and set up Git authentication.
 
@@ -148,7 +148,7 @@ gh auth refresh --hostname github.com --scopes workflow
 gh auth setup-git
 ```
 
-### Step 0.4: Verify Authentication
+### Step 1.4: Verify Authentication
 
 **What this does:** Confirms that authentication is working correctly and you have the necessary permissions.
 
@@ -171,9 +171,9 @@ If all these commands succeed, your GitHub CLI is properly configured!
 
 ---
 
-## Phase 1: GitHub Repository Settings
+## Phase 2: GitHub Repository Settings
 
-### Step 1.1: Enable Actions Permissions
+### Step 2.1: Enable Actions Permissions
 
 **What this does:** Allows GitHub Actions workflows to create branches and pull requests in your repository.
 
@@ -202,11 +202,11 @@ gh api repos/{owner}/{repo}/actions/permissions/workflow
 # Should show: default_workflow_permissions: "write", can_approve_pull_request_reviews: true
 ```
 
-### Step 1.2: Create an LLM API Key
+### Step 2.2: Create an LLM API Key
 
 **What this does:** The agent needs an API key to call the LLM. You need at least one key for whichever provider you want to use.
 
-> **Already have an API key?** One API key works across all your repos — just set the same key as a secret on each repo (Step 1.3). You don't need a separate key per repo. Skip ahead to Step 1.3.
+> **Already have an API key?** One API key works across all your repos — just set the same key as a secret on each repo (Step 2.3). You don't need a separate key per repo. Skip ahead to Step 2.3.
 >
 > **Per-repo keys (optional):** If you want to track API costs per repo, create a separate key for each one and name it after the repo (e.g., "remote-dev-bot-myrepo"). This is optional — most users share one key.
 
@@ -237,7 +237,7 @@ gh api repos/{owner}/{repo}/actions/permissions/workflow
 
 **Tip:** Store your API key in a password manager. Name it "remote-dev-bot" so you can find it later when adding it to other repos.
 
-### Step 1.2.1: Set Cost Limits (Recommended)
+### Step 2.2.1: Set Cost Limits (Recommended)
 
 **What this does:** Configures spending limits on your LLM provider accounts to prevent unexpected charges. Each provider handles this differently.
 
@@ -293,7 +293,7 @@ Anthropic provides usage limits that cap your monthly spending.
 
 **Recommended approach for Google:** If you need hard cost limits, consider using OpenAI or Anthropic instead. If you must use Google with billing enabled, set conservative API quotas and monitor your budget alerts closely. The free tier is the only way to guarantee $0 spend.
 
-### Step 1.3: Add Repository Secrets
+### Step 2.3: Add Repository Secrets
 
 **What this does:** Stores your API keys securely as GitHub repository secrets so the workflow can use them. Secret values are encrypted and never exposed in logs.
 
@@ -328,9 +328,9 @@ gh secret list --repo {owner}/{repo}
 # Should list the secrets you just set (values are hidden)
 ```
 
-### Step 1.4: Create a Personal Access Token (PAT) — Optional
+### Step 2.4: Create a Personal Access Token (PAT) — Optional
 
-> **You can skip this step.** The compiled single-file workflow (Step 2.1) works without a PAT. The only thing you lose is automatic CI triggering: when the bot creates a PR, your CI checks won't run automatically. You can always trigger them manually, or come back and add a PAT later.
+> **You can skip this step.** The compiled single-file workflow (Step 3.1) works without a PAT. The only thing you lose is automatic CI triggering: when the bot creates a PR, your CI checks won't run automatically. You can always trigger them manually, or come back and add a PAT later.
 
 <details>
 <summary><strong>Click to expand PAT setup instructions</strong> (needed only if you want bot PRs to auto-trigger CI)</summary>
@@ -370,9 +370,9 @@ gh secret set PAT_TOKEN --repo {owner}/{repo}
 
 ---
 
-## Phase 2: Install the Workflow
+## Phase 3: Install the Workflow
 
-### Step 2.1: Download the Workflow File
+### Step 3.1: Download the Workflow File
 
 **What this does:** Adds two self-contained workflow files to your repository. Each file includes everything the bot needs — model configuration, config parsing, security guardrails, and the agent runner.
 
@@ -391,7 +391,7 @@ The files are self-contained and configurable. Search for these markers to custo
 - `PR_STYLE` — switch between draft and ready PRs
 - `SECURITY_GATE` — change who can trigger the agent
 
-### Step 2.2: Push and Verify
+### Step 3.2: Push and Verify
 
 ```bash
 git add .github/workflows/agent-resolve.yml .github/workflows/agent-design.yml
@@ -441,7 +441,7 @@ jobs:
 ```
 
 This requires:
-- A PAT with access to both your repo and `gnovak/remote-dev-bot` (see Step 1.4)
+- A PAT with access to both your repo and `gnovak/remote-dev-bot` (see Step 2.4)
 - The PAT stored as `PAT_TOKEN` secret on your repo
 
 **Using your own fork:** For full control, fork `gnovak/remote-dev-bot` and point the `uses:` line at your fork. You'll need to set Actions access to `user` level on the fork (see Troubleshooting).
@@ -450,9 +450,9 @@ This requires:
 
 ---
 
-## Phase 3: Test It
+## Phase 4: Test It
 
-### Step 3.1: Create a Test Issue
+### Step 4.1: Create a Test Issue
 
 **Via web interface:**
 1. Go to `https://github.com/{owner}/{repo}/issues/new`
@@ -467,7 +467,7 @@ gh issue create --repo {owner}/{repo} \
   --body "Create a simple hello.py that prints 'Hello from Remote Dev Bot'"
 ```
 
-### Step 3.2: Trigger the Agent
+### Step 4.2: Trigger the Agent
 
 Comment on the issue to trigger the agent. For your first test, use `claude-medium` (Sonnet) — it handles the task lifecycle more reliably than `claude-small` (Haiku).
 
@@ -482,7 +482,7 @@ Comment on the issue to trigger the agent. For your first test, use `claude-medi
 gh issue comment {issue-number} --repo {owner}/{repo} --body "/agent-resolve-claude-medium"
 ```
 
-### Step 3.3: Monitor the Run
+### Step 4.3: Monitor the Run
 
 **Via web interface:**
 1. Go to `https://github.com/{owner}/{repo}/actions`
@@ -504,7 +504,7 @@ A successful run typically takes 5-10 minutes. The agent will:
 2. Read the issue and work on the solution (~3-7 min)
 3. Create a draft PR (~30 sec)
 
-### Step 3.4: Check Results
+### Step 4.4: Check Results
 
 If successful, you should see:
 - A new branch created by the agent
@@ -538,17 +538,17 @@ gh pr list --repo {owner}/{repo}
 
 ---
 
-## Phase 4: Customize (Optional)
+## Phase 5: Customize (Optional)
 
-### Step 4.1: Add Repository Context for the Agent
+### Step 5.1: Add Repository Context for the Agent
 
 Create `.openhands/microagents/repo.md` in your target repo with any context the agent should know (coding conventions, architecture, test commands, etc.).
 
-### Step 4.2: Adjust Model Aliases
+### Step 5.2: Adjust Model Aliases
 
 Edit `remote-dev-bot.yaml` to add, remove, or change model aliases. The default model is set by the `default_model` field.
 
-### Step 4.3: Adjust Iteration Limits
+### Step 5.3: Adjust Iteration Limits
 
 The `max_iterations` setting in `remote-dev-bot.yaml` controls how many steps the agent can take. Higher = more capable but more expensive. Default is 50. If using cheaper models that tend to loop, consider lowering to 30.
 
@@ -586,7 +586,7 @@ Also ensure your PAT token covers all repos involved — both the target repo an
 
 ### Agent fails during setup steps (first 2 minutes)
 - Check the run log — these are usually missing dependencies or config issues
-- See the error table in Step 3.4 above for common issues and fixes
+- See the error table in Step 4.4 above for common issues and fixes
 
 ### Agent runs but hits max iterations
 - The agent completed the work but couldn't gracefully stop
@@ -609,7 +609,7 @@ Also ensure your PAT token covers all repos involved — both the target repo an
 
 These are planned but not yet built. See GitHub issues for discussion.
 
-- [x] **LLM account setup**: Walk through creating accounts, getting API keys, setting spending limits for each provider (done — see Step 1.2 and Step 1.2.1)
+- [x] **LLM account setup**: Walk through creating accounts, getting API keys, setting spending limits for each provider (done — see Step 2.2 and Step 2.2.1)
 - [ ] **Cost reporting**: Extract cost data from agent runs and post as PR comments
 - [ ] **EC2 backend**: Run the agent on a dedicated EC2 instance instead of GitHub Actions (for longer runs, more resources, or cost optimization)
 - [x] **Reusable workflow**: Split into shim + reusable workflow so target repos auto-update (done)
