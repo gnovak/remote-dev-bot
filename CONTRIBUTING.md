@@ -75,24 +75,30 @@ Releases distribute two compiled workflows (`agent-resolve.yml` and `agent-desig
 
 1. **Ensure main is clean**: all PRs merged, CI green.
 
-2. **Run E2E tests against the compiled workflows**:
+2. **Run E2E tests against the shim-based workflow** (tests the reusable workflow on main):
+   ```bash
+   ./tests/e2e.sh --provider claude
+   ```
+
+3. **Run E2E tests against the compiled workflows** (tests the standalone install):
    ```bash
    ./tests/e2e.sh --compiled --provider claude
    ```
-   This compiles both workflows, swaps them into the test repo, and runs the full test suite.
 
-3. **Compile the release artifacts**:
+   Both must pass before proceeding.
+
+4. **Compile the release artifacts**:
    ```bash
    python3 scripts/compile.py dist/
    ```
 
-4. **Tag the release**:
+5. **Tag the release**:
    ```bash
    git tag -a vX.Y.Z -m "Release vX.Y.Z: summary of changes"
    git push origin vX.Y.Z
    ```
 
-5. **Create the GitHub release** with both compiled workflows:
+6. **Create the GitHub release** with both compiled workflows:
    ```bash
    gh release create vX.Y.Z dist/agent-resolve.yml dist/agent-design.yml \
      --title "vX.Y.Z" \
