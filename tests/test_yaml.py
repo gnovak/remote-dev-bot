@@ -47,6 +47,7 @@ def bot_config():
 def test_config_has_required_keys(bot_config):
     assert "default_model" in bot_config
     assert "models" in bot_config
+    assert "modes" in bot_config
     assert "openhands" in bot_config
 
 
@@ -55,6 +56,23 @@ def test_default_model_exists_in_models(bot_config):
     assert default in bot_config["models"], (
         f"default_model '{default}' not in models"
     )
+
+
+def test_modes_have_action(bot_config):
+    for name, mode in bot_config["modes"].items():
+        assert "action" in mode, f"Mode '{name}' missing 'action' field"
+        assert mode["action"] in ("pr", "comment"), (
+            f"Mode '{name}' has unknown action '{mode['action']}'"
+        )
+
+
+def test_mode_default_models_exist(bot_config):
+    models = bot_config["models"]
+    for name, mode in bot_config["modes"].items():
+        if "default_model" in mode:
+            assert mode["default_model"] in models, (
+                f"Mode '{name}' default_model '{mode['default_model']}' not in models"
+            )
 
 
 def test_every_model_has_id(bot_config):

@@ -1,8 +1,25 @@
 # Remote Dev Bot Configuration
-# Model aliases map short names to LiteLLM model identifiers.
-# Usage: comment "/agent-<alias>" on an issue (or just "/agent" for the default).
+# Usage: /agent-<mode>[-<model>]
+#   /agent-resolve             — resolve issue, open PR (default model)
+#   /agent-resolve-claude-large — resolve issue with specific model
+#   /agent-design              — design discussion, post comment
+#   /agent-design-claude-large  — design discussion with specific model
 
 default_model: claude-medium
+
+# Modes define what the agent does. Each mode has an action and optional defaults.
+modes:
+  resolve:
+    action: pr               # Run OpenHands, open a draft PR
+    default_model: claude-medium
+  design:
+    action: comment           # Post analysis as an issue comment (no code changes)
+    default_model: claude-medium
+    prompt_prefix: >
+      You are analyzing this issue for design discussion.
+      Do NOT write code or open a PR. Instead, provide thoughtful
+      analysis, surface trade-offs, suggest approaches, and ask
+      clarifying questions. Respond in a GitHub comment.
 
 models:
   claude-small:
