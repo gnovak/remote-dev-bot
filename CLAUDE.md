@@ -78,12 +78,16 @@ gh run view RUN_ID --repo gnovak/remote-dev-bot-test --log | tail -40
 
 ## Git Workflow Preferences
 
-### Restricted Git Commands
-Do NOT execute these git commands:
-- `git push`
-- `git merge`
+### Git Push/Merge Policy
 
-The user will run these commands themselves. You can suggest them or explain what needs to be done, but do not execute them.
+**Allowed freely:**
+- `git push` to any branch that isn't `main` (including `--force-with-lease` for rebased branches)
+- `git merge` between non-main branches
+
+**Restricted (ask the user first):**
+- Any push to `main` (`git push origin main`)
+- Merging into `main` (whether via `git merge` on main or `git push origin feature:main`)
+- `git push --force` (without `--with-lease`) to any branch — always use `--force-with-lease` instead
 
 ### Two Modes of Git Usage
 Git serves **two different purposes** depending on the phase of work:
