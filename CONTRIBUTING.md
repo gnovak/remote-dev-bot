@@ -64,26 +64,26 @@ See [CLAUDE.md](CLAUDE.md) for the full dev cycle documentation, including how t
 - Requires repos to be public and uses `TESTER_PAT_TOKEN`
 
 ### Compiled workflow tests
-- Unit tests (`tests/test_compile.py`): validate compiled output structure, triggers, permissions, model aliases, security microagent
-- E2E: `./tests/e2e.sh --compiled` swaps the compiled workflow into the test repo, runs the full suite against it, then restores the shim. Use this before releases.
+- Unit tests (`tests/test_compile.py`): validate both compiled files (resolve and design) — structure, triggers, permissions, model aliases, security microagent
+- E2E: `./tests/e2e.sh --compiled` swaps compiled workflows into the test repo, runs the full suite, then restores the shim. Use this before releases.
 
 ## Release Procedure
 
-Releases distribute the compiled single-file workflow (`agent.yml`) that users download into their repos.
+Releases distribute two compiled workflows (`agent-resolve.yml` and `agent-design.yml`) that users download into their repos.
 
 ### Steps
 
 1. **Ensure main is clean**: all PRs merged, CI green.
 
-2. **Run E2E tests against the compiled workflow**:
+2. **Run E2E tests against the compiled workflows**:
    ```bash
    ./tests/e2e.sh --compiled --provider claude
    ```
-   This compiles the workflow, swaps it into the test repo, and runs the full test suite. If it passes, the compiled output is behaviorally equivalent to the shim.
+   This compiles both workflows, swaps them into the test repo, and runs the full test suite.
 
-3. **Compile the release artifact**:
+3. **Compile the release artifacts**:
    ```bash
-   python3 scripts/compile.py dist/agent.yml
+   python3 scripts/compile.py dist/
    ```
 
 4. **Tag the release**:
@@ -92,17 +92,15 @@ Releases distribute the compiled single-file workflow (`agent.yml`) that users d
    git push origin vX.Y.Z
    ```
 
-5. **Create the GitHub release** with the compiled workflow as an attachment:
+5. **Create the GitHub release** with both compiled workflows:
    ```bash
-   gh release create vX.Y.Z dist/agent.yml \
+   gh release create vX.Y.Z dist/agent-resolve.yml dist/agent-design.yml \
      --title "vX.Y.Z" \
      --notes "Release notes here"
    ```
-   This makes the compiled workflow downloadable at:
-   `https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent.yml`
 
 ### What goes in a release
 
-- The compiled `agent.yml` is the only artifact. It's a self-contained workflow with all config, model aliases, and security guardrails inlined.
-- Users who installed via the compiled workflow get updates by downloading the new release. They are fully insulated from repo changes between releases.
+- Two compiled workflow files: `agent-resolve.yml` (issue resolution) and `agent-design.yml` (design analysis). Both are self-contained with inlined config, model aliases, and security guardrails.
+- Users who installed via compiled workflows get updates by downloading the new release.
 - Users who installed via the shim get updates automatically (the shim calls `resolve.yml@main`).
