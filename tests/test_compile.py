@@ -1,4 +1,4 @@
-"""Tests for scripts/compile.py — workflow compiler."""
+"""Tests for scripts/compile.py — two-file workflow compiler."""
 
 import os
 import tempfile
@@ -7,294 +7,193 @@ from pathlib import Path
 import pytest
 import yaml
 
+# Repo root
+WORKSPACE = Path(__file__).parent.parent
 
-def test_compile_produces_valid_yaml(tmp_path):
-    """Compiler should produce valid YAML output."""
-    # Import and run the compiler
+
+@pytest.fixture
+def compiled_dir(tmp_path):
+    """Compile both workflows into a temp directory."""
     import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from scripts.compile import compile_workflow
+    sys.path.insert(0, str(WORKSPACE))
+    from scripts.compile import compile_resolve, compile_design, load_yaml
 
-    workspace = Path(__file__).parent.parent
-    shim_path = workspace / "examples" / "agent.yml"
-    workflow_path = workspace / ".github" / "workflows" / "resolve.yml"
-    config_path = workspace / "remote-dev-bot.yaml"
-    output_path = tmp_path / "agent.yml"
+    shim = load_yaml(str(WORKSPACE / "examples" / "agent.yml"))
+    workflow = load_yaml(str(WORKSPACE / ".github" / "workflows" / "resolve.yml"))
+    config = load_yaml(str(WORKSPACE / "remote-dev-bot.yaml"))
 
-    # Compile
-    compile_workflow(str(shim_path), str(workflow_path), str(config_path), str(output_path))
+    compile_resolve(shim, workflow, config, str(tmp_path / "agent-resolve.yml"))
+    compile_design(shim, workflow, config, str(tmp_path / "agent-design.yml"))
 
-    # Verify output exists
-    assert output_path.exists()
+    return tmp_path
 
-    # Verify it's valid YAML
-    with open(output_path) as f:
+
+def _load_compiled(path):
+    """Load a compiled YAML file, fixing the 'on' key."""
+    with open(path) as f:
         data = yaml.safe_load(f)
+    if True in data and 'on' not in data:
+        data['on'] = data.pop(True)
+    return data
 
+
+def _read_text(path):
+    with open(path) as f:
+        return f.read()
+
+
+# --- Both files: valid YAML ---
+
+
+def test_resolve_produces_valid_yaml(compiled_dir):
+    data = _load_compiled(compiled_dir / "agent-resolve.yml")
     assert data is not None
     assert "name" in data
     assert "jobs" in data
 
 
-def test_compile_has_required_markers():
-    """Compiled workflow should have searchable configuration markers."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from scripts.compile import compile_workflow
-
-    workspace = Path(__file__).parent.parent
-    shim_path = workspace / "examples" / "agent.yml"
-    workflow_path = workspace / ".github" / "workflows" / "resolve.yml"
-    config_path = workspace / "remote-dev-bot.yaml"
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-        output_path = f.name
-
-    try:
-        # Compile
-        compile_workflow(str(shim_path), str(workflow_path), str(config_path), output_path)
-
-        # Read as text to check for markers
-        with open(output_path) as f:
-            content = f.read()
-
-        # Check for configuration markers
-        assert "MODEL_CONFIG" in content, "Missing MODEL_CONFIG marker"
-        assert "SECURITY_GATE" in content, "Missing SECURITY_GATE marker"
-        assert "MAX_ITERATIONS" in content, "Missing MAX_ITERATIONS marker"
-        assert "PR_STYLE" in content, "Missing PR_STYLE marker"
-        assert "PAT_TOKEN" in content, "Missing PAT_TOKEN documentation"
-
-    finally:
-        if os.path.exists(output_path):
-            os.unlink(output_path)
+def test_design_produces_valid_yaml(compiled_dir):
+    data = _load_compiled(compiled_dir / "agent-design.yml")
+    assert data is not None
+    assert "name" in data
+    assert "jobs" in data
 
 
-def test_compile_has_security_microagent():
-    """Compiled workflow should include security microagent content."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from scripts.compile import compile_workflow
-
-    workspace = Path(__file__).parent.parent
-    shim_path = workspace / "examples" / "agent.yml"
-    workflow_path = workspace / ".github" / "workflows" / "resolve.yml"
-    config_path = workspace / "remote-dev-bot.yaml"
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-        output_path = f.name
-
-    try:
-        # Compile
-        compile_workflow(str(shim_path), str(workflow_path), str(config_path), output_path)
-
-        # Read as text
-        with open(output_path) as f:
-            content = f.read()
-
-        # Check for security microagent
-        assert "Security Rules (injected by remote-dev-bot)" in content
-        assert "NEVER output, print, log, echo, or write environment variable values" in content
-        assert "remote-dev-bot-security.md" in content
-
-    finally:
-        if os.path.exists(output_path):
-            os.unlink(output_path)
+# --- Correct triggers ---
 
 
-def test_compile_no_cross_repo_checkout():
-    """Compiled workflow should not have cross-repo checkout steps."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from scripts.compile import compile_workflow
-
-    workspace = Path(__file__).parent.parent
-    shim_path = workspace / "examples" / "agent.yml"
-    workflow_path = workspace / ".github" / "workflows" / "resolve.yml"
-    config_path = workspace / "remote-dev-bot.yaml"
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-        output_path = f.name
-
-    try:
-        # Compile
-        compile_workflow(str(shim_path), str(workflow_path), str(config_path), output_path)
-
-        # Read as text
-        with open(output_path) as f:
-            content = f.read()
-
-        # Should NOT have cross-repo checkout
-        assert "gnovak/remote-dev-bot" not in content, "Should not checkout remote-dev-bot repo"
-        assert ".remote-dev-bot" not in content, "Should not reference .remote-dev-bot directory"
-
-    finally:
-        if os.path.exists(output_path):
-            os.unlink(output_path)
+def test_resolve_trigger(compiled_dir):
+    content = _read_text(compiled_dir / "agent-resolve.yml")
+    assert "startsWith(github.event.comment.body, '/agent-resolve')" in content
 
 
-def test_compile_has_correct_triggers():
-    """Compiled workflow should trigger on correct events."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from scripts.compile import compile_workflow
+def test_design_trigger(compiled_dir):
+    content = _read_text(compiled_dir / "agent-design.yml")
+    assert "startsWith(github.event.comment.body, '/agent-design')" in content
 
-    workspace = Path(__file__).parent.parent
-    shim_path = workspace / "examples" / "agent.yml"
-    workflow_path = workspace / ".github" / "workflows" / "resolve.yml"
-    config_path = workspace / "remote-dev-bot.yaml"
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-        output_path = f.name
-
-    try:
-        # Compile
-        compile_workflow(str(shim_path), str(workflow_path), str(config_path), output_path)
-
-        # Parse YAML
-        with open(output_path) as f:
-            content = f.read()
-            # Handle 'on' being parsed as True
-            data = yaml.safe_load(content)
-            if True in data and 'on' not in data:
-                data['on'] = data.pop(True)
-
-        # Check triggers
-        assert 'on' in data
+def test_both_have_correct_event_triggers(compiled_dir):
+    for fname in ["agent-resolve.yml", "agent-design.yml"]:
+        data = _load_compiled(compiled_dir / fname)
         triggers = data['on']
         assert 'issue_comment' in triggers
         assert 'pull_request_review_comment' in triggers
         assert triggers['issue_comment']['types'] == ['created']
         assert triggers['pull_request_review_comment']['types'] == ['created']
 
-    finally:
-        if os.path.exists(output_path):
-            os.unlink(output_path)
+
+# --- Permissions ---
 
 
-def test_compile_has_permissions():
-    """Compiled workflow should have correct permissions."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from scripts.compile import compile_workflow
-
-    workspace = Path(__file__).parent.parent
-    shim_path = workspace / "examples" / "agent.yml"
-    workflow_path = workspace / ".github" / "workflows" / "resolve.yml"
-    config_path = workspace / "remote-dev-bot.yaml"
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-        output_path = f.name
-
-    try:
-        # Compile
-        compile_workflow(str(shim_path), str(workflow_path), str(config_path), output_path)
-
-        # Parse YAML
-        with open(output_path) as f:
-            data = yaml.safe_load(f)
-
-        # Check permissions
-        assert 'permissions' in data
+def test_both_have_correct_permissions(compiled_dir):
+    for fname in ["agent-resolve.yml", "agent-design.yml"]:
+        data = _load_compiled(compiled_dir / fname)
         perms = data['permissions']
         assert perms['contents'] == 'write'
         assert perms['issues'] == 'write'
         assert perms['pull-requests'] == 'write'
 
-    finally:
-        if os.path.exists(output_path):
-            os.unlink(output_path)
+
+# --- Resolve-specific ---
 
 
-def test_compile_inlines_model_aliases():
-    """Compiled workflow should inline all model aliases."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from scripts.compile import compile_workflow
+def test_resolve_has_security_microagent(compiled_dir):
+    content = _read_text(compiled_dir / "agent-resolve.yml")
+    assert "Security Rules (injected by remote-dev-bot)" in content
+    assert "NEVER output, print, log, echo, or write environment variable values" in content
+    assert "remote-dev-bot-security.md" in content
 
-    workspace = Path(__file__).parent.parent
-    shim_path = workspace / "examples" / "agent.yml"
-    workflow_path = workspace / ".github" / "workflows" / "resolve.yml"
-    config_path = workspace / "remote-dev-bot.yaml"
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-        output_path = f.name
+def test_resolve_has_openhands_steps(compiled_dir):
+    content = _read_text(compiled_dir / "agent-resolve.yml")
+    assert "Install OpenHands" in content
+    assert "Resolve issue" in content
+    assert "Create pull request" in content
+    assert "openhands.resolver" in content
 
-    try:
-        # Compile
-        compile_workflow(str(shim_path), str(workflow_path), str(config_path), output_path)
 
-        # Read as text
-        with open(output_path) as f:
-            content = f.read()
+# --- Design-specific ---
 
-        # Check that model aliases are present
+
+def test_design_has_no_openhands_steps(compiled_dir):
+    """Design mode should not install or run OpenHands."""
+    content = _read_text(compiled_dir / "agent-design.yml")
+    assert "Install OpenHands" not in content
+    assert "openhands.resolver" not in content
+    assert "Resolve issue" not in content
+    assert "Create pull request" not in content
+
+
+def test_design_has_litellm(compiled_dir):
+    content = _read_text(compiled_dir / "agent-design.yml")
+    assert "litellm" in content
+
+
+def test_design_has_llm_and_comment_steps(compiled_dir):
+    content = _read_text(compiled_dir / "agent-design.yml")
+    assert "Call LLM for design analysis" in content
+    assert "Post comment" in content
+    assert "Gather issue context" in content
+
+
+# --- Both: model aliases ---
+
+
+def test_both_inline_model_aliases(compiled_dir):
+    for fname in ["agent-resolve.yml", "agent-design.yml"]:
+        content = _read_text(compiled_dir / fname)
         assert "claude-small" in content
         assert "claude-medium" in content
         assert "claude-large" in content
         assert "openai-small" in content
         assert "gemini-medium" in content
-
-        # Check that model IDs are present
         assert "anthropic/claude-sonnet-4-5" in content
         assert "openai/gpt-5-nano" in content
         assert "gemini/gemini-2.5-flash" in content
 
-    finally:
-        if os.path.exists(output_path):
-            os.unlink(output_path)
+
+# --- Both: github.token fallback ---
+
+
+def test_both_use_github_token_fallback(compiled_dir):
+    for fname in ["agent-resolve.yml", "agent-design.yml"]:
+        content = _read_text(compiled_dir / fname)
+        assert "secrets.PAT_TOKEN || github.token" in content
+
+
+# --- Both: no cross-repo checkout ---
+
+
+def test_no_cross_repo_checkout(compiled_dir):
+    for fname in ["agent-resolve.yml", "agent-design.yml"]:
+        content = _read_text(compiled_dir / fname)
+        assert "gnovak/remote-dev-bot" not in content, \
+            f"{fname} should not checkout remote-dev-bot repo"
+        assert ".remote-dev-bot" not in content, \
+            f"{fname} should not reference .remote-dev-bot directory"
+
+
+# --- Both: configuration markers ---
+
+
+def test_both_have_required_markers(compiled_dir):
+    for fname in ["agent-resolve.yml", "agent-design.yml"]:
+        content = _read_text(compiled_dir / fname)
+        assert "MODEL_CONFIG" in content, f"{fname} missing MODEL_CONFIG marker"
+        assert "SECURITY_GATE" in content, f"{fname} missing SECURITY_GATE marker"
+        assert "MAX_ITERATIONS" in content, f"{fname} missing MAX_ITERATIONS marker"
+        assert "PR_STYLE" in content, f"{fname} missing PR_STYLE marker"
+        assert "PAT_TOKEN" in content, f"{fname} missing PAT_TOKEN documentation"
+
+
+# --- Error handling ---
 
 
 def test_compile_missing_source_file():
-    """Compiler should exit with error if source file is missing."""
     import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from scripts.compile import compile_workflow
+    sys.path.insert(0, str(WORKSPACE))
+    from scripts.compile import load_yaml
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-        output_path = f.name
-
-    try:
-        # Try to compile with missing file
-        with pytest.raises(SystemExit) as exc_info:
-            compile_workflow(
-                "nonexistent.yml",
-                "nonexistent2.yml",
-                "nonexistent3.yaml",
-                output_path
-            )
-        assert exc_info.value.code != 0
-
-    finally:
-        if os.path.exists(output_path):
-            os.unlink(output_path)
-
-
-def test_compile_uses_github_token_fallback():
-    """Compiled workflow should use github.token as fallback."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from scripts.compile import compile_workflow
-
-    workspace = Path(__file__).parent.parent
-    shim_path = workspace / "examples" / "agent.yml"
-    workflow_path = workspace / ".github" / "workflows" / "resolve.yml"
-    config_path = workspace / "remote-dev-bot.yaml"
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-        output_path = f.name
-
-    try:
-        # Compile
-        compile_workflow(str(shim_path), str(workflow_path), str(config_path), output_path)
-
-        # Read as text
-        with open(output_path) as f:
-            content = f.read()
-
-        # Check for PAT_TOKEN || github.token pattern
-        assert "secrets.PAT_TOKEN || github.token" in content
-
-    finally:
-        if os.path.exists(output_path):
-            os.unlink(output_path)
+    with pytest.raises(SystemExit) as exc_info:
+        load_yaml("nonexistent.yml")
+    assert exc_info.value.code != 0

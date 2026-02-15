@@ -12,7 +12,7 @@
 #   --test        Run a specific test only (default: all)
 #   --provider    Run only tests for a specific provider (claude/openai/gemini)
 #   --all-models  Test every model alias, not just one per provider
-#   --compiled    Test compiled workflow instead of shim (pre-release validation)
+#   --compiled    Test compiled workflows instead of shim (pre-release validation)
 
 set -euo pipefail
 
@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
         --all-models) ALL_MODELS=true; shift ;;
         --compiled) USE_COMPILED=true; shift ;;
         -h|--help)
-            head -16 "$0" | tail -12
+            head -17 "$0" | tail -13
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -45,21 +45,22 @@ done
 
 # --- Test case definitions ---
 # Parallel arrays — index i corresponds to the same test across all arrays.
+# test_type: "resolve" expects a PR, "design" expects a comment
 
 all_names=()
 all_titles=()
 all_bodies=()
 all_cmds=()
 all_providers=()
+all_types=()
 
 add_test() {
     all_names+=("$1"); all_titles+=("$2"); all_bodies+=("$3")
-    all_cmds+=("$4"); all_providers+=("$5")
+    all_cmds+=("$4"); all_providers+=("$5"); all_types+=("${6:-resolve}")
 }
 
 if $ALL_MODELS; then
     # Generate a test for every model alias in the config file.
-    # Requires PyYAML (pip install PyYAML).
     config_file="remote-dev-bot.yaml"
     if [[ ! -f "$config_file" ]]; then
         echo "ERROR: $config_file not found. Run from repo root." >&2
@@ -68,11 +69,10 @@ if $ALL_MODELS; then
 
     # Read all model aliases and their provider prefixes from the config
     while IFS='|' read -r alias provider; do
-        # Sanitize alias for use in filenames: claude-small -> claude_small
         safe_alias="${alias//-/_}"
         add_test "$alias" "Test ($alias): add hello_${safe_alias}.py" \
             "Create a file hello_${safe_alias}.py with a function hello() that returns 'Hello from ${alias}!'" \
-            "/agent-$alias" "$provider"
+            "/agent-resolve-$alias" "$provider" "resolve"
     done < <(python3 -c "
 import yaml, sys
 with open('$config_file') as f:
@@ -83,27 +83,32 @@ for alias, info in config.get('models', {}).items():
     print(f'{alias}|{provider}')
 ")
 
-    # Also add the default-model test (uses /agent with no alias)
+    # Default model test (resolve mode, no alias)
     add_test "default-model" "Test (default): add hello_default.py" \
         "Create a file hello_default.py with a function hello() that returns 'Hello from default!'" \
-        "/agent" "all"
+        "/agent-resolve" "all" "resolve"
 else
-    # Smoke tests: one small model per provider + default alias
+    # Smoke tests: one small model per provider + default
     add_test "default-model" "Test: add hello.py" \
         "Create a file hello.py with a function hello() that returns 'Hello, world!'" \
-        "/agent" "all"
+        "/agent-resolve" "all" "resolve"
 
     add_test "claude" "Test: add greet.py" \
         "Create a file greet.py with a function greet(name) that returns f'Hello, {name}!'" \
-        "/agent-claude-small" "claude"
+        "/agent-resolve-claude-small" "claude" "resolve"
 
     add_test "openai" "Test: add wave.py" \
         "Create a file wave.py with a function wave() that returns 'Wave!'" \
-        "/agent-openai-small" "openai"
+        "/agent-resolve-openai-small" "openai" "resolve"
 
     add_test "gemini" "Test: add hi.py" \
         "Create a file hi.py with a function hi() that returns 'Hi!'" \
-        "/agent-gemini-small" "gemini"
+        "/agent-resolve-gemini-small" "gemini" "resolve"
+
+    # Design mode smoke test
+    add_test "design" "Test: design analysis" \
+        "Discuss whether this test repo should have a README. What would you include?" \
+        "/agent-design" "all" "design"
 fi
 
 # --- Helpers ---
@@ -116,15 +121,16 @@ cleanup_branches=()
 
 # --- Compiled workflow swap ---
 # When --compiled is used, we replace the shim (agent.yml) in the test repo
-# with the compiled workflow, run the full test suite against it, then restore
-# the original shim. This validates the compiled output before release.
+# with agent-resolve.yml, add agent-design.yml, run the full test suite, then
+# restore the original shim and remove agent-design.yml.
 
 ORIGINAL_SHIM_CONTENT=""  # base64-encoded original shim
 ORIGINAL_SHIM_SHA=""      # SHA for restoring
+DESIGN_WORKFLOW_SHA=""     # SHA for removing agent-design.yml on cleanup
 
 install_compiled_workflow() {
-    log "Compiling single-file workflow..."
-    python3 scripts/compile.py /tmp/compiled-agent.yml
+    log "Compiling workflows..."
+    python3 scripts/compile.py /tmp/compiled-workflows
 
     log "Saving original shim from $TEST_REPO..."
     local shim_response
@@ -132,17 +138,40 @@ install_compiled_workflow() {
     ORIGINAL_SHIM_CONTENT=$(echo "$shim_response" | jq -r '.content' | tr -d '\n')
     ORIGINAL_SHIM_SHA=$(echo "$shim_response" | jq -r '.sha')
 
-    log "Replacing shim with compiled workflow..."
-    local compiled_content
-    compiled_content=$(base64 < /tmp/compiled-agent.yml | tr -d '\n')
+    log "Replacing shim with compiled resolve workflow..."
+    local resolve_content
+    resolve_content=$(base64 < /tmp/compiled-workflows/agent-resolve.yml | tr -d '\n')
 
     gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
         --method PUT \
-        -f message="E2E: swap shim for compiled workflow (pre-release test)" \
-        -f content="$compiled_content" \
+        -f message="E2E: swap shim for compiled resolve workflow (pre-release test)" \
+        -f content="$resolve_content" \
         -f sha="$ORIGINAL_SHIM_SHA" >/dev/null
 
-    log "Compiled workflow installed. Waiting 10s for GitHub to register..."
+    log "Adding compiled design workflow..."
+    local design_content
+    design_content=$(base64 < /tmp/compiled-workflows/agent-design.yml | tr -d '\n')
+
+    local design_response
+    design_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
+        --method PUT \
+        -f message="E2E: add compiled design workflow (pre-release test)" \
+        -f content="$design_content" 2>&1) || {
+        # File may already exist; get its SHA and update
+        local existing_sha
+        existing_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
+            --jq '.sha' 2>/dev/null || echo "")
+        if [[ -n "$existing_sha" ]]; then
+            design_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
+                --method PUT \
+                -f message="E2E: update compiled design workflow (pre-release test)" \
+                -f content="$design_content" \
+                -f sha="$existing_sha")
+        fi
+    }
+    DESIGN_WORKFLOW_SHA=$(echo "$design_response" | jq -r '.content.sha' 2>/dev/null || echo "")
+
+    log "Compiled workflows installed. Waiting 10s for GitHub to register..."
     sleep 10
 }
 
@@ -169,6 +198,18 @@ restore_shim() {
             err "Original content saved in ORIGINAL_SHIM_CONTENT variable"
         }
     log "  Original shim restored."
+
+    # Remove agent-design.yml if we added it
+    local design_sha
+    design_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
+        --jq '.sha' 2>/dev/null || echo "")
+    if [[ -n "$design_sha" ]]; then
+        gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
+            -X DELETE \
+            -f message="E2E: remove compiled design workflow after pre-release test" \
+            -f sha="$design_sha" >/dev/null 2>&1 || true
+        log "  Compiled design workflow removed."
+    fi
 }
 
 cleanup() {
@@ -211,7 +252,7 @@ fi
 mode="smoke"
 $ALL_MODELS && mode="all-models"
 if $USE_COMPILED; then
-    log "COMPILED MODE: testing compiled workflow (pre-release validation)"
+    log "COMPILED MODE: testing compiled workflows (pre-release validation)"
 fi
 log "Running ${#active_indices[@]} test(s) against branch '$BRANCH' ($mode)"
 
@@ -275,9 +316,8 @@ elapsed=0
 while [[ $elapsed -lt $TIMEOUT ]]; do
     all_done=true
 
-    # Get recent workflow runs once per poll cycle
+    # Get recent workflow runs once per poll cycle — check all workflow files
     run_json=$(gh run list --repo "$TEST_REPO" \
-        --workflow=agent.yml \
         --limit 50 \
         --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
 
@@ -299,6 +339,11 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
             status=$(echo "$row" | jq -r '.status')
             conclusion=$(echo "$row" | jq -r '.conclusion')
             run_id=$(echo "$row" | jq -r '.databaseId')
+
+            # Skip runs that were skipped (e.g., bot's own comment re-triggered the shim)
+            if [[ "$conclusion" == "skipped" ]]; then
+                continue
+            fi
 
             # Match: run title contains our timestamp AND our test's title prefix
             if [[ "$display_title" == *"$match_str"* && "$display_title" == *"$title"* ]]; then
@@ -346,26 +391,37 @@ timeout_count=0
 for pos in "${!issue_nums[@]}"; do
     idx="${active_indices[$pos]}"
     name="${all_names[$idx]}"
+    test_type="${all_types[$idx]}"
     issue_num="${issue_nums[$pos]}"
     conclusion="${test_results[$pos]:-timeout}"
     run_id="${test_run_ids[$pos]}"
 
     if [[ "$conclusion" == "success" ]]; then
-        # Check if a PR was created (OpenHands branch pattern: openhands-fix-issue-N)
-        pr_count=$(gh pr list --repo "$TEST_REPO" \
-            --search "head:openhands-fix-issue-$issue_num" \
-            --json number --jq 'length' 2>/dev/null || echo "0")
-
-        if [[ "$pr_count" -gt 0 ]]; then
-            status="PASS"
+        if [[ "$test_type" == "design" ]]; then
+            # Design mode: check if a comment was posted (not a PR)
+            comment_count=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
+                --jq '[.[] | select(.body | contains("Design analysis"))] | length' \
+                2>/dev/null || echo "0")
+            if [[ "$comment_count" -gt 0 ]]; then
+                status="PASS (comment posted)"
+            else
+                status="PASS (no comment found)"
+            fi
             ((pass++)) || true
-            cleanup_branches+=("openhands-fix-issue-$issue_num")
         else
-            # Workflow succeeded but no PR — agent ran but didn't produce a PR.
-            # This is still a "pass" for the workflow itself (config parsing,
-            # agent invocation all worked). The agent just didn't solve the issue.
-            status="PASS (no PR)"
-            ((pass++)) || true
+            # Resolve mode: check if a PR was created
+            pr_count=$(gh pr list --repo "$TEST_REPO" \
+                --search "head:openhands-fix-issue-$issue_num" \
+                --json number --jq 'length' 2>/dev/null || echo "0")
+
+            if [[ "$pr_count" -gt 0 ]]; then
+                status="PASS"
+                ((pass++)) || true
+                cleanup_branches+=("openhands-fix-issue-$issue_num")
+            else
+                status="PASS (no PR)"
+                ((pass++)) || true
+            fi
         fi
     elif [[ "$conclusion" == "timeout" ]]; then
         status="TIMEOUT"
