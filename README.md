@@ -119,6 +119,8 @@ Dashboard, billing, and API key management links for each supported provider.
 
 ## Current Status
 
-**v0.2.0** — Shim + reusable workflow (Feb 11, 2026). Refactored into a thin shim (`agent.yml`) per target repo that calls a shared reusable workflow (`resolve.yml`). Cross-repo support tested with separate test repo. Dev cycle infrastructure in place.
+**v0.3.0** — Mode-based commands + compiled workflows (Feb 15, 2026). Two command modes: `/agent-resolve` (opens PR) and `/agent-design` (posts analysis comment). Multi-provider support (Claude, GPT, Gemini). Two-file compiled install. Security guardrails and config layering. See [CHANGELOG.md](CHANGELOG.md) for details.
+
+**v0.2.0** — Shim + reusable workflow (Feb 11, 2026). Refactored into a thin shim per target repo that calls a shared reusable workflow. Cross-repo support tested with separate test repo.
 
 **v0.1.0** — First working version (Feb 9, 2026). End-to-end pipeline operational: `/agent` comment on an issue triggers OpenHands, which resolves the issue and opens a draft PR.
