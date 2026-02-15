@@ -6,12 +6,13 @@
 #
 # Usage:
 #   ./tests/e2e.sh [--branch <branch>] [--test <name>] [--provider <name>]
-#                  [--all-models]
+#                  [--all-models] [--compiled]
 #
 #   --branch      Branch to test (default: main). Sets dev pointer to this branch.
 #   --test        Run a specific test only (default: all)
 #   --provider    Run only tests for a specific provider (claude/openai/gemini)
 #   --all-models  Test every model alias, not just one per provider
+#   --compiled    Test compiled workflow instead of shim (pre-release validation)
 
 set -euo pipefail
 
@@ -25,6 +26,7 @@ BRANCH="main"
 FILTER_TEST=""
 FILTER_PROVIDER=""
 ALL_MODELS=false
+USE_COMPILED=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -32,8 +34,9 @@ while [[ $# -gt 0 ]]; do
         --test) FILTER_TEST="$2"; shift 2 ;;
         --provider) FILTER_PROVIDER="$2"; shift 2 ;;
         --all-models) ALL_MODELS=true; shift ;;
+        --compiled) USE_COMPILED=true; shift ;;
         -h|--help)
-            head -14 "$0" | tail -10
+            head -16 "$0" | tail -12
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -111,6 +114,63 @@ err() { echo "ERROR: $*" >&2; }
 cleanup_issues=()
 cleanup_branches=()
 
+# --- Compiled workflow swap ---
+# When --compiled is used, we replace the shim (agent.yml) in the test repo
+# with the compiled workflow, run the full test suite against it, then restore
+# the original shim. This validates the compiled output before release.
+
+ORIGINAL_SHIM_CONTENT=""  # base64-encoded original shim
+ORIGINAL_SHIM_SHA=""      # SHA for restoring
+
+install_compiled_workflow() {
+    log "Compiling single-file workflow..."
+    python3 scripts/compile.py /tmp/compiled-agent.yml
+
+    log "Saving original shim from $TEST_REPO..."
+    local shim_response
+    shim_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml")
+    ORIGINAL_SHIM_CONTENT=$(echo "$shim_response" | jq -r '.content' | tr -d '\n')
+    ORIGINAL_SHIM_SHA=$(echo "$shim_response" | jq -r '.sha')
+
+    log "Replacing shim with compiled workflow..."
+    local compiled_content
+    compiled_content=$(base64 < /tmp/compiled-agent.yml | tr -d '\n')
+
+    gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
+        --method PUT \
+        -f message="E2E: swap shim for compiled workflow (pre-release test)" \
+        -f content="$compiled_content" \
+        -f sha="$ORIGINAL_SHIM_SHA" >/dev/null
+
+    log "Compiled workflow installed. Waiting 10s for GitHub to register..."
+    sleep 10
+}
+
+restore_shim() {
+    if [[ -z "$ORIGINAL_SHIM_CONTENT" ]]; then return; fi
+    log "Restoring original shim in $TEST_REPO..."
+
+    # Get current SHA (it changed when we installed compiled)
+    local current_sha
+    current_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
+        --jq '.sha' 2>/dev/null || echo "")
+
+    if [[ -z "$current_sha" ]]; then
+        err "Could not find agent.yml to restore — manual fix needed!"
+        return
+    fi
+
+    gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
+        --method PUT \
+        -f message="E2E: restore original shim after pre-release test" \
+        -f content="$ORIGINAL_SHIM_CONTENT" \
+        -f sha="$current_sha" >/dev/null 2>&1 || {
+            err "Failed to restore shim — manual fix needed!"
+            err "Original content saved in ORIGINAL_SHIM_CONTENT variable"
+        }
+    log "  Original shim restored."
+}
+
 cleanup() {
     log "Cleaning up..."
     for issue_num in "${cleanup_issues[@]+"${cleanup_issues[@]}"}"; do
@@ -119,6 +179,9 @@ cleanup() {
     for branch in "${cleanup_branches[@]+"${cleanup_branches[@]}"}"; do
         gh api "repos/$TEST_REPO/git/refs/heads/$branch" -X DELETE 2>/dev/null || true
     done
+    if $USE_COMPILED; then
+        restore_shim
+    fi
     log "Cleanup complete."
 }
 
@@ -147,7 +210,16 @@ fi
 
 mode="smoke"
 $ALL_MODELS && mode="all-models"
+if $USE_COMPILED; then
+    log "COMPILED MODE: testing compiled workflow (pre-release validation)"
+fi
 log "Running ${#active_indices[@]} test(s) against branch '$BRANCH' ($mode)"
+
+# --- Install compiled workflow if requested ---
+
+if $USE_COMPILED; then
+    install_compiled_workflow
+fi
 
 # --- Point dev at target branch ---
 
@@ -260,7 +332,11 @@ done
 
 log ""
 log "========================================="
-log "  E2E Test Results"
+if $USE_COMPILED; then
+    log "  E2E Test Results (COMPILED)"
+else
+    log "  E2E Test Results"
+fi
 log "========================================="
 
 pass=0

@@ -308,93 +308,28 @@ gh secret list --repo {owner}/{repo}
 # Should list the secrets you just set (values are hidden)
 ```
 
-### Step 1.4: Create a Personal Access Token (PAT)
+### Step 1.4: Create a Personal Access Token (PAT) — Optional
 
-#### Why a PAT is Needed
+> **You can skip this step.** The compiled single-file workflow (Step 2.1) works without a PAT. The only thing you lose is automatic CI triggering: when the bot creates a PR, your CI checks won't run automatically. You can always trigger them manually, or come back and add a PAT later.
 
-GitHub Actions workflows automatically get a `GITHUB_TOKEN`, but it has limitations that prevent the bot from working reliably:
+<details>
+<summary><strong>Click to expand PAT setup instructions</strong> (needed only if you want bot PRs to auto-trigger CI)</summary>
 
-1. **Cross-repository access:** The default token only has access to the repository where the workflow runs. Remote Dev Bot needs to access both your target repo AND the `gnovak/remote-dev-bot` repo (to fetch configuration). The default token can't do this.
+#### Why a PAT Helps
 
-2. **Workflow trigger restrictions:** When the default `GITHUB_TOKEN` creates a commit or PR, it won't trigger other workflows (like CI checks). This is a security feature to prevent infinite loops, but it means PRs created by the bot won't run your test suite automatically.
+GitHub's default `GITHUB_TOKEN` can push branches and create PRs, but PRs it creates won't trigger other workflows (like CI checks). This is a GitHub security feature to prevent infinite loops. A PAT bypasses this limitation.
 
-3. **Fork limitations:** In fork-based workflows, the default token has even more restricted permissions.
-
-A Personal Access Token (PAT) bypasses these limitations by authenticating as you (the user) rather than as the workflow itself.
-
-#### Fine-Grained vs Classic Tokens
-
-GitHub offers two types of PATs:
-
-| Aspect | Fine-Grained | Classic |
-|--------|--------------|---------|
-| Repository scope | Can limit to specific repos | All repos or public-only |
-| Permission granularity | Individual permissions (Contents, Issues, etc.) | Broad scopes (repo, workflow) |
-| Expiration | Required (max 1 year) or no expiration | Optional |
-| Audit visibility | Better audit logs | Basic audit logs |
-| Organization support | Full support | Full support |
-
-**We recommend fine-grained tokens** because:
-- You can scope them to only the repositories the bot needs
-- You grant only the specific permissions required (not broad "repo" access)
-- If compromised, the blast radius is limited to those specific repos and permissions
-
-Classic tokens are simpler to set up but grant broader access than necessary. Use them only if fine-grained tokens don't work for your organization's setup.
-
-#### One PAT Per Repo vs Shared PAT
-
-You have two options for managing PATs across multiple repositories:
-
-**Option A: One PAT per repo (more secure)**
-- Create a separate fine-grained PAT for each target repository
-- Each PAT is scoped to only that repo (plus `gnovak/remote-dev-bot` for config)
-- If one token is compromised, only that repo is affected
-- More tokens to manage and rotate
-
-**Option B: Shared PAT across repos (more convenient)**
-- Create one fine-grained PAT with access to all your target repositories
-- Easier to manage — one token to rotate
-- If compromised, all repos using it are affected
-- Good for repos with similar trust levels (e.g., all personal projects)
-
-**Our recommendation:** Start with one PAT per repo for maximum security. If managing multiple tokens becomes burdensome, consolidate to a shared PAT for repos with similar trust levels.
-
-#### Expiration Policy
-
-Fine-grained tokens can be set to expire or have no expiration:
-
-- **No expiration:** Convenient — set it and forget it. Acceptable for fine-grained tokens because they're already scoped to specific repos and permissions. The risk is limited.
-- **90 days:** More conservative. Set a calendar reminder to rotate before expiration. Good practice for shared tokens or high-value repos.
-- **Custom (up to 1 year):** Balance between convenience and security hygiene.
-
-**Our recommendation:** No expiration is fine for a fine-grained token scoped to one repo. Use 90-day expiration for shared tokens or if your organization requires regular rotation.
-
-#### Required Permissions
-
-The bot needs these four permissions (all Read and write):
-
-| Permission | Why Needed |
-|------------|------------|
-| **Contents** | Push branches with the agent's code changes |
-| **Issues** | Read issue descriptions, post status comments |
-| **Pull requests** | Create draft PRs, read PR comments for feedback |
-| **Workflows** | Trigger workflow runs (e.g., CI on the created PR) |
-
-Metadata (Read-only) is added automatically — that's expected.
-
-> **Already have a PAT?** If you already have a PAT scoped to "All repositories" (or one that includes both your target repo and `gnovak/remote-dev-bot`), you can reuse it. Skip the token creation steps below and go straight to storing it as a secret: `gh secret set PAT_TOKEN --repo {owner}/{repo}`.
+With the single-file install, the PAT only needs access to your own repo — no cross-repo scoping required.
 
 #### Instructions
 
 1. Go to https://github.com/settings/tokens?type=beta (Fine-grained tokens)
 2. Click "Generate new token"
-3. **Token name:** Something like "remote-dev-bot-myrepo" (include the repo name if using one PAT per repo)
-4. **Expiration:** No expiration (for single-repo tokens) or 90 days (for shared tokens — set a calendar reminder)
-5. **Resource owner:** Your GitHub account (or organization if applicable)
-6. **Repository access:**
-   - For one PAT per repo: Select "Only select repositories" and choose your target repo plus `gnovak/remote-dev-bot`
-   - For shared PAT: Select "All repositories" or select all your target repos plus `gnovak/remote-dev-bot`
-7. **Permissions** — under "Repository permissions", set these four to **Read and write**:
+3. **Token name:** "remote-dev-bot" (or "remote-dev-bot-myrepo" for per-repo tokens)
+4. **Expiration:** No expiration is fine for a token scoped to one repo
+5. **Resource owner:** Your GitHub account
+6. **Repository access:** Select "Only select repositories" and choose your target repo
+7. **Permissions** — under "Repository permissions", set these to **Read and write**:
    - Contents
    - Issues
    - Pull requests
@@ -402,71 +337,62 @@ Metadata (Read-only) is added automatically — that's expected.
 8. Click "Generate token"
 9. **Copy the token immediately** — you won't be able to see it again
 
-Now store the token as a repository secret:
+Store the token as a repository secret:
 
-**Via web interface:**
-1. Go to `https://github.com/{owner}/{repo}/settings/secrets/actions`
-2. Click "New repository secret"
-3. Name: `PAT_TOKEN`
-4. Secret: Paste the token you just copied
-5. Click "Add secret"
-
-**Via command line:**
 ```bash
-# Store it as a repo secret (run this yourself, not through an AI shell):
 gh secret set PAT_TOKEN --repo {owner}/{repo}
 # Paste the token when prompted, then press Enter
 ```
 
-**Verify:**
+> **Already have a PAT?** If you have an existing PAT scoped to "All repositories", just set it as a secret: `gh secret set PAT_TOKEN --repo {owner}/{repo}`.
 
-*Via web:* Go to `https://github.com/{owner}/{repo}/settings/secrets/actions` — you should see `PAT_TOKEN` alongside your API key(s).
-
-*Via command line:*
-```bash
-gh secret list --repo {owner}/{repo}
-# Should now show PAT_TOKEN alongside your API key(s)
-```
-
-#### Security Summary
-
-| Choice | Security | Convenience |
-|--------|----------|-------------|
-| Fine-grained + one per repo + no expiration | ★★★★☆ | ★★★☆☆ |
-| Fine-grained + shared + 90-day expiration | ★★★☆☆ | ★★★★☆ |
-| Fine-grained + shared + no expiration | ★★☆☆☆ | ★★★★★ |
-| Classic token | ★☆☆☆☆ | ★★★★★ |
-
-The default recommendation (fine-grained, one per repo, no expiration) balances security and convenience for most users.
+</details>
 
 ---
 
 ## Phase 2: Install the Workflow
 
-### Architecture
+### Step 2.1: Download the Workflow File
 
-Remote Dev Bot uses a **shim + reusable workflow** pattern:
-
-- **Reusable workflow** (`resolve.yml`) — lives in `gnovak/remote-dev-bot`. Contains all the logic: model parsing, OpenHands install, issue resolution, PR creation. You never need to copy or update this.
-- **Shim** (`agent.yml`) — a tiny file you add to each target repo. It triggers on `/agent` comments and calls the reusable workflow. Updates to `remote-dev-bot` flow to all repos automatically.
-
-**Using your own fork:** If you want full control over the reusable workflow (recommended for organizations), fork `gnovak/remote-dev-bot` and point the shim at your fork instead. Replace `gnovak/remote-dev-bot` with your fork's `{owner}/{repo}` everywhere in this runbook — in the shim's `uses:` line, and in the `resolve.yml` config checkout step. You'll also need to set the Actions access level on your fork (see Troubleshooting: Cross-repo reusable workflow access).
-
-### Step 2.1: Add the Shim Workflow
-
-**What this does:** Adds a small workflow file to your target repo that calls the reusable workflow from `gnovak/remote-dev-bot`.
+**What this does:** Adds a self-contained workflow file to your repository. This single file includes everything the bot needs — model configuration, config parsing, security guardrails, and the agent runner.
 
 ```bash
 # From within the target repo:
 mkdir -p .github/workflows
-# Copy the example shim (or create it manually — it's ~25 lines)
 curl -o .github/workflows/agent.yml \
-  https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/examples/agent.yml
+  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent.yml
 ```
 
-> **Note:** The `curl` command above only works when `gnovak/remote-dev-bot` is a public repository. If you're testing with a private copy, create the file manually using the YAML below instead.
+The file is self-contained and configurable. Search for these markers to customize:
+- `MODEL_CONFIG` — change the default model or available aliases
+- `MAX_ITERATIONS` — adjust how many steps the agent can take
+- `PR_STYLE` — switch between draft and ready PRs
+- `SECURITY_GATE` — change who can trigger the agent
 
-Or manually create `.github/workflows/agent.yml` with:
+### Step 2.2: Push and Verify
+
+```bash
+git add .github/workflows/agent.yml
+git commit -m "Add remote dev bot workflow"
+git push
+```
+
+> **New empty repo?** If your repository has no commits yet, you'll need to set the branch name before pushing: `git branch -M main` before `git push -u origin main`.
+
+**Verify the workflow is recognized:**
+
+*Via web:* Go to `https://github.com/{owner}/{repo}/actions` — you should see "Remote Dev Bot" listed in the left sidebar under "All workflows".
+
+*Via command line:*
+```bash
+gh workflow list --repo {owner}/{repo}
+# Should show "Remote Dev Bot"
+```
+
+<details>
+<summary><strong>Alternative: Shim install (auto-updating)</strong></summary>
+
+Instead of the self-contained file, you can use a thin shim that calls the reusable workflow from `gnovak/remote-dev-bot`. This means you automatically get updates when the bot is improved, but requires a PAT with cross-repo access.
 
 ```yaml
 name: Remote Dev Bot
@@ -492,27 +418,13 @@ jobs:
     secrets: inherit
 ```
 
-**Note:** To test against a dev branch of remote-dev-bot, change `@main` to `@dev` (or any branch name).
+This requires:
+- A PAT with access to both your repo and `gnovak/remote-dev-bot` (see Step 1.4)
+- The PAT stored as `PAT_TOKEN` secret on your repo
 
-### Step 2.2: Push and Verify
+**Using your own fork:** For full control, fork `gnovak/remote-dev-bot` and point the `uses:` line at your fork. You'll need to set Actions access to `user` level on the fork (see Troubleshooting).
 
-```bash
-git add .github/workflows/agent.yml
-git commit -m "Add remote dev bot shim workflow"
-git push
-```
-
-> **New empty repo?** If your repository has no commits yet, you'll need to set the branch name before pushing: `git branch -M main` before `git push -u origin main`.
-
-**Verify the workflow is recognized:**
-
-*Via web:* Go to `https://github.com/{owner}/{repo}/actions` — you should see "Remote Dev Bot" listed in the left sidebar under "All workflows".
-
-*Via command line:*
-```bash
-gh workflow list --repo {owner}/{repo}
-# Should show "Remote Dev Bot"
-```
+</details>
 
 ---
 
