@@ -66,7 +66,7 @@ models:
     description: "My custom model configuration"
 ```
 
-You can also create a `remote-dev-bot.yaml` in your target repo to override the defaults. See `runbook.md` Phase 4 for details.
+You can also create a `remote-dev-bot.yaml` in your target repo to override the defaults. See `runbook.md` Phase 5 for details.
 
 ## Architecture
 
