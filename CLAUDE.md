@@ -91,7 +91,8 @@ gh run view RUN_ID --repo gnovak/remote-dev-bot-test --log | tail -40
 
 ### PR Policy
 
-- Treat `runbook.md` changes as code changes — always use a PR, not direct commits to main.
+- **All changes go through a PR.** No direct commits to main. This keeps GitHub's PR list as a complete, searchable record of every change.
+- For small changes, a single-commit PR self-merged immediately is fine — the point is the artifact, not the review ceremony.
 
 ### Two Modes of Git Usage
 Git serves **two different purposes** depending on the phase of work:
