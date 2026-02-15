@@ -4,28 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to resolve issues and create PRs, controlled via `/agent` comments on GitHub issues.
+Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to resolve issues and create PRs, controlled via `/agent-resolve` and `/agent-design` comments on GitHub issues.
 
 ### Key Files
 - `remote-dev-bot.yaml` — model aliases and OpenHands settings
 - `runbook.md` — setup instructions (designed to be followed by humans or AI assistants)
-- `how-it-works.md` — architecture docs: what files live where, how repos connect
 - `.github/workflows/resolve.yml` — the reusable workflow (all the real logic)
 - `.github/workflows/agent.yml` — thin shim that calls resolve.yml
 - `.github/workflows/test.yml` — CI: runs pytest on PRs to main
 - `.github/workflows/e2e.yml` — manual trigger for E2E tests
 - `lib/config.py` — config parsing logic (used by resolve.yml and unit tests)
-- `scripts/compile.py` — compiles a single-file workflow from the shim + reusable workflow
+- `scripts/compile.py` — compiles two self-contained workflows (`dist/agent-resolve.yml`, `dist/agent-design.yml`)
 - `tests/` — pytest unit tests and E2E test script
 - `examples/agent.yml` — shim template for target repos to copy
 - `.openhands/microagents/repo.md` — (in target repos) context for the agent
 
 ### How It Works
-1. User comments `/agent` or `/agent-<alias>` on a GitHub issue in a target repo
+1. User comments `/agent-resolve[-<model>]` or `/agent-design[-<model>]` on a GitHub issue
 2. Target repo's shim workflow calls `resolve.yml` from this repo
-3. Reusable workflow parses the alias, looks up the model in `remote-dev-bot.yaml`
-4. OpenHands resolver runs with that model, reads the issue, edits code, opens a draft PR
-5. Iterative: comment `/agent` again on the PR with feedback for another pass
+3. Reusable workflow parses the mode and model, dispatches to the right job
+4. Resolve mode: OpenHands runs, edits code, opens a draft PR. Design mode: LLM analyzes the issue, posts a comment.
+5. Iterative: comment `/agent-resolve` again on the PR with feedback for another pass
 
 ### Dev Cycle (detailed)
 
@@ -58,7 +57,7 @@ This project has an unusual dev cycle because GitHub Actions only runs workflows
 1. Create a feature branch from `main`: `git checkout -b my-feature main`
 2. Make changes, commit freely (work log mode)
 3. Point dev at your branch: `git branch -f dev my-feature && git push --force-with-lease origin dev`
-4. In `remote-dev-bot-test`: create an issue, comment `/agent-claude-medium`
+4. In `remote-dev-bot-test`: create an issue, comment `/agent-resolve-claude-medium`
 5. Monitor: `gh run list --repo gnovak/remote-dev-bot-test --workflow=agent.yml --limit 3`
 6. If it fails: check logs, fix, commit, push dev again, re-trigger
 7. If it works: clean up git history (rebase), open a PR (dev → main), merge
@@ -70,7 +69,7 @@ gh issue create --repo gnovak/remote-dev-bot-test \
   --title "Test: description" --body "What to do"
 # Trigger agent
 gh issue comment ISSUE_NUM --repo gnovak/remote-dev-bot-test \
-  --body "/agent-claude-medium"
+  --body "/agent-resolve-claude-medium"
 # Monitor
 gh run list --repo gnovak/remote-dev-bot-test --workflow=agent.yml --limit 3
 # Check logs on failure
@@ -149,11 +148,11 @@ git merge --no-ff feature-branch -m "Merge feature: column visibility"
 - Avoid names that differ by only one character (e.g., `add-config` vs `add-configs`)
 - Check existing branches before creating a new one to avoid similar names
 
-## Compiler Constraint: resolve.yml step ordering
+## Compiler: two-file output
 
-`scripts/compile.py` references steps in `resolve.yml` by **hardcoded index** (e.g., `steps[2]`, `steps[5]`, `steps[10]`). If you add, remove, or reorder steps in resolve.yml, the compiler will silently grab the wrong steps.
+`scripts/compile.py` produces two compiled workflows: `dist/agent-resolve.yml` and `dist/agent-design.yml`. It finds steps by **name** (not index), so reordering steps in resolve.yml is safe as long as step names don't change.
 
-**Rule: any change to resolve.yml steps requires updating compile.py to match.** Run `pytest tests/test_compile.py -v` after changes — the unit tests check for specific content in the compiled output and will catch most mismatches.
+**Rule: if you rename a step in resolve.yml, update compile.py to match.** Run `pytest tests/test_compile.py -v` after changes — the unit tests validate the compiled output structure.
 
 ## Code Style
 - Follow existing patterns in the codebase
