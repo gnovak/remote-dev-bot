@@ -2,9 +2,9 @@
 
 ## Overview
 
-This runbook will guide you through setting up Remote Dev Bot on your GitHub repository. By the end, you'll have an AI-powered bot that can automatically resolve issues and create pull requests when triggered by a `/agent` comment.
+This runbook will guide you through setting up Remote Dev Bot on your GitHub repository. By the end, you'll have an AI-powered bot that can automatically resolve issues and create pull requests when triggered by a `/agent-resolve` comment.
 
-**How the bot works:** When you comment `/agent` on an issue, a GitHub Actions workflow starts. It spins up [OpenHands](https://github.com/All-Hands-AI/OpenHands) (an open-source AI coding agent) in a sandboxed container, points it at your issue, and lets it work. The agent reads the issue, explores your codebase, writes code, runs tests, and iterates until it has a solution. Then it pushes a branch and opens a draft PR for your review.
+**How the bot works:** When you comment `/agent-resolve` on an issue, a GitHub Actions workflow starts. It spins up [OpenHands](https://github.com/All-Hands-AI/OpenHands) (an open-source AI coding agent) in a sandboxed container, points it at your issue, and lets it work. The agent reads the issue, explores your codebase, writes code, runs tests, and iterates until it has a solution. Then it pushes a branch and opens a draft PR for your review. You can also use `/agent-design` for AI design analysis posted as a comment (no code changes).
 
 **What you'll set up:**
 
@@ -374,16 +374,18 @@ gh secret set PAT_TOKEN --repo {owner}/{repo}
 
 ### Step 2.1: Download the Workflow File
 
-**What this does:** Adds a self-contained workflow file to your repository. This single file includes everything the bot needs — model configuration, config parsing, security guardrails, and the agent runner.
+**What this does:** Adds two self-contained workflow files to your repository. Each file includes everything the bot needs — model configuration, config parsing, security guardrails, and the agent runner.
 
 ```bash
 # From within the target repo:
 mkdir -p .github/workflows
-curl -o .github/workflows/agent.yml \
-  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent.yml
+curl -o .github/workflows/agent-resolve.yml \
+  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent-resolve.yml
+curl -o .github/workflows/agent-design.yml \
+  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent-design.yml
 ```
 
-The file is self-contained and configurable. Search for these markers to customize:
+The files are self-contained and configurable. Search for these markers to customize:
 - `MODEL_CONFIG` — change the default model or available aliases
 - `MAX_ITERATIONS` — adjust how many steps the agent can take
 - `PR_STYLE` — switch between draft and ready PRs
@@ -392,8 +394,8 @@ The file is self-contained and configurable. Search for these markers to customi
 ### Step 2.2: Push and Verify
 
 ```bash
-git add .github/workflows/agent.yml
-git commit -m "Add remote dev bot workflow"
+git add .github/workflows/agent-resolve.yml .github/workflows/agent-design.yml
+git commit -m "Add remote dev bot workflows"
 git push
 ```
 
@@ -432,7 +434,7 @@ jobs:
   resolve:
     if: >
       (github.event.issue || github.event.pull_request) &&
-      startsWith(github.event.comment.body, '/agent') &&
+      startsWith(github.event.comment.body, '/agent-') &&
       contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), github.event.comment.author_association)
     uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@main
     secrets: inherit
@@ -472,12 +474,12 @@ Comment on the issue to trigger the agent. For your first test, use `claude-medi
 **Via web interface:**
 1. Go to `https://github.com/{owner}/{repo}/issues/{issue-number}` (or click on the issue you just created)
 2. Scroll to the comment box at the bottom
-3. Type `/agent-claude-medium`
+3. Type `/agent-resolve-claude-medium`
 4. Click "Comment"
 
 **Via command line:**
 ```bash
-gh issue comment {issue-number} --repo {owner}/{repo} --body "/agent-claude-medium"
+gh issue comment {issue-number} --repo {owner}/{repo} --body "/agent-resolve-claude-medium"
 ```
 
 ### Step 3.3: Monitor the Run
@@ -507,7 +509,7 @@ A successful run typically takes 5-10 minutes. The agent will:
 If successful, you should see:
 - A new branch created by the agent
 - A draft PR linked to the issue
-- A rocket emoji reaction on your `/agent` comment
+- A rocket emoji reaction on your `/agent-resolve` comment
 
 **Via web interface:**
 - Go to `https://github.com/{owner}/{repo}/pulls` to see the new draft PR
@@ -527,7 +529,7 @@ gh pr list --repo {owner}/{repo}
 | `error: the following arguments are required: --selected-repo` | OpenHands 1.x API change | Update workflow — `--repo` was renamed to `--selected-repo` |
 | `ValueError: Username is required` | Missing env vars | Workflow needs `GITHUB_USERNAME` and `GIT_USERNAME` |
 | `Missing Anthropic API Key` or `x-api-key header is required` | API key not set or set empty | Re-set the secret via web (`https://github.com/{owner}/{repo}/settings/secrets/actions`) or `gh secret set` |
-| `Agent reached maximum iteration` | Agent loops instead of finishing | Try `/agent-claude-medium` instead of `/agent` |
+| `Agent reached maximum iteration` | Agent loops instead of finishing | Try `/agent-resolve-claude-medium` instead of `/agent-resolve` |
 | `429 Too Many Requests` | GitHub API rate limit | Wait a few minutes and try again |
 | `KeyError: 'LLM_API_KEY'` in PR creation step | Missing env vars in PR step | Update workflow to pass `LLM_API_KEY` and `LLM_MODEL` to both steps |
 | Workflow file issue (instant failure, 0s) | Reusable workflow not accessible | Set Actions access to `user` level on remote-dev-bot (see below) |
@@ -579,7 +581,7 @@ Also ensure your PAT token covers all repos involved — both the target repo an
 - Verify the shim workflow file is on the default branch (usually `main`) of the target repo
 - Check that the commenter has collaborator/member/owner access to the repo
 - Look at the Actions tab for failed runs (go to `https://github.com/{owner}/{repo}/actions`)
-- Make sure the comment starts with exactly `/agent` (no leading spaces)
+- Make sure the comment starts with exactly `/agent-resolve` or `/agent-design` (no leading spaces)
 - Verify the shim points to the correct ref (e.g., `@main` or `@dev`)
 
 ### Agent fails during setup steps (first 2 minutes)
@@ -599,7 +601,7 @@ Also ensure your PAT token covers all repos involved — both the target repo an
 ### Agent produces bad results
 - Add more context to the issue description
 - Add repo context in `.openhands/microagents/repo.md`
-- Comment `/agent` on the PR with specific feedback for another pass
+- Comment `/agent-resolve` on the PR with specific feedback for another pass
 
 ---
 

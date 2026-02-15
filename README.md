@@ -4,31 +4,28 @@ An AI-powered development workflow where GitHub issues get resolved autonomously
 
 There are already excellent vendor-specific implementations of this pattern (GitHub Copilot Workspace, Cursor, etc.), so this project isn't necessarily better than those. However, it's intentionally cross-platform and was built as a learning exercise — a way to understand the agent tooling space and explore how to design agents that can autonomously handle real development tasks.
 
-> **📱 Code by Voice** — Use the GitHub mobile app with your phone's dictation to describe features or bugs, then say "/agent" to trigger implementation. No keyboard required — delegate coding tasks while walking, commuting, or anywhere inspiration strikes.
-
 ## How It Works
 
 1. Create a GitHub issue describing a feature or bug
-2. Comment `/agent` (or `/agent-claude-large`, `/agent-openai`, etc.) on the issue
+2. Comment `/agent-resolve` (or `/agent-resolve-claude-large`, etc.) to trigger implementation
 3. A GitHub Action spins up an AI agent (powered by [OpenHands](https://github.com/OpenHands/OpenHands)) that:
    - Reads the issue and codebase
    - Implements the requested changes
    - Opens a draft PR
-4. Review the PR. If changes are needed, comment `/agent` on the PR with feedback and the agent runs again.
+4. Review the PR. If changes are needed, comment `/agent-resolve` on the PR with feedback for another pass.
 
-## Model Selection
+Or use `/agent-design` to get AI design analysis posted as a comment (no code changes).
 
-Comment with an alias to choose the model:
+## Commands
 
-| Command | Model |
-|---------|-------|
-| `/agent` | Default (Claude Sonnet — balanced cost/capability) |
-| `/agent-claude-small` | Claude Haiku |
-| `/agent-claude-large` | Claude Opus |
-| `/agent-openai` | GPT-4o |
-| `/agent-gemini` | Gemini 2.0 Flash |
+| Command | What it does |
+|---------|-------------|
+| `/agent-resolve` | Resolve the issue and open a PR (default model) |
+| `/agent-resolve-claude-large` | Resolve with a specific model |
+| `/agent-design` | Post design analysis as a comment (no code changes) |
+| `/agent-design-claude-small` | Design analysis with a specific model |
 
-Aliases are configured in `remote-dev-bot.yaml`.
+Modes and model aliases are configured in `remote-dev-bot.yaml`.
 
 ### Understanding Model Names
 
@@ -50,11 +47,11 @@ Prefix the model string with the provider name in `remote-dev-bot.yaml` (e.g., `
 
 ### Choosing a Model
 
-**For most tasks:** Use the default (`/agent` or `/agent-claude-medium`). Claude Sonnet offers a good balance of capability and cost.
+**For most tasks:** Use the default (`/agent-resolve`). Claude Sonnet offers a good balance of capability and cost.
 
-**For complex multi-file features:** Use `/agent-claude-large` (Opus) or `/agent-openai-large` (GPT Codex). These models handle larger contexts and more intricate reasoning.
+**For complex multi-file features:** Use `/agent-resolve-claude-large` (Opus) or `/agent-resolve-openai-large` (GPT Codex). These models handle larger contexts and more intricate reasoning.
 
-**For simple, well-defined tasks:** Use `/agent-claude-small` (Haiku) or `/agent-gemini-small`. Faster and cheaper, but may struggle with ambiguous requirements.
+**For simple, well-defined tasks:** Use `/agent-resolve-claude-small` (Haiku) or `/agent-resolve-gemini-small`. Faster and cheaper, but may struggle with ambiguous requirements.
 
 **For coding-heavy tasks:** Models with "codex" in the name (e.g., `openai/gpt-5.1-codex-mini`) are specifically tuned for code generation and may perform better on implementation tasks.
 
@@ -75,26 +72,17 @@ You can also create a `remote-dev-bot.yaml` in your target repo to override the 
 
 The system has two parts:
 
-- **Shim workflow** (`.github/workflows/agent.yml`) — a thin trigger that lives in each target repo. Fires on `/agent` comments and calls the reusable workflow. See `examples/agent.yml` for the template.
-- **Reusable workflow** (`.github/workflows/resolve.yml`) — all the logic: parses model aliases, installs OpenHands, resolves the issue, creates a draft PR. Lives in this repo and is called by shims in target repos. Organizations or individuals who want full control can fork this repo and point their shims at the fork instead.
+- **Shim workflow** (`.github/workflows/agent.yml`) — a thin trigger that lives in each target repo. Fires on `/agent-` commands and calls the reusable workflow. See `examples/agent.yml` for the template.
+- **Reusable workflow** (`.github/workflows/resolve.yml`) — all the logic: parses commands, dispatches to resolve or design mode, runs the agent. Lives in this repo and is called by shims in target repos.
 - **OpenHands** — the AI agent framework that does the actual code exploration and editing
 - **`remote-dev-bot.yaml`** — model aliases and OpenHands settings (version, max iterations, PR type)
 - **`runbook.md`** — step-by-step setup instructions, designed to be followed by a human or by an AI assistant (like Claude Code)
-
-For a detailed explanation of what files live where and how the pieces connect, see `how-it-works.md`.
 
 ## Setup
 
 See `runbook.md` for complete setup instructions. The runbook is designed so you (or an AI assistant) can follow it step-by-step to get this running in your own GitHub account.
 
 **Quick version:** You need a GitHub repo, API keys for your preferred LLM provider(s), and about 10 minutes.
-
-**AI-assisted install:** If you want an AI coding agent to guide you through the setup, you'll need one of the following installed:
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` CLI)
-- [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini` CLI)
-- [OpenAI Codex CLI](https://github.com/openai/codex) (`codex` CLI)
-
-Then run a command like: `claude "Follow runbook.md to set up remote-dev-bot for my repo owner/repo"`
 
 ## Development
 
@@ -106,7 +94,7 @@ GitHub Actions only runs workflows from the default branch (main), so developing
 
 **Dev cycle:**
 1. In `remote-dev-bot`: reset `dev` to `main`, then make changes on `dev`
-2. In `remote-dev-bot-test`: create an issue and comment `/agent-claude-medium` to trigger the agent
+2. In `remote-dev-bot-test`: create an issue and comment `/agent-resolve-claude-medium` to trigger the agent
 3. The shim in the test repo calls `resolve.yml@dev`, so it picks up your changes
 4. If it works, clean up the git history on `dev` (squash, rebase, reword) and merge to `main`
 5. If not, make more commits on `dev` and trigger the agent again

@@ -11,7 +11,7 @@ Remote Dev Bot uses a **shim + reusable workflow** pattern that involves two rep
 │                           TARGET REPO                                       │
 │                    (where you want AI to help develop)                      │
 │                                                                             │
-│   .github/workflows/agent.yml  ←── Shim: triggers on /agent comments        │
+│   .github/workflows/agent.yml  ←── Shim: triggers on /agent- commands       │
 │                                    and calls resolve.yml from remote-dev-bot│
 │                                                                             │
 │   remote-dev-bot.yaml          ←── (Optional) Override config for this repo │
@@ -65,7 +65,7 @@ This is where you want the AI agent to help with development.
 
 | File | Purpose |
 |------|---------|
-| `.github/workflows/agent.yml` | **Required.** The shim workflow. Triggers on `/agent` comments and calls `resolve.yml` from remote-dev-bot. This is the only workflow file you need. |
+| `.github/workflows/agent.yml` | **Required.** The shim workflow. Triggers on `/agent-resolve` and `/agent-design` comments and calls `resolve.yml` from remote-dev-bot. This is the only workflow file you need. |
 | `remote-dev-bot.yaml` | **Optional.** Override config. Add model aliases, change settings, or override defaults for this specific repo. Merged on top of the base config. |
 | `.openhands/microagents/repo.md` | **Optional.** Context for the AI agent. Describe your codebase, coding conventions, test commands, architecture — anything the agent should know. |
 
