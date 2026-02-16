@@ -535,7 +535,7 @@ gh pr list --repo {owner}/{repo}
 | `ImportError: cannot import name 'WorkspaceState'` | Old OpenHands version | **Compiled:** Re-download latest from [releases](https://github.com/gnovak/remote-dev-bot/releases). **Shim:** Should auto-fix |
 | `error: the following arguments are required: --selected-repo` | OpenHands 1.x API change | Update workflow — `--repo` was renamed to `--selected-repo` |
 | `ValueError: Username is required` | Missing env vars | Workflow needs `GITHUB_USERNAME` and `GIT_USERNAME` |
-| `Missing Anthropic API Key` or `x-api-key header is required` | API key not reaching the workflow | **Shim install:** Ensure secrets are passed explicitly (not via `secrets: inherit`) — see `examples/agent.yml`. **Both installs:** Re-check the secret value via web (`https://github.com/{owner}/{repo}/settings/secrets/actions`) |
+| `Missing Anthropic API Key` or `x-api-key header is required` | API key not reaching the workflow | **Shim install:** Ensure secrets are passed explicitly (not via `secrets: inherit`) — see `.github/workflows/agent.yml`. **Both installs:** Re-check the secret value via web (`https://github.com/{owner}/{repo}/settings/secrets/actions`) |
 | `Agent reached maximum iteration` | Agent loops instead of finishing | Try `/agent-resolve-claude-medium` instead of `/agent-resolve` |
 | `429 Too Many Requests` | GitHub API rate limit | Wait a few minutes and try again |
 | `KeyError: 'LLM_API_KEY'` in PR creation step | Missing env vars in PR step | Update workflow to pass `LLM_API_KEY` and `LLM_MODEL` to both steps |
@@ -581,7 +581,7 @@ Without this, the shim will fail instantly with "workflow file issue."
 
 ### Secrets not reaching the reusable workflow (shim install only)
 
-If the agent fails with `x-api-key header is required` or similar authentication errors, check that secrets are passed explicitly in the shim (not via `secrets: inherit`). GitHub Actions does not pass inherited secrets across different repo owners. See the shim template in `examples/agent.yml`.
+If the agent fails with `x-api-key header is required` or similar authentication errors, check that secrets are passed explicitly in the shim (not via `secrets: inherit`). GitHub Actions does not pass inherited secrets across different repo owners. See the shim template in `.github/workflows/agent.yml`.
 
 ### Agent doesn't trigger
 - Verify the shim workflow file is on the default branch (usually `main`) of the target repo

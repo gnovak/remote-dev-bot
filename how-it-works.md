@@ -36,7 +36,7 @@ Remote Dev Bot uses a **shim + reusable workflow** pattern that involves two rep
 │                                                                             │
 │   lib/config.py                  ←── Config parsing logic                   │
 │                                                                             │
-│   examples/agent.yml             ←── Shim template to copy to target repos  │
+│   .github/workflows/agent.yml    ←── Shim (also the template for target repos)│
 │                                                                             │
 │   runbook.md                     ←── Setup instructions                     │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -53,7 +53,7 @@ This is the "engine" — the shared infrastructure that all target repos use.
 | `.github/workflows/resolve.yml` | The reusable workflow. Contains all the logic: parses model aliases, installs OpenHands, resolves issues, creates PRs. Target repos call this. |
 | `remote-dev-bot.yaml` | Base configuration. Defines model aliases (claude-small, claude-large, etc.) and OpenHands settings (version, max iterations, PR type). |
 | `lib/config.py` | Config parsing logic. Loads base config, merges with target repo overrides, resolves aliases. Used by resolve.yml at runtime. |
-| `examples/agent.yml` | Template shim workflow. Copy this to target repos at `.github/workflows/agent.yml`. |
+| `.github/workflows/agent.yml` | Shim workflow. Also serves as the template — copy this to target repos. |
 | `runbook.md` | Step-by-step setup instructions for humans or AI assistants. |
 | `AGENTS.md` | Development guidance for AI assistants working on this repo. |
 

@@ -1,7 +1,7 @@
 name: Resolve Issue
 
 # Reusable workflow — called by thin shims in target repos.
-# See examples/agent.yml for the shim template.
+# See .github/workflows/agent.yml for the shim template.
 #
 # Supports two modes via /agent-<mode>[-<model>]:
 #   /agent-resolve[-<model>]  — run OpenHands to resolve the issue, open a PR
