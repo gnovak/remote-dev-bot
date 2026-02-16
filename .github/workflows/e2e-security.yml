@@ -1,4 +1,5 @@
 name: E2E Security Tests
+run-name: "E2E Security: ${{ inputs.test || 'all' }} on ${{ inputs.branch || 'main' }}"
 
 on:
   workflow_dispatch:
