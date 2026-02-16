@@ -159,8 +159,7 @@ jobs:
             --selected-repo "${{ github.repository }}" \
             --issue-number "$ISSUE_NUMBER" \
             --issue-type "$ISSUE_TYPE" \
-            --max-iterations ${{ needs.parse.outputs.max_iterations }} \
-            --comment-id ${{ github.event.comment.id }}
+            --max-iterations ${{ needs.parse.outputs.max_iterations }}
 
       - name: Create pull request
         env:
