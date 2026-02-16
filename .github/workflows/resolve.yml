@@ -75,6 +75,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
 
+      - name: Assign commenter to issue
+        continue-on-error: true
+        run: |
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          gh issue edit "$ISSUE_NUMBER" --repo "${{ github.repository }}" \
+            --add-assignee "${{ github.event.comment.user.login }}"
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+
   # --- Mode: resolve (action=pr) — run OpenHands, open a PR ---
   resolve:
     needs: parse

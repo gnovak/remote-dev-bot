@@ -247,6 +247,11 @@ def compile_resolve(shim, workflow, config_yaml, output_path):
     react_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
     steps.append(react_step)
 
+    # Assign commenter to issue (from parse job)
+    assign_step = find_step(parse_steps, "Assign commenter to issue").copy()
+    assign_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    steps.append(assign_step)
+
     # Install OpenHands
     steps.append(find_step(resolve_steps, "Install OpenHands").copy())
 
@@ -327,11 +332,15 @@ def compile_design(shim, workflow, config_yaml, output_path):
     steps.append(find_step(design_steps, "Determine API key").copy())
 
     # React to comment — design mode doesn't have its own, use from parse job
-    # Actually the parse job has the react step. Let's add it.
     parse_steps = workflow["jobs"]["parse"]["steps"]
     react_step = find_step(parse_steps, "React to comment").copy()
     react_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
     steps.append(react_step)
+
+    # Assign commenter to issue (from parse job)
+    assign_step = find_step(parse_steps, "Assign commenter to issue").copy()
+    assign_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    steps.append(assign_step)
 
     # Install dependencies (PyYAML + litellm)
     steps.append(find_step(design_steps, "Install dependencies").copy())

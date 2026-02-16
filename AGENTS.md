@@ -85,7 +85,7 @@ gh run view RUN_ID --repo gnovak/remote-dev-bot-test --log | tail -40
 
 `scripts/compile.py` produces two compiled workflows: `dist/agent-resolve.yml` and `dist/agent-design.yml`. It finds steps by **name** (not index), so reordering steps in resolve.yml is safe as long as step names don't change.
 
-**Rule: if you rename a step in resolve.yml, update compile.py to match.** Run `pytest tests/test_compile.py -v` after changes — the unit tests validate the compiled output structure.
+**Rule: if you add, remove, or rename a step in resolve.yml, update compile.py to match.** Run `pytest tests/test_compile.py -v` after changes — the step-count tripwire tests (`test_resolve_step_count`, `test_design_step_count`) will fail if the compiled output doesn't match the expected step list, forcing you to update both `compile.py` and the expected step lists in `test_compile.py`.
 
 ## Code Style
 - Follow existing patterns in the codebase
