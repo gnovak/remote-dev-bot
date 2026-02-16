@@ -123,3 +123,14 @@ def test_agent_yml_has_author_association_gate():
         # Ensure it's a restrictive check, not just a comment
         assert 'fromJson(' in content
         assert 'github.event.comment.author_association' in content
+
+
+def test_design_job_has_loop_prevention(resolve_yml):
+    """Verify the design job strips /agent commands from LLM responses.
+
+    This prevents the bot from triggering itself when posting comments,
+    which could create an infinite loop.
+    """
+    assert "/agent-" in resolve_yml  # The pattern we're checking for
+    assert "Loop prevention" in resolve_yml
+    assert "Stripped /agent command" in resolve_yml

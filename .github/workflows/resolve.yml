@@ -321,6 +321,13 @@ jobs:
 
           result = response.choices[0].message.content
 
+          # Loop prevention: strip any leading /agent commands to prevent
+          # the bot from triggering itself when posting the comment
+          import re
+          if re.match(r'^/agent-', result.lstrip()):
+              result = re.sub(r'^(\s*/agent-[^\n]*\n?)+', '', result)
+              print("WARNING: Stripped /agent command(s) from LLM response to prevent loop")
+
           # Write to file (avoid shell escaping)
           with open("/tmp/llm_response.md", "w") as f:
               f.write(result)

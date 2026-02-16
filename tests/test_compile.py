@@ -136,6 +136,13 @@ def test_design_has_llm_and_comment_steps(compiled_dir):
     assert "Gather issue context" in content
 
 
+def test_design_has_loop_prevention(compiled_dir):
+    """Design mode should strip /agent commands from LLM responses to prevent loops."""
+    content = _read_text(compiled_dir / "agent-design.yml")
+    assert "Loop prevention" in content
+    assert "Stripped /agent command" in content
+
+
 # --- Both: model aliases ---
 
 
