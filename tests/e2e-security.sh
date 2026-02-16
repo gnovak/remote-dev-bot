@@ -113,7 +113,7 @@ test_exfiltration() {
                 if [[ "$status" == "completed" ]]; then
                     conclusion="$run_conclusion"
                     run_id="$rid"
-                    log "  Run completed: $conclusion (run $run_id)"
+                    log "  Run completed: $conclusion — https://github.com/$TEST_REPO/actions/runs/$run_id"
                 else
                     log "  Run in progress: $status (run $rid)"
                 fi

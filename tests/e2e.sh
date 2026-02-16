@@ -429,12 +429,15 @@ for pos in "${!issue_nums[@]}"; do
     else
         status="FAIL ($conclusion)"
         ((fail++)) || true
-        if [[ -n "$run_id" ]]; then
-            log "  Logs: gh run view $run_id --repo $TEST_REPO --log | tail -40"
-        fi
     fi
 
-    printf "  %-25s %-25s issue #%s\n" "$name" "$status" "$issue_num"
+    # Build clickable job log URL
+    log_url=""
+    if [[ -n "$run_id" ]]; then
+        log_url="https://github.com/$TEST_REPO/actions/runs/$run_id"
+    fi
+
+    printf "  %-25s %-25s issue #%-5s %s\n" "$name" "$status" "$issue_num" "$log_url"
 done
 
 log "========================================="
