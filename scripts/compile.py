@@ -416,7 +416,7 @@ def _rewrite_needs_refs(steps):
 def main():
     """Main entry point."""
     workspace = Path(__file__).parent.parent
-    shim_path = workspace / "examples" / "agent.yml"
+    shim_path = workspace / ".github" / "workflows" / "agent.yml"
     workflow_path = workspace / ".github" / "workflows" / "resolve.yml"
     config_path = workspace / "remote-dev-bot.yaml"
 

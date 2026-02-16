@@ -18,7 +18,7 @@ def compiled_dir(tmp_path):
     sys.path.insert(0, str(WORKSPACE))
     from scripts.compile import compile_resolve, compile_design, load_yaml
 
-    shim = load_yaml(str(WORKSPACE / "examples" / "agent.yml"))
+    shim = load_yaml(str(WORKSPACE / ".github" / "workflows" / "agent.yml"))
     workflow = load_yaml(str(WORKSPACE / ".github" / "workflows" / "resolve.yml"))
     config = load_yaml(str(WORKSPACE / "remote-dev-bot.yaml"))
 

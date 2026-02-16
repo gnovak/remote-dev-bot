@@ -74,7 +74,7 @@ You can also create a `remote-dev-bot.yaml` in your target repo to override the 
 
 The system has two parts:
 
-- **Shim workflow** (`.github/workflows/agent.yml`) — a thin trigger that lives in each target repo. Fires on `/agent-` commands and calls the reusable workflow. See `examples/agent.yml` for the template.
+- **Shim workflow** (`.github/workflows/agent.yml`) — a thin trigger that lives in each target repo. Fires on `/agent-` commands and calls the reusable workflow. Copy this file to set up the shim install.
 - **Reusable workflow** (`.github/workflows/resolve.yml`) — all the logic: parses commands, dispatches to resolve or design mode, runs the agent. Lives in this repo and is called by shims in target repos.
 - **OpenHands** — the AI agent framework that does the actual code exploration and editing
 - **`remote-dev-bot.yaml`** — model aliases and OpenHands settings (version, max iterations, PR type)

@@ -36,7 +36,7 @@ Remote Dev Bot uses a **shim + reusable workflow** pattern that involves two rep
 │                                                                             │
 │   lib/config.py                  ←── Config parsing logic                   │
 │                                                                             │
-│   examples/agent.yml             ←── Shim template to copy to target repos  │
+│   .github/workflows/agent.yml    ←── Shim (also the template for target repos)│
 │                                                                             │
 │   runbook.md                     ←── Setup instructions                     │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -53,7 +53,7 @@ This is the "engine" — the shared infrastructure that all target repos use.
 | `.github/workflows/resolve.yml` | The reusable workflow. Contains all the logic: parses model aliases, installs OpenHands, resolves issues, creates PRs. Target repos call this. |
 | `remote-dev-bot.yaml` | Base configuration. Defines model aliases (claude-small, claude-large, etc.) and OpenHands settings (version, max iterations, PR type). |
 | `lib/config.py` | Config parsing logic. Loads base config, merges with target repo overrides, resolves aliases. Used by resolve.yml at runtime. |
-| `examples/agent.yml` | Template shim workflow. Copy this to target repos at `.github/workflows/agent.yml`. |
+| `.github/workflows/agent.yml` | Shim workflow. Also serves as the template — copy this to target repos. |
 | `runbook.md` | Step-by-step setup instructions for humans or AI assistants. |
 | `AGENTS.md` | Development guidance for AI assistants working on this repo. |
 
@@ -133,6 +133,37 @@ This lets you:
 - Set lower iteration limits for repos with simpler tasks
 - Test config changes without modifying remote-dev-bot
 
+## Secrets and PAT Requirements
+
+### Cross-owner secret passing
+
+GitHub Actions does not pass `secrets: inherit` across different repo owners. Since your target repo and `gnovak/remote-dev-bot` have different owners, the shim must list secrets explicitly:
+
+```yaml
+    uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@main
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+```
+
+If you fork remote-dev-bot into your own org and your target repos are in the same org, `secrets: inherit` will work.
+
+### When is a PAT needed?
+
+**Short answer: almost never.**
+
+The shim install works without a PAT. The compiled install works without a PAT. The only thing a PAT adds is automatic CI triggering: PRs created by `github.token` (the default) won't trigger other workflows like CI checks. This is a GitHub security feature to prevent infinite loops. A PAT bypasses it.
+
+For most users, manually triggering CI on bot PRs is fine. Add a PAT later if you find you need auto-triggering.
+
+### Visibility requirements
+
+The shim install requires `gnovak/remote-dev-bot` (or your fork) to be **public** so the target repo's workflow can call the reusable workflow. Your target repo can be public or private — only the repo hosting the reusable workflow must be public (or in the same org with appropriate Actions access settings).
+
+The compiled install has no visibility requirements since the workflow is self-contained.
+
 ## Using Your Own Fork
 
 Organizations often want full control over the reusable workflow. To use a fork:
@@ -143,8 +174,11 @@ Organizations often want full control over the reusable workflow. To use a fork:
    uses: myorg/remote-dev-bot/.github/workflows/resolve.yml@main
    ```
 3. Set Actions access on your fork (Settings → Actions → General → Access → "Accessible from repositories owned by the user")
+4. If your fork and target repos are in the same org, you can use `secrets: inherit` instead of listing secrets explicitly
 
 Now updates to your fork flow to your target repos, and you control the release cadence.
+
+**Private forks:** If you keep your fork private, your target repos must be in the same org/user account (GitHub doesn't allow cross-owner calls to private repo workflows). Set the Actions access level as described in step 3.
 
 ## The Special Case: Developing Remote-Dev-Bot Itself
 

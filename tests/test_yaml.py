@@ -26,7 +26,6 @@ def load_yaml(path):
         "remote-dev-bot.yaml",
         ".github/workflows/resolve.yml",
         ".github/workflows/agent.yml",
-        "examples/agent.yml",
     ],
 )
 def test_yaml_parses(path):
@@ -117,7 +116,6 @@ def test_agent_yml_has_author_association_gate():
     """Verify the shim requires trusted author_association."""
     for path in [
         REPO_ROOT / ".github/workflows/agent.yml",
-        REPO_ROOT / "examples/agent.yml",
     ]:
         content = path.read_text()
         assert "author_association" in content
