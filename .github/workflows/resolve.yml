@@ -25,6 +25,7 @@ jobs:
   # --- Shared setup: parse config, determine mode and model ---
   parse:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       mode: ${{ steps.parse.outputs.mode }}
       action: ${{ steps.parse.outputs.action }}
@@ -79,6 +80,7 @@ jobs:
     needs: parse
     if: needs.parse.outputs.action == 'pr'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout target repository
@@ -190,6 +192,7 @@ jobs:
     needs: parse
     if: needs.parse.outputs.action == 'comment'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout target repository
