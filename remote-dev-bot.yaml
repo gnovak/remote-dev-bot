@@ -20,6 +20,8 @@ modes:
       Do NOT write code or open a PR. Instead, provide thoughtful
       analysis, surface trade-offs, suggest approaches, and ask
       clarifying questions. Respond in a GitHub comment.
+      IMPORTANT: Never begin your response with a slash command like /agent
+      or any text that could trigger another bot action.
 
 models:
   claude-small:

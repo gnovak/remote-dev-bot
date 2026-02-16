@@ -123,3 +123,76 @@ def test_agent_yml_has_author_association_gate():
         # Ensure it's a restrictive check, not just a comment
         assert 'fromJson(' in content
         assert 'github.event.comment.author_association' in content
+
+
+# --- Loop prevention checks ---
+
+
+def test_design_prompt_has_loop_prevention(bot_config):
+    """Verify the design mode prompt instructs LLM not to start with /agent."""
+    design_mode = bot_config["modes"]["design"]
+    prompt_prefix = design_mode.get("prompt_prefix", "")
+    assert "/agent" in prompt_prefix.lower(), (
+        "Design mode prompt_prefix should warn against starting with /agent"
+    )
+    assert "never" in prompt_prefix.lower() or "do not" in prompt_prefix.lower(), (
+        "Design mode prompt_prefix should contain prohibition language"
+    )
+
+
+def test_resolve_yml_has_response_validation(resolve_yml):
+    """Verify resolve.yml strips /agent commands from LLM responses."""
+    # Check for the loop prevention regex
+    assert "Loop prevention" in resolve_yml, (
+        "resolve.yml should have loop prevention comment"
+    )
+    assert "/agent" in resolve_yml and "re.sub" in resolve_yml, (
+        "resolve.yml should strip /agent commands from responses"
+    )
+
+
+class TestLoopPreventionRegex:
+    """Test the regex pattern used to strip /agent commands from responses."""
+
+    import re
+    # This is the same pattern used in resolve.yml
+    PATTERN = r'^(/agent[^\s]*\s*)+'
+
+    def strip_agent_commands(self, text):
+        import re
+        return re.sub(self.PATTERN, '', text, flags=re.MULTILINE).lstrip()
+
+    def test_strips_single_agent_command(self):
+        text = "/agent-design-claude-large\nHere is my analysis..."
+        result = self.strip_agent_commands(text)
+        assert result == "Here is my analysis..."
+
+    def test_strips_multiple_agent_commands(self):
+        text = "/agent-resolve\n/agent-design\nActual content"
+        result = self.strip_agent_commands(text)
+        assert result == "Actual content"
+
+    def test_preserves_agent_in_middle_of_text(self):
+        text = "You can use /agent-resolve to trigger the bot."
+        result = self.strip_agent_commands(text)
+        assert result == text
+
+    def test_preserves_normal_response(self):
+        text = "Here is my thoughtful analysis of the issue..."
+        result = self.strip_agent_commands(text)
+        assert result == text
+
+    def test_strips_agent_with_various_suffixes(self):
+        text = "/agent-resolve-claude-large\nContent"
+        result = self.strip_agent_commands(text)
+        assert result == "Content"
+
+    def test_handles_empty_response(self):
+        text = ""
+        result = self.strip_agent_commands(text)
+        assert result == ""
+
+    def test_strips_bare_agent_command(self):
+        text = "/agent\nSome content"
+        result = self.strip_agent_commands(text)
+        assert result == "Some content"
