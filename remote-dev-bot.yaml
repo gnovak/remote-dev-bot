@@ -45,8 +45,8 @@ models:
     description: "OpenAI GPT-5.1 Codex Mini"
 
   openai-large:
-    id: openai/gpt-5.3-codex
-    description: "OpenAI GPT-5.3 Codex — best coding model"
+    id: openai/gpt-5.2-codex
+    description: "OpenAI GPT-5.2 Codex — best coding model"
 
   gemini-small:
     id: gemini/gemini-2.5-flash-lite

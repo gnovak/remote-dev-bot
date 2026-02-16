@@ -347,9 +347,9 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
 
             # Match: run title contains our timestamp AND our test's title prefix
             if [[ "$display_title" == *"$match_str"* && "$display_title" == *"$title"* ]]; then
+                test_run_ids[$pos]="$run_id"
                 if [[ "$status" == "completed" ]]; then
                     test_results[$pos]="$conclusion"
-                    test_run_ids[$pos]="$run_id"
                     log "  $name: $conclusion (run $run_id)"
                 else
                     # Found our run but still in progress
