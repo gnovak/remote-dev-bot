@@ -25,13 +25,13 @@ Or use `/agent-design` to get AI design analysis posted as a comment (no code ch
 | `/agent-resolve` | Resolve the issue and open a PR (default model) |
 | `/agent-resolve-claude-large` | Resolve with a specific model |
 | `/agent-design` | Post design analysis as a comment (no code changes) |
-| `/agent-design-claude-small` | Design analysis with a specific model |
+| `/agent-design-claude-large` | Design analysis with a specific model |
 
 Modes and model aliases are configured in `remote-dev-bot.yaml`.
 
 ### Understanding Model Names
 
-Model aliases (like `claude-medium`) map to **LiteLLM model identifiers** in `remote-dev-bot.yaml`. LiteLLM is the library OpenHands uses to talk to different LLM providers through a unified interface.
+Model aliases (like `claude-small`) map to **LiteLLM model identifiers** in `remote-dev-bot.yaml`. LiteLLM is the library OpenHands uses to talk to different LLM providers through a unified interface.
 
 **Model ID format:** `provider/model-name`
 
@@ -49,11 +49,9 @@ Prefix the model string with the provider name in `remote-dev-bot.yaml` (e.g., `
 
 ### Choosing a Model
 
-**For most tasks:** Use the default (`/agent-resolve`). Claude Sonnet offers a good balance of capability and cost.
+**For most tasks:** Use the default (`/agent-resolve`). Claude Sonnet (`claude-small`) offers a good balance of capability and cost.
 
 **For complex multi-file features:** Use `/agent-resolve-claude-large` (Opus) or `/agent-resolve-openai-large` (GPT Codex). These models handle larger contexts and more intricate reasoning.
-
-**For simple, well-defined tasks:** Use `/agent-resolve-claude-small` (Haiku) or `/agent-resolve-gemini-small`. Faster and cheaper, but may struggle with ambiguous requirements.
 
 **For coding-heavy tasks:** Models with "codex" in the name (e.g., `openai/gpt-5.1-codex-mini`) are specifically tuned for code generation and may perform better on implementation tasks.
 
@@ -96,7 +94,7 @@ GitHub Actions only runs workflows from the default branch (main), so developing
 
 **Dev cycle:**
 1. In `remote-dev-bot`: reset `dev` to `main`, then make changes on `dev`
-2. In `remote-dev-bot-test`: create an issue and comment `/agent-resolve-claude-medium` to trigger the agent
+2. In `remote-dev-bot-test`: create an issue and comment `/agent-resolve-claude-small` to trigger the agent
 3. The shim in the test repo calls `resolve.yml@dev`, so it picks up your changes
 4. If it works, clean up the git history on `dev` (squash, rebase, reword) and merge to `main`
 5. If not, make more commits on `dev` and trigger the agent again

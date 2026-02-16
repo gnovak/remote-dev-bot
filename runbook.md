@@ -475,17 +475,17 @@ gh issue create --repo {owner}/{repo} \
 
 ### Step 4.2: Trigger the Agent
 
-Comment on the issue to trigger the agent. For your first test, use `claude-medium` (Sonnet) — it handles the task lifecycle more reliably than `claude-small` (Haiku).
+Comment on the issue to trigger the agent. For your first test, use `claude-small` (Sonnet) — it's the default and handles most tasks well.
 
 **Via web interface:**
 1. Go to `https://github.com/{owner}/{repo}/issues/{issue-number}` (or click on the issue you just created)
 2. Scroll to the comment box at the bottom
-3. Type `/agent-resolve-claude-medium`
+3. Type `/agent-resolve-claude-small`
 4. Click "Comment"
 
 **Via command line:**
 ```bash
-gh issue comment {issue-number} --repo {owner}/{repo} --body "/agent-resolve-claude-medium"
+gh issue comment {issue-number} --repo {owner}/{repo} --body "/agent-resolve-claude-small"
 ```
 
 ### Step 4.3: Monitor the Run
@@ -537,7 +537,7 @@ gh pr list --repo {owner}/{repo}
 | `error: the following arguments are required: --selected-repo` | OpenHands 1.x API change | Update workflow — `--repo` was renamed to `--selected-repo` |
 | `ValueError: Username is required` | Missing env vars | Workflow needs `GITHUB_USERNAME` and `GIT_USERNAME` |
 | `Missing Anthropic API Key` or `x-api-key header is required` | API key not reaching the workflow | **Shim install:** Ensure secrets are passed explicitly (not via `secrets: inherit`) — see `.github/workflows/agent.yml`. **Both installs:** Re-check the secret value via web (`https://github.com/{owner}/{repo}/settings/secrets/actions`) |
-| `Agent reached maximum iteration` | Agent loops instead of finishing | Try `/agent-resolve-claude-medium` instead of `/agent-resolve` |
+| `Agent reached maximum iteration` | Agent loops instead of finishing | Try `/agent-resolve-claude-large` for complex tasks |
 | `429 Too Many Requests` | GitHub API rate limit | Wait a few minutes and try again |
 | `KeyError: 'LLM_API_KEY'` in PR creation step | Missing env vars in PR step | Update workflow to pass `LLM_API_KEY` and `LLM_MODEL` to both steps |
 | Workflow file issue (instant failure, 0s) | Reusable workflow not accessible | **Shim install:** Ensure `gnovak/remote-dev-bot` (or your fork) is public, or set Actions access to `user` level if using a private fork |
@@ -597,7 +597,7 @@ If the agent fails with `x-api-key header is required` or similar authentication
 
 ### Agent runs but hits max iterations
 - The agent completed the work but couldn't gracefully stop
-- Try a more capable model: `/agent-claude-medium` or `/agent-claude-large`
+- Try a more capable model: `/agent-resolve-claude-large`
 - Or lower `max_iterations` in `remote-dev-bot.yaml`
 
 ### Agent runs but skips PR creation

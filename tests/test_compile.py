@@ -174,12 +174,13 @@ def test_both_inline_model_aliases(compiled_dir):
     for fname in ["agent-resolve.yml", "agent-design.yml"]:
         content = _read_text(compiled_dir / fname)
         assert "claude-small" in content
-        assert "claude-medium" in content
         assert "claude-large" in content
         assert "openai-small" in content
-        assert "gemini-medium" in content
+        assert "openai-large" in content
+        assert "gemini-small" in content
+        assert "gemini-large" in content
         assert "anthropic/claude-sonnet-4-5" in content
-        assert "openai/gpt-5-nano" in content
+        assert "openai/gpt-5.1-codex-mini" in content
         assert "gemini/gemini-2.5-flash" in content
 
 
