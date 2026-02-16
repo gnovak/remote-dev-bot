@@ -273,6 +273,11 @@ def compile_resolve(shim, workflow, config_yaml, output_path):
     # Upload artifact
     steps.append(find_step(resolve_steps, "Upload output artifact").copy())
 
+    # Calculate and post cost
+    cost_step = find_step(resolve_steps, "Calculate and post cost").copy()
+    cost_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    steps.append(cost_step)
+
     # Fix needs.parse.outputs -> steps.parse.outputs (compiled is single-job)
     _rewrite_needs_refs(steps)
 
@@ -377,6 +382,11 @@ def compile_design(shim, workflow, config_yaml, output_path):
     post_step = find_step(design_steps, "Post comment").copy()
     post_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
     steps.append(post_step)
+
+    # Post cost comment
+    cost_step = find_step(design_steps, "Post cost comment").copy()
+    cost_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    steps.append(cost_step)
 
     # Fix needs.parse.outputs -> steps.parse.outputs
     _rewrite_needs_refs(steps)

@@ -136,6 +136,27 @@ def test_design_has_llm_and_comment_steps(compiled_dir):
     assert "Gather issue context" in content
 
 
+# --- Cost transparency ---
+
+
+def test_resolve_has_cost_step(compiled_dir):
+    """Resolve mode should post a cost summary comment."""
+    content = _read_text(compiled_dir / "agent-resolve.yml")
+    assert "Calculate and post cost" in content
+    assert "Cost Summary" in content
+    assert "Input tokens" in content
+    assert "Output tokens" in content
+
+
+def test_design_has_cost_step(compiled_dir):
+    """Design mode should post a cost summary comment."""
+    content = _read_text(compiled_dir / "agent-design.yml")
+    assert "Post cost comment" in content
+    assert "Cost Summary" in content
+    assert "Input tokens" in content
+    assert "Output tokens" in content
+
+
 # --- Both: model aliases ---
 
 
@@ -203,6 +224,7 @@ EXPECTED_RESOLVE_STEPS = [
     "Resolve issue",
     "Create pull request",
     "Upload output artifact",
+    "Calculate and post cost",
 ]
 
 EXPECTED_DESIGN_STEPS = [
@@ -216,6 +238,7 @@ EXPECTED_DESIGN_STEPS = [
     "Gather issue context",
     "Call LLM for design analysis",
     "Post comment",
+    "Post cost comment",
 ]
 
 
