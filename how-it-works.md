@@ -82,8 +82,9 @@ When someone comments `/agent-claude-large` on an issue:
 3. **Config checkout** — resolve.yml checks out `lib/config.py` from remote-dev-bot
 4. **Config merge** — config.py loads base config from remote-dev-bot, merges with any override config in the target repo
 5. **Model resolution** — The alias `claude-large` is resolved to a model ID like `anthropic/claude-opus-4-5`
-6. **Agent runs** — OpenHands reads the issue, explores the codebase, makes changes
-7. **PR created** — A draft (or ready) PR is opened with the changes
+6. **Feedback** — A rocket emoji is added to your comment and you're assigned to the issue, so you can see at a glance which issues have active work
+7. **Agent runs** — OpenHands reads the issue, explores the codebase, makes changes
+8. **PR created** — A draft (or ready) PR is opened with the changes
 
 ```
 User comments /agent-claude-large

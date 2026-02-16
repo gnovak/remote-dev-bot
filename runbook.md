@@ -517,6 +517,7 @@ If successful, you should see:
 - A new branch created by the agent
 - A draft PR linked to the issue
 - A rocket emoji reaction on your `/agent-resolve` comment
+- You're auto-assigned to the issue (so your issues list shows what has active work)
 
 **Via web interface:**
 - Go to `https://github.com/{owner}/{repo}/pulls` to see the new draft PR
