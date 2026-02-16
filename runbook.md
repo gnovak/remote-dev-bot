@@ -372,7 +372,7 @@ gh secret set PAT_TOKEN --repo {owner}/{repo}
 
 ## Phase 3: Install the Workflow
 
-### Step 3.1: Download the Workflow File
+### Step 3.1: Download the Workflow Files
 
 **What this does:** Adds two self-contained workflow files to your repository. Each file includes everything the bot needs — model configuration, config parsing, security guardrails, and the agent runner.
 
@@ -499,7 +499,8 @@ gh issue comment {issue-number} --repo {owner}/{repo} --body "/agent-resolve-cla
 **Via command line:**
 ```bash
 # Check the Actions tab for runs:
-gh run list --repo {owner}/{repo} --workflow=agent.yml
+gh run list --repo {owner}/{repo} --workflow=agent-resolve.yml
+# If using the shim install, use --workflow=agent.yml instead
 
 # View logs for a specific run:
 gh run view {run-id} --repo {owner}/{repo} --log
@@ -530,8 +531,8 @@ gh pr list --repo {owner}/{repo}
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `ModuleNotFoundError: No module named 'yaml'` | PyYAML not installed before config parsing | Should be fixed in current workflow — update to latest |
-| `ImportError: cannot import name 'WorkspaceState'` | Old OpenHands version | Update `openhands.version` in `remote-dev-bot.yaml` to latest (currently 1.3.0) |
+| `ModuleNotFoundError: No module named 'yaml'` | PyYAML not installed before config parsing | **Compiled:** Re-download latest from [releases](https://github.com/gnovak/remote-dev-bot/releases). **Shim:** Should auto-fix (uses latest resolve.yml) |
+| `ImportError: cannot import name 'WorkspaceState'` | Old OpenHands version | **Compiled:** Re-download latest from [releases](https://github.com/gnovak/remote-dev-bot/releases). **Shim:** Should auto-fix |
 | `error: the following arguments are required: --selected-repo` | OpenHands 1.x API change | Update workflow — `--repo` was renamed to `--selected-repo` |
 | `ValueError: Username is required` | Missing env vars | Workflow needs `GITHUB_USERNAME` and `GIT_USERNAME` |
 | `Missing Anthropic API Key` or `x-api-key header is required` | API key not reaching the workflow | **Shim install:** Ensure secrets are passed explicitly (not via `secrets: inherit`) — see `examples/agent.yml`. **Both installs:** Re-check the secret value via web (`https://github.com/{owner}/{repo}/settings/secrets/actions`) |
@@ -550,11 +551,17 @@ Create `.openhands/microagents/repo.md` in your target repo with any context the
 
 ### Step 5.2: Adjust Model Aliases
 
-Edit `remote-dev-bot.yaml` to add, remove, or change model aliases. The default model is set by the `default_model` field.
+**Compiled install:** Search for `MODEL_CONFIG` in your workflow files to change the default model or add/modify aliases.
+
+**Shim install:** Create a `remote-dev-bot.yaml` file in your repo root to override the default model or add custom aliases. See `how-it-works.md` for config layering details.
 
 ### Step 5.3: Adjust Iteration Limits
 
-The `max_iterations` setting in `remote-dev-bot.yaml` controls how many steps the agent can take. Higher = more capable but more expensive. Default is 50. If using cheaper models that tend to loop, consider lowering to 30.
+**Compiled install:** Search for `MAX_ITERATIONS` in your workflow files. Default is 50.
+
+**Shim install:** Create or edit `remote-dev-bot.yaml` in your repo root and set `openhands.max_iterations`.
+
+If using cheaper models that tend to loop, consider lowering to 30.
 
 ---
 
