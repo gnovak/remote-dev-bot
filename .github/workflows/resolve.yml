@@ -306,7 +306,9 @@ jobs:
               "You are analyzing a GitHub issue for design discussion. "
               "Provide thoughtful analysis, surface trade-offs, suggest approaches, "
               "and ask clarifying questions. Format your response as markdown suitable "
-              "for a GitHub comment."
+              "for a GitHub comment. "
+              "IMPORTANT: Never begin your response with a slash command like /agent "
+              "or any text that could trigger another bot action."
           )
 
           response = completion(
@@ -320,11 +322,27 @@ jobs:
 
           result = response.choices[0].message.content
 
-          # Write to file (avoid shell escaping)
-          with open("/tmp/llm_response.md", "w") as f:
-              f.write(result)
-
-          print(f"Generated {len(result)} chars of design analysis")
+          # Loop prevention: detect /agent commands anywhere in the response
+          # If found, block the entire response to prevent recursive triggers
+          import re
+          agent_pattern = re.compile(r'^/agent', re.MULTILINE)
+          if agent_pattern.search(result):
+              print("=" * 60)
+              print("BLOCKED: Response contains /agent command(s)")
+              print("=" * 60)
+              print("Full response (for debugging):")
+              print(result)
+              print("=" * 60)
+              # Signal to the post step that this response should be blocked
+              with open("/tmp/llm_blocked", "w") as f:
+                  f.write("true")
+              with open("/tmp/llm_response.md", "w") as f:
+                  f.write("")  # Empty - won't be used
+          else:
+              # Write to file (avoid shell escaping)
+              with open("/tmp/llm_response.md", "w") as f:
+                  f.write(result)
+              print(f"Generated {len(result)} chars of design analysis")
           PYEOF
 
       - name: Post comment
@@ -332,14 +350,30 @@ jobs:
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           MODE="${{ needs.parse.outputs.mode }}"
           ALIAS="${{ needs.parse.outputs.alias }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          # Add footer with metadata
-          {
-            cat /tmp/llm_response.md
-            echo ""
-            echo "---"
-            echo "_Design analysis by \`/agent-${MODE}-${ALIAS}\`_"
-          } > /tmp/comment_body.md
+          # Check if the response was blocked due to /agent command detection
+          if [ -f /tmp/llm_blocked ]; then
+            echo "⚠️ Response blocked due to /agent command detection"
+            {
+              echo "⚠️ **Agent loop blocked!**"
+              echo ""
+              echo "The design analysis response contained \`/agent\` command(s) which could trigger a recursive agent loop. The response has been blocked for safety."
+              echo ""
+              echo "See the [workflow run logs]($RUN_URL) for the full response content."
+              echo ""
+              echo "---"
+              echo "_Blocked by \`/agent-${MODE}-${ALIAS}\` safety check_"
+            } > /tmp/comment_body.md
+          else
+            # Add footer with metadata
+            {
+              cat /tmp/llm_response.md
+              echo ""
+              echo "---"
+              echo "_Design analysis by \`/agent-${MODE}-${ALIAS}\`_"
+            } > /tmp/comment_body.md
+          fi
 
           gh issue comment "$ISSUE_NUMBER" \
             --repo "${{ github.repository }}" \
