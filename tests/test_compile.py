@@ -186,6 +186,61 @@ def test_both_have_required_markers(compiled_dir):
         assert "PAT_TOKEN" in content, f"{fname} missing PAT_TOKEN documentation"
 
 
+# --- Step count tripwire ---
+# These tests fail when steps are added to or removed from resolve.yml,
+# forcing you to check whether compile.py needs a corresponding update.
+
+
+EXPECTED_RESOLVE_STEPS = [
+    "Checkout repository",
+    "Set up Python",
+    "Parse config and model alias",
+    "Determine API key",
+    "React to comment",
+    "Assign commenter to issue",
+    "Install OpenHands",
+    "Inject security guardrails",
+    "Resolve issue",
+    "Create pull request",
+    "Upload output artifact",
+]
+
+EXPECTED_DESIGN_STEPS = [
+    "Checkout repository",
+    "Set up Python",
+    "Parse config and model alias",
+    "Determine API key",
+    "React to comment",
+    "Assign commenter to issue",
+    "Install dependencies",
+    "Gather issue context",
+    "Call LLM for design analysis",
+    "Post comment",
+]
+
+
+def test_resolve_step_count(compiled_dir):
+    """Tripwire: fails if steps are added/removed from resolve.yml without updating compile.py."""
+    data = _load_compiled(compiled_dir / "agent-resolve.yml")
+    job = list(data["jobs"].values())[0]
+    actual = [s.get("name", "(unnamed)") for s in job["steps"]]
+    assert actual == EXPECTED_RESOLVE_STEPS, (
+        f"Compiled resolve steps changed. If you added/removed a step in resolve.yml, "
+        f"update compile.py and this list.\n  Expected: {EXPECTED_RESOLVE_STEPS}\n  Actual:   {actual}"
+    )
+
+
+def test_design_step_count(compiled_dir):
+    """Tripwire: fails if steps are added/removed from resolve.yml without updating compile.py."""
+    data = _load_compiled(compiled_dir / "agent-design.yml")
+    job = list(data["jobs"].values())[0]
+    actual = [s.get("name", "(unnamed)") for s in job["steps"]]
+    assert actual == EXPECTED_DESIGN_STEPS, (
+        f"Compiled design steps changed. If you added/removed a step in resolve.yml, "
+        f"update compile.py and this list.\n  Expected: {EXPECTED_DESIGN_STEPS}\n  Actual:   {actual}"
+    )
+
+
 # --- Error handling ---
 
 
