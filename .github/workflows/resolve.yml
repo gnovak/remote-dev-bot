@@ -34,6 +34,7 @@ jobs:
       max_iterations: ${{ steps.parse.outputs.max_iterations }}
       oh_version: ${{ steps.parse.outputs.oh_version }}
       pr_type: ${{ steps.parse.outputs.pr_type }}
+      context_files: ${{ steps.parse.outputs.context_files }}
 
     steps:
       - name: Checkout target repository
@@ -335,8 +336,10 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CONTEXT_FILES: ${{ needs.parse.outputs.context_files }}
         run: |
           python3 << 'PYEOF'
+          import json
           import os
           import yaml
 
@@ -356,6 +359,16 @@ jobs:
                   if "prompt_prefix" in mode_cfg:
                       prompt_prefix = mode_cfg["prompt_prefix"]
                       break
+
+          # Read repo context files (missing files are skipped gracefully)
+          repo_context = ""
+          context_files = json.loads(os.environ.get("CONTEXT_FILES", "[]") or "[]")
+          for filepath in context_files:
+              if os.path.exists(filepath):
+                  with open(filepath) as f:
+                      content = f.read().strip()
+                  if content:
+                      repo_context += f"\n\n## File: {filepath}\n\n{content}"
 
           # Read issue context
           with open("/tmp/issue_title.txt") as f:
@@ -382,6 +395,9 @@ jobs:
               "IMPORTANT: Never begin your response with a slash command like /agent "
               "or any text that could trigger another bot action."
           )
+
+          if repo_context:
+              system_prompt = "# Repository Context\n" + repo_context + "\n\n# Instructions\n\n" + system_prompt
 
           response = completion(
               model=model,
