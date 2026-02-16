@@ -8,7 +8,7 @@ on:
         required: false
         default: "main"
       provider:
-        description: "Provider to test (all, claude, openai, gemini)"
+        description: "Provider to test (all, anthropic, openai, gemini)"
         required: false
         default: "all"
       all_models:
