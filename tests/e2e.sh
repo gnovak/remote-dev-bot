@@ -10,7 +10,7 @@
 #
 #   --branch      Branch to test (default: main). Sets dev pointer to this branch.
 #   --test        Run a specific test only (default: all)
-#   --provider    Run only tests for a specific provider (claude/openai/gemini)
+#   --provider    Run only tests for a specific provider (anthropic/openai/gemini)
 #   --all-models  Test every model alias, not just one per provider
 #   --compiled    Test compiled workflows instead of shim (pre-release validation)
 
@@ -93,9 +93,9 @@ else
         "Create a file hello.py with a function hello() that returns 'Hello, world!'" \
         "/agent-resolve" "all" "resolve"
 
-    add_test "claude" "Test: add greet.py" \
+    add_test "anthropic" "Test: add greet.py" \
         "Create a file greet.py with a function greet(name) that returns f'Hello, {name}!'" \
-        "/agent-resolve-claude-small" "claude" "resolve"
+        "/agent-resolve-claude-small" "anthropic" "resolve"
 
     add_test "openai" "Test: add wave.py" \
         "Create a file wave.py with a function wave() that returns 'Wave!'" \

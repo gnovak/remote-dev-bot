@@ -54,7 +54,7 @@ See [AGENTS.md](AGENTS.md) for the full dev cycle documentation, including how t
 
 ### E2E tests (`tests/e2e.sh`)
 - Creates issues in remote-dev-bot-test, triggers agent, polls for completion
-- Modes: `--provider claude` (one provider), `--all-models` (every alias)
+- Modes: `--provider anthropic` (one provider), `--all-models` (every alias)
 - Run via GitHub Actions: `.github/workflows/e2e.yml` (workflow_dispatch)
 - See `./tests/e2e.sh --help` for options
 
@@ -67,6 +67,19 @@ See [AGENTS.md](AGENTS.md) for the full dev cycle documentation, including how t
 - Unit tests (`tests/test_compile.py`): validate both compiled files (resolve and design) — structure, triggers, permissions, model aliases, security microagent
 - E2E: `./tests/e2e.sh --compiled` swaps compiled workflows into the test repo, runs the full suite, then restores the shim. Use this before releases.
 
+### Full test suite (`.github/workflows/full-test-suite.yml`)
+- One-button "run everything" workflow: unit tests → e2e shim → e2e compiled → e2e security
+- Jobs run **sequentially** — all e2e tests share `remote-dev-bot-test` and cannot run in parallel (shared dev pointer, workflow files, and issues)
+- Use before releases to validate everything in one go
+
+### Shared state constraint
+All e2e tests (functional, compiled, security) use `remote-dev-bot-test` as their target repo. They share:
+- The `dev` branch pointer (set to the branch under test)
+- Workflow files in the test repo (compiled tests swap out the shim)
+- Issues and PRs created during the test run
+
+**Do not run e2e workflows in parallel.** Use the full test suite workflow for sequential execution, or run individual workflows one at a time.
+
 ## Release Procedure
 
 Releases distribute two compiled workflows (`agent-resolve.yml` and `agent-design.yml`) that users download into their repos.
@@ -77,12 +90,12 @@ Releases distribute two compiled workflows (`agent-resolve.yml` and `agent-desig
 
 2. **Run E2E tests against the shim-based workflow** (tests the reusable workflow on main):
    ```bash
-   ./tests/e2e.sh --provider claude
+   ./tests/e2e.sh --provider anthropic
    ```
 
 3. **Run E2E tests against the compiled workflows** (tests the standalone install):
    ```bash
-   ./tests/e2e.sh --compiled --provider claude
+   ./tests/e2e.sh --compiled --provider anthropic
    ```
 
    Both must pass before proceeding.

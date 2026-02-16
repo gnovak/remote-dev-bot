@@ -8,7 +8,7 @@ on:
         required: false
         default: "main"
       provider:
-        description: "Provider to test (all, claude, openai, gemini)"
+        description: "Provider to test (all, anthropic, openai, gemini)"
         required: false
         default: "all"
       all_models:
@@ -20,6 +20,11 @@ on:
         description: "Specific test name (blank for all)"
         required: false
         default: ""
+      compiled:
+        description: "Test compiled workflows instead of shim"
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   e2e:
@@ -37,7 +42,7 @@ jobs:
 
       - name: Run E2E tests
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
         run: |
           ARGS="--branch ${{ inputs.branch }}"
           if [[ -n "${{ inputs.provider }}" && "${{ inputs.provider }}" != "all" ]]; then
@@ -48,5 +53,8 @@ jobs:
           fi
           if [[ -n "${{ inputs.test }}" ]]; then
             ARGS="$ARGS --test ${{ inputs.test }}"
+          fi
+          if [[ "${{ inputs.compiled }}" == "true" ]]; then
+            ARGS="$ARGS --compiled"
           fi
           ./tests/e2e.sh $ARGS

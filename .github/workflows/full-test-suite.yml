@@ -1,0 +1,85 @@
+name: Full Test Suite
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to test"
+        required: false
+        default: "main"
+
+# Sequential execution: all jobs use the same test repo, so they
+# cannot run in parallel (shared dev pointer, workflow files, issues).
+# Unit tests run first as a fast-fail gate.
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pytest PyYAML
+
+      - name: Run unit tests
+        run: pytest tests/ -v
+        env:
+          PYTHONPATH: .
+
+  e2e-shim:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
+      - name: Install PyYAML
+        run: pip install PyYAML
+
+      - name: Run E2E tests (shim, all models)
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+        run: ./tests/e2e.sh --branch ${{ inputs.branch }} --all-models
+
+  e2e-compiled:
+    needs: e2e-shim
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
+      - name: Install PyYAML
+        run: pip install PyYAML
+
+      - name: Run E2E tests (compiled, all models)
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+        run: ./tests/e2e.sh --branch ${{ inputs.branch }} --compiled --all-models
+
+  e2e-security:
+    needs: e2e-compiled
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
+      - name: Run security E2E tests
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          TESTER_PAT: ${{ secrets.TESTER_PAT_TOKEN }}
+        run: ./tests/e2e-security.sh --branch ${{ inputs.branch }}
