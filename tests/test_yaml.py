@@ -141,58 +141,68 @@ def test_design_prompt_has_loop_prevention(bot_config):
 
 
 def test_resolve_yml_has_response_validation(resolve_yml):
-    """Verify resolve.yml strips /agent commands from LLM responses."""
-    # Check for the loop prevention regex
+    """Verify resolve.yml blocks responses containing /agent commands."""
+    # Check for the loop prevention comment
     assert "Loop prevention" in resolve_yml, (
         "resolve.yml should have loop prevention comment"
     )
-    assert "/agent" in resolve_yml and "re.sub" in resolve_yml, (
-        "resolve.yml should strip /agent commands from responses"
+    # Check for the blocking mechanism (not stripping)
+    assert "agent_pattern" in resolve_yml, (
+        "resolve.yml should use agent_pattern to detect /agent commands"
+    )
+    assert "llm_blocked" in resolve_yml, (
+        "resolve.yml should write to llm_blocked file when /agent detected"
+    )
+    assert "Agent loop blocked" in resolve_yml, (
+        "resolve.yml should post a warning message when blocking"
     )
 
 
 class TestLoopPreventionRegex:
-    """Test the regex pattern used to strip /agent commands from responses."""
+    """Test the regex pattern used to detect /agent commands in responses."""
 
     import re
     # This is the same pattern used in resolve.yml
-    PATTERN = r'^(/agent[^\s]*\s*)+'
+    PATTERN = re.compile(r'^/agent', re.MULTILINE)
 
-    def strip_agent_commands(self, text):
-        import re
-        return re.sub(self.PATTERN, '', text, flags=re.MULTILINE).lstrip()
+    def contains_agent_command(self, text):
+        """Returns True if text contains /agent at start of any line."""
+        return bool(self.PATTERN.search(text))
 
-    def test_strips_single_agent_command(self):
+    def test_detects_single_agent_command(self):
         text = "/agent-design-claude-large\nHere is my analysis..."
-        result = self.strip_agent_commands(text)
-        assert result == "Here is my analysis..."
+        assert self.contains_agent_command(text) is True
 
-    def test_strips_multiple_agent_commands(self):
+    def test_detects_multiple_agent_commands(self):
         text = "/agent-resolve\n/agent-design\nActual content"
-        result = self.strip_agent_commands(text)
-        assert result == "Actual content"
+        assert self.contains_agent_command(text) is True
 
-    def test_preserves_agent_in_middle_of_text(self):
+    def test_ignores_agent_in_middle_of_text(self):
         text = "You can use /agent-resolve to trigger the bot."
-        result = self.strip_agent_commands(text)
-        assert result == text
+        assert self.contains_agent_command(text) is False
 
-    def test_preserves_normal_response(self):
+    def test_ignores_normal_response(self):
         text = "Here is my thoughtful analysis of the issue..."
-        result = self.strip_agent_commands(text)
-        assert result == text
+        assert self.contains_agent_command(text) is False
 
-    def test_strips_agent_with_various_suffixes(self):
+    def test_detects_agent_with_various_suffixes(self):
         text = "/agent-resolve-claude-large\nContent"
-        result = self.strip_agent_commands(text)
-        assert result == "Content"
+        assert self.contains_agent_command(text) is True
 
     def test_handles_empty_response(self):
         text = ""
-        result = self.strip_agent_commands(text)
-        assert result == ""
+        assert self.contains_agent_command(text) is False
 
-    def test_strips_bare_agent_command(self):
+    def test_detects_bare_agent_command(self):
         text = "/agent\nSome content"
-        result = self.strip_agent_commands(text)
-        assert result == "Some content"
+        assert self.contains_agent_command(text) is True
+
+    def test_detects_agent_on_later_line(self):
+        """Ensure /agent on any line (not just first) is detected."""
+        text = "Some normal content\n/agent-resolve\nMore content"
+        assert self.contains_agent_command(text) is True
+
+    def test_detects_bypass_attempt(self):
+        """Ensure /agent/agent bypass attempt is detected."""
+        text = "/agent/agent-resolve\nContent"
+        assert self.contains_agent_command(text) is True
