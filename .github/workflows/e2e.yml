@@ -1,4 +1,5 @@
 name: E2E Tests
+run-name: "E2E: ${{ inputs.provider || 'all' }} on ${{ inputs.branch || 'main' }}${{ inputs.compiled && ' (compiled)' || '' }}${{ inputs.all_models && ' (all models)' || '' }}${{ inputs.test && format(' [{0}]', inputs.test) || '' }}"
 
 on:
   workflow_dispatch:

@@ -88,22 +88,22 @@ for alias, info in config.get('models', {}).items():
         "Create a file hello_default.py with a function hello() that returns 'Hello from default!'" \
         "/agent-resolve" "all" "resolve"
 else
-    # Smoke tests: one small model per provider + default
+    # Smoke tests: one medium model per provider + default
     add_test "default-model" "Test: add hello.py" \
         "Create a file hello.py with a function hello() that returns 'Hello, world!'" \
         "/agent-resolve" "all" "resolve"
 
     add_test "anthropic" "Test: add greet.py" \
         "Create a file greet.py with a function greet(name) that returns f'Hello, {name}!'" \
-        "/agent-resolve-claude-small" "anthropic" "resolve"
+        "/agent-resolve-claude-medium" "anthropic" "resolve"
 
     add_test "openai" "Test: add wave.py" \
         "Create a file wave.py with a function wave() that returns 'Wave!'" \
-        "/agent-resolve-openai-small" "openai" "resolve"
+        "/agent-resolve-openai-medium" "openai" "resolve"
 
     add_test "gemini" "Test: add hi.py" \
         "Create a file hi.py with a function hi() that returns 'Hi!'" \
-        "/agent-resolve-gemini-small" "gemini" "resolve"
+        "/agent-resolve-gemini-medium" "gemini" "resolve"
 
     # Design mode smoke test
     add_test "design" "Test: design analysis" \
@@ -429,12 +429,15 @@ for pos in "${!issue_nums[@]}"; do
     else
         status="FAIL ($conclusion)"
         ((fail++)) || true
-        if [[ -n "$run_id" ]]; then
-            log "  Logs: gh run view $run_id --repo $TEST_REPO --log | tail -40"
-        fi
     fi
 
-    printf "  %-25s %-25s issue #%s\n" "$name" "$status" "$issue_num"
+    # Build clickable job log URL
+    log_url=""
+    if [[ -n "$run_id" ]]; then
+        log_url="https://github.com/$TEST_REPO/actions/runs/$run_id"
+    fi
+
+    printf "  %-25s %-25s issue #%-5s %s\n" "$name" "$status" "$issue_num" "$log_url"
 done
 
 log "========================================="
