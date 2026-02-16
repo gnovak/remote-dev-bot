@@ -4,8 +4,11 @@
 # The real logic lives in gnovak/remote-dev-bot and updates automatically.
 #
 # Prerequisites (see runbook.md for details):
-#   - Repository secrets: at least one LLM API key + PAT_TOKEN
+#   - Repository secrets: at least one LLM API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY)
 #   - Actions permissions: read/write + allow PR creation
+#
+# Note: secrets must be passed explicitly (not via `secrets: inherit`) because
+# GitHub Actions does not pass inherited secrets across different repo owners.
 #
 # To test against a dev branch of remote-dev-bot, change @main to @dev below.
 
@@ -33,4 +36,8 @@ jobs:
       startsWith(github.event.comment.body, '/agent-') &&
       contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), github.event.comment.author_association)
     uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@main
-    secrets: inherit
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}

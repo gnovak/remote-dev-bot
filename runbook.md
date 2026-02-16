@@ -330,7 +330,7 @@ gh secret list --repo {owner}/{repo}
 
 ### Step 2.4: Create a Personal Access Token (PAT) — Optional
 
-> **You can skip this step.** The compiled single-file workflow (Step 3.1) works without a PAT. The only thing you lose is automatic CI triggering: when the bot creates a PR, your CI checks won't run automatically. You can always trigger them manually, or come back and add a PAT later.
+> **You can skip this step.** Both the compiled install and the shim install work without a PAT. The only thing you lose is automatic CI triggering: when the bot creates a PR, your CI checks won't run automatically. You can always trigger them manually, or come back and add a PAT later.
 
 <details>
 <summary><strong>Click to expand PAT setup instructions</strong> (needed only if you want bot PRs to auto-trigger CI)</summary>
@@ -339,7 +339,7 @@ gh secret list --repo {owner}/{repo}
 
 GitHub's default `GITHUB_TOKEN` can push branches and create PRs, but PRs it creates won't trigger other workflows (like CI checks). This is a GitHub security feature to prevent infinite loops. A PAT bypasses this limitation.
 
-With the single-file install, the PAT only needs access to your own repo — no cross-repo scoping required.
+The PAT only needs access to your own repo — no cross-repo scoping required.
 
 #### Instructions
 
@@ -414,7 +414,9 @@ gh workflow list --repo {owner}/{repo}
 <details>
 <summary><strong>Alternative: Shim install (auto-updating)</strong></summary>
 
-Instead of the self-contained file, you can use a thin shim that calls the reusable workflow from `gnovak/remote-dev-bot`. This means you automatically get updates when the bot is improved, but requires a PAT with cross-repo access.
+Instead of the self-contained file, you can use a thin shim that calls the reusable workflow from `gnovak/remote-dev-bot`. This means you automatically get updates when the bot is improved — no need to download new releases.
+
+No PAT is required. The shim works with just your LLM API key(s).
 
 ```yaml
 name: Remote Dev Bot
@@ -437,14 +439,18 @@ jobs:
       startsWith(github.event.comment.body, '/agent-') &&
       contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), github.event.comment.author_association)
     uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@main
-    secrets: inherit
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
 ```
 
-This requires:
-- A PAT with access to both your repo and `gnovak/remote-dev-bot` (see Step 2.4)
-- The PAT stored as `PAT_TOKEN` secret on your repo
+**Why explicit secrets?** GitHub Actions does not pass `secrets: inherit` across different repo owners. Since your repo and `gnovak/remote-dev-bot` have different owners, secrets must be listed explicitly. You only need to set the API key(s) for the provider(s) you use — the others will be empty and that's fine.
 
-**Using your own fork:** For full control, fork `gnovak/remote-dev-bot` and point the `uses:` line at your fork. You'll need to set Actions access to `user` level on the fork (see Troubleshooting).
+**Optional PAT:** `PAT_TOKEN` is only needed if you want bot-created PRs to auto-trigger your CI checks. See Step 2.4 for details.
+
+**Using your own fork:** For full control, fork `gnovak/remote-dev-bot` and point the `uses:` line at your fork. If the fork is in the same owner/org as your target repos, `secrets: inherit` will work. You'll need to set Actions access to `user` level on the fork (see Troubleshooting).
 
 </details>
 
@@ -528,13 +534,11 @@ gh pr list --repo {owner}/{repo}
 | `ImportError: cannot import name 'WorkspaceState'` | Old OpenHands version | Update `openhands.version` in `remote-dev-bot.yaml` to latest (currently 1.3.0) |
 | `error: the following arguments are required: --selected-repo` | OpenHands 1.x API change | Update workflow — `--repo` was renamed to `--selected-repo` |
 | `ValueError: Username is required` | Missing env vars | Workflow needs `GITHUB_USERNAME` and `GIT_USERNAME` |
-| `Missing Anthropic API Key` or `x-api-key header is required` | API key not set or set empty | Re-set the secret via web (`https://github.com/{owner}/{repo}/settings/secrets/actions`) or `gh secret set` |
+| `Missing Anthropic API Key` or `x-api-key header is required` | API key not reaching the workflow | **Shim install:** Ensure secrets are passed explicitly (not via `secrets: inherit`) — see `examples/agent.yml`. **Both installs:** Re-check the secret value via web (`https://github.com/{owner}/{repo}/settings/secrets/actions`) |
 | `Agent reached maximum iteration` | Agent loops instead of finishing | Try `/agent-resolve-claude-medium` instead of `/agent-resolve` |
 | `429 Too Many Requests` | GitHub API rate limit | Wait a few minutes and try again |
 | `KeyError: 'LLM_API_KEY'` in PR creation step | Missing env vars in PR step | Update workflow to pass `LLM_API_KEY` and `LLM_MODEL` to both steps |
-| Workflow file issue (instant failure, 0s) | Reusable workflow not accessible | Set Actions access to `user` level on remote-dev-bot (see below) |
-| `Not Found` on config checkout step | PAT can't access remote-dev-bot repo | PAT must include remote-dev-bot in its repository scope (update at `https://github.com/settings/tokens`) |
-| `404 Not Found` on issues API (Resolve step) | PAT doesn't cover the target repo | Update PAT to "All repositories" or add the target repo to its scope (at `https://github.com/settings/tokens`) |
+| Workflow file issue (instant failure, 0s) | Reusable workflow not accessible | **Shim install:** Ensure `gnovak/remote-dev-bot` (or your fork) is public, or set Actions access to `user` level if using a private fork |
 
 ---
 
@@ -556,26 +560,21 @@ The `max_iterations` setting in `remote-dev-bot.yaml` controls how many steps th
 
 ## Troubleshooting
 
-### Cross-repo reusable workflow access
+### Cross-repo reusable workflow access (shim install only)
 
-The shim in your target repo calls `resolve.yml` from `gnovak/remote-dev-bot`. For this to work with a private repo, you must enable Actions access sharing on `remote-dev-bot`:
+The shim calls `resolve.yml` from `gnovak/remote-dev-bot`. Since that repo is public, this works automatically — no special access settings needed.
 
-**Via web interface:**
-1. Go to `https://github.com/gnovak/remote-dev-bot/settings/actions`
-2. Scroll down to "Access" section
-3. Select "Accessible from repositories owned by the user 'gnovak'" (or your fork's owner)
-4. Click "Save"
+**If using a private fork:** You must enable Actions access sharing on your fork:
 
-**Via command line:**
-```bash
-gh api repos/gnovak/remote-dev-bot/actions/permissions/access \
-  --method PUT \
-  --field access_level=user
-```
+1. Go to your fork's Settings → Actions → General → Access
+2. Select "Accessible from repositories owned by the user" (or org)
+3. Click "Save"
 
-This allows all repos owned by the same user to call reusable workflows in `remote-dev-bot`. Without this, the shim will fail instantly with "workflow file issue."
+Without this, the shim will fail instantly with "workflow file issue."
 
-Also ensure your PAT token covers all repos involved — both the target repo and `remote-dev-bot`. The simplest approach is to set the PAT to "All repositories" scope in your GitHub token settings (at `https://github.com/settings/tokens`).
+### Secrets not reaching the reusable workflow (shim install only)
+
+If the agent fails with `x-api-key header is required` or similar authentication errors, check that secrets are passed explicitly in the shim (not via `secrets: inherit`). GitHub Actions does not pass inherited secrets across different repo owners. See the shim template in `examples/agent.yml`.
 
 ### Agent doesn't trigger
 - Verify the shim workflow file is on the default branch (usually `main`) of the target repo
