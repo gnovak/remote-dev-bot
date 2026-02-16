@@ -88,22 +88,22 @@ for alias, info in config.get('models', {}).items():
         "Create a file hello_default.py with a function hello() that returns 'Hello from default!'" \
         "/agent-resolve" "all" "resolve"
 else
-    # Smoke tests: one small model per provider + default
+    # Smoke tests: one medium model per provider + default
     add_test "default-model" "Test: add hello.py" \
         "Create a file hello.py with a function hello() that returns 'Hello, world!'" \
         "/agent-resolve" "all" "resolve"
 
     add_test "anthropic" "Test: add greet.py" \
         "Create a file greet.py with a function greet(name) that returns f'Hello, {name}!'" \
-        "/agent-resolve-claude-small" "anthropic" "resolve"
+        "/agent-resolve-claude-medium" "anthropic" "resolve"
 
     add_test "openai" "Test: add wave.py" \
         "Create a file wave.py with a function wave() that returns 'Wave!'" \
-        "/agent-resolve-openai-small" "openai" "resolve"
+        "/agent-resolve-openai-medium" "openai" "resolve"
 
     add_test "gemini" "Test: add hi.py" \
         "Create a file hi.py with a function hi() that returns 'Hi!'" \
-        "/agent-resolve-gemini-small" "gemini" "resolve"
+        "/agent-resolve-gemini-medium" "gemini" "resolve"
 
     # Design mode smoke test
     add_test "design" "Test: design analysis" \
