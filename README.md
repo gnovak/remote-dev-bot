@@ -41,6 +41,26 @@ Model aliases (like `claude-medium`) map to **LiteLLM model identifiers** in `re
 | OpenAI (GPT) | `openai/` | `openai/gpt-5.1-codex-mini` |
 | Google (Gemini) | `gemini/` | `gemini/gemini-2.5-flash` |
 
+### Supported Providers
+
+Remote Dev Bot currently supports three LLM providers out of the box:
+
+| Provider | Secret Name | Model Prefix |
+|----------|-------------|--------------|
+| Anthropic (Claude) | `ANTHROPIC_API_KEY` | `anthropic/` |
+| OpenAI (GPT) | `OPENAI_API_KEY` | `openai/` |
+| Google (Gemini) | `GEMINI_API_KEY` | `gemini/` |
+
+The workflow automatically selects the correct API key based on the model prefix. For example, a model ID starting with `anthropic/` will use `ANTHROPIC_API_KEY`.
+
+**Adding a new provider:** LiteLLM supports many providers beyond these three. To add support for a new provider, you'll need to modify `.github/workflows/resolve.yml`:
+
+1. Add the new secret to the `workflow_call.secrets` section
+2. Add a case in the "Determine API key" step to match the provider prefix
+3. Pass the secret to the environment in the resolve and design jobs
+
+See the [LiteLLM providers documentation](https://docs.litellm.ai/docs/providers) for the full list of supported providers and their model prefixes.
+
 ### Finding Valid Model Names
 
 OpenHands uses LiteLLM, so the model strings must be valid LiteLLM identifiers. Browse available models at **[models.litellm.ai](https://models.litellm.ai)** — search by name, filter by provider, and see context windows and pricing.
