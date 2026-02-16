@@ -249,6 +249,28 @@ def test_resolve_config_mode_default_model_differs():
         os.unlink(path)
 
 
+def test_resolve_config_context_files_for_design(config_dir):
+    """Design mode should include context_files when configured."""
+    tmp_path, base_path = config_dir
+    # Add context_files to the config
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["modes"]["design"]["context_files"] = ["README.md", "AGENTS.md"]
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+
+    result = resolve_config(base_path, "nonexistent.yaml", "design")
+    assert "context_files" in result
+    assert result["context_files"] == ["README.md", "AGENTS.md"]
+
+
+def test_resolve_config_no_context_files_for_resolve(config_dir):
+    """Resolve mode should not have context_files."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert "context_files" not in result
+
+
 def test_resolve_config_no_prompt_prefix_for_resolve(config_dir):
     """Resolve mode should not have a prompt_prefix."""
     tmp_path, base_path = config_dir

@@ -14,6 +14,7 @@ and imported directly by unit tests. See CLAUDE.md "PR constraints" for why
 config parsing changes must be in their own PR, separate from workflow changes.
 """
 
+import json
 import os
 import sys
 
@@ -152,6 +153,10 @@ def resolve_config(base_path, override_path, command_string):
     if "prompt_prefix" in mode_config:
         result["prompt_prefix"] = mode_config["prompt_prefix"]
 
+    # Include context_files if the mode defines them
+    if "context_files" in mode_config:
+        result["context_files"] = mode_config["context_files"]
+
     return result
 
 
@@ -178,6 +183,8 @@ def main():
             f.write(f"max_iterations={result['max_iterations']}\n")
             f.write(f"oh_version={result['oh_version']}\n")
             f.write(f"pr_type={result['pr_type']}\n")
+            if "context_files" in result:
+                f.write(f"context_files={json.dumps(result['context_files'])}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"

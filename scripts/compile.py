@@ -355,7 +355,7 @@ def compile_design(shim, workflow, config_yaml, output_path):
     gather_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
     steps.append(gather_step)
 
-    # Call LLM for design analysis — rewrite to inline prompt_prefix
+    # Call LLM for design analysis — rewrite to inline prompt_prefix and context_files
     llm_step = find_step(design_steps, "Call LLM for design analysis").copy()
     # The step reads prompt_prefix from config files on disk. In compiled mode,
     # we inline it. Replace the config-loading Python code.
@@ -375,7 +375,17 @@ def compile_design(shim, workflow, config_yaml, output_path):
     llm_run = llm_run.replace(
         'config_path = ".remote-dev-bot/lib/../remote-dev-bot.yaml"\n', ''
     )
+    # Inline the context_files list (compiled workflows can't read from config at runtime)
+    context_files = design_config.get("context_files", [])
+    context_files_repr = repr(context_files)
+    llm_run = llm_run.replace(
+        'context_files = json.loads(os.environ.get("CONTEXT_FILES", "[]") or "[]")',
+        f'context_files = {context_files_repr}',
+    )
     llm_step["run"] = llm_run
+    # Remove CONTEXT_FILES env var since the list is inlined
+    if "env" in llm_step and "CONTEXT_FILES" in llm_step["env"]:
+        del llm_step["env"]["CONTEXT_FILES"]
     steps.append(llm_step)
 
     # Post comment

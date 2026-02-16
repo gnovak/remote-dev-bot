@@ -136,6 +136,16 @@ def test_design_has_llm_and_comment_steps(compiled_dir):
     assert "Gather issue context" in content
 
 
+def test_design_has_inlined_context_files(compiled_dir):
+    """Compiled design workflow should have context file paths inlined."""
+    content = _read_text(compiled_dir / "agent-design.yml")
+    assert "README.md" in content
+    assert "AGENTS.md" in content
+    assert ".openhands/microagents/repo.md" in content
+    # Should NOT use the env var approach (that's for the reusable workflow)
+    assert 'CONTEXT_FILES' not in content
+
+
 # --- Cost transparency ---
 
 

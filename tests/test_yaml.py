@@ -128,6 +128,14 @@ def test_agent_yml_has_author_association_gate():
 # --- Loop prevention checks ---
 
 
+def test_design_mode_has_context_files(bot_config):
+    """Design mode should have a context_files list."""
+    design_mode = bot_config["modes"]["design"]
+    assert "context_files" in design_mode, "Design mode missing 'context_files'"
+    assert isinstance(design_mode["context_files"], list), "context_files should be a list"
+    assert len(design_mode["context_files"]) > 0, "context_files should not be empty"
+
+
 def test_design_prompt_has_loop_prevention(bot_config):
     """Verify the design mode prompt instructs LLM not to start with /agent."""
     design_mode = bot_config["modes"]["design"]

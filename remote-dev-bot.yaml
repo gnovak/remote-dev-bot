@@ -15,6 +15,10 @@ modes:
   design:
     action: comment           # Post analysis as an issue comment (no code changes)
     default_model: claude-medium
+    context_files:
+      - README.md
+      - AGENTS.md
+      - .openhands/microagents/repo.md
     prompt_prefix: >
       You are analyzing this issue for design discussion.
       Do NOT write code or open a PR. Instead, provide thoughtful
