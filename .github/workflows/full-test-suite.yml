@@ -42,10 +42,13 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN || github.token }}
 
-      - name: Run E2E tests (shim)
+      - name: Install PyYAML
+        run: pip install PyYAML
+
+      - name: Run E2E tests (shim, all models)
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
-        run: ./tests/e2e.sh --branch ${{ inputs.branch }}
+        run: ./tests/e2e.sh --branch ${{ inputs.branch }} --all-models
 
   e2e-compiled:
     needs: e2e-shim
@@ -57,10 +60,13 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN || github.token }}
 
-      - name: Run E2E tests (compiled)
+      - name: Install PyYAML
+        run: pip install PyYAML
+
+      - name: Run E2E tests (compiled, all models)
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
-        run: ./tests/e2e.sh --branch ${{ inputs.branch }} --compiled
+        run: ./tests/e2e.sh --branch ${{ inputs.branch }} --compiled --all-models
 
   e2e-security:
     needs: e2e-compiled
