@@ -7,25 +7,27 @@ There are already excellent vendor-specific implementations of this pattern (Git
 ## How It Works
 
 1. Create a GitHub issue describing a feature or bug
-2. Comment `/agent-resolve` (or `/agent-resolve-claude-large`, etc.) to trigger implementation
+2. Comment `/agent-resolve` (or `/agent resolve`, `/agent-resolve-claude-large`, etc.) to trigger implementation
 3. A GitHub Action spins up an AI agent (powered by [OpenHands](https://github.com/OpenHands/OpenHands)) that:
    - Reads the issue and codebase
    - Implements the requested changes
    - Opens a draft PR
-4. Review the PR. If changes are needed, comment `/agent-resolve` on the PR with feedback for another pass.
+4. Review the PR. If changes are needed, comment `/agent-resolve` (or `/agent resolve`) on the PR with feedback for another pass.
 
-Or use `/agent-design` to get AI design analysis posted as a comment (no code changes).
+Or use `/agent-design` (or `/agent design`) to get AI design analysis posted as a comment (no code changes).
 
 **See it in action:** [Issue #33](https://github.com/gnovak/remote-dev-bot/issues/33) asked for model name documentation → [PR #52](https://github.com/gnovak/remote-dev-bot/pull/52) was created and merged autonomously.
 
 ## Commands
 
-| Command | What it does |
-|---------|-------------|
-| `/agent-resolve` | Resolve the issue and open a PR (default model) |
-| `/agent-resolve-claude-large` | Resolve with a specific model |
-| `/agent-design` | Post design analysis as a comment (no code changes) |
-| `/agent-design-claude-large` | Design analysis with a specific model |
+Both dash and space formats are supported (spaces are easier on mobile):
+
+| Dash Format | Space Format | What it does |
+|-------------|--------------|-------------|
+| `/agent-resolve` | `/agent resolve` | Resolve the issue and open a PR (default model) |
+| `/agent-resolve-claude-large` | `/agent resolve claude large` | Resolve with a specific model |
+| `/agent-design` | `/agent design` | Post design analysis as a comment (no code changes) |
+| `/agent-design-claude-large` | `/agent design claude large` | Design analysis with a specific model |
 
 Modes and model aliases are configured in `remote-dev-bot.yaml`.
 
@@ -92,7 +94,7 @@ You can also create a `remote-dev-bot.yaml` in your target repo to override the 
 
 The system has two parts:
 
-- **Shim workflow** (`.github/workflows/agent.yml`) — a thin trigger that lives in each target repo. Fires on `/agent-` commands and calls the reusable workflow. Copy this file to set up the shim install.
+- **Shim workflow** (`.github/workflows/agent.yml`) — a thin trigger that lives in each target repo. Fires on `/agent` commands (with dashes or spaces) and calls the reusable workflow. Copy this file to set up the shim install.
 - **Reusable workflow** (`.github/workflows/resolve.yml`) — all the logic: parses commands, dispatches to resolve or design mode, runs the agent. Lives in this repo and is called by shims in target repos.
 - **OpenHands** — the AI agent framework that does the actual code exploration and editing
 - **`remote-dev-bot.yaml`** — model aliases and OpenHands settings (version, max iterations, PR type)

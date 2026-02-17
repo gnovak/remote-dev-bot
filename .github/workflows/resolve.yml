@@ -62,9 +62,17 @@ jobs:
         id: parse
         run: |
           COMMENT="${{ github.event.comment.body }}"
-          # Extract command string: "/agent-resolve-claude-large do X" -> "resolve-claude-large"
+          # Extract command string: "/agent-resolve-claude-large" or "/agent resolve claude large"
+          # Both formats extract "resolve-claude-large" (spaces normalized to dashes)
           # Bare "/agent" produces empty string, which config.py will reject
+
+          # Try dash format first: /agent-resolve-claude-large
           COMMAND=$(echo "$COMMENT" | grep -oP '^/agent-\K[a-z0-9-]+' || echo "")
+
+          # If no match, try space format: /agent resolve claude large
+          if [ -z "$COMMAND" ]; then
+            COMMAND=$(echo "$COMMENT" | grep -oP '^/agent\s+\K[a-z0-9\s-]+' | head -1 | sed 's/\s\+/-/g' || echo "")
+          fi
 
           python3 .remote-dev-bot/lib/config.py "$COMMAND"
 

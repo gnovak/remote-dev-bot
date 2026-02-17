@@ -2,9 +2,9 @@
 
 ## Overview
 
-This runbook will guide you through setting up Remote Dev Bot on your GitHub repository. By the end, you'll have an AI-powered bot that can automatically resolve issues and create pull requests when triggered by a `/agent-resolve` comment.
+This runbook will guide you through setting up Remote Dev Bot on your GitHub repository. By the end, you'll have an AI-powered bot that can automatically resolve issues and create pull requests when triggered by a `/agent-resolve` (or `/agent resolve`) comment.
 
-**How the bot works:** When you comment `/agent-resolve` on an issue, a GitHub Actions workflow starts. It spins up [OpenHands](https://github.com/All-Hands-AI/OpenHands) (an open-source AI coding agent) in a sandboxed container, points it at your issue, and lets it work. The agent reads the issue, explores your codebase, writes code, runs tests, and iterates until it has a solution. Then it pushes a branch and opens a draft PR for your review. You can also use `/agent-design` for AI design analysis posted as a comment (no code changes).
+**How the bot works:** When you comment `/agent-resolve` (or `/agent resolve`) on an issue, a GitHub Actions workflow starts. It spins up [OpenHands](https://github.com/All-Hands-AI/OpenHands) (an open-source AI coding agent) in a sandboxed container, points it at your issue, and lets it work. The agent reads the issue, explores your codebase, writes code, runs tests, and iterates until it has a solution. Then it pushes a branch and opens a draft PR for your review. You can also use `/agent-design` (or `/agent design`) for AI design analysis posted as a comment (no code changes). Both dash and space formats work identically — use whichever is more convenient (spaces are easier on mobile).
 
 **What you'll set up:**
 

@@ -33,7 +33,7 @@ jobs:
     # To restrict further, remove roles from the list (e.g., '["OWNER"]' for owner-only).
     if: >
       (github.event.issue || github.event.pull_request) &&
-      startsWith(github.event.comment.body, '/agent-') &&
+      startsWith(github.event.comment.body, '/agent') &&
       contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), github.event.comment.author_association)
     uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@main
     secrets:

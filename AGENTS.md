@@ -6,6 +6,22 @@ Project conventions for AI coding agents working on this repository.
 
 Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to resolve issues and create PRs, controlled via `/agent-resolve` and `/agent-design` comments on GitHub issues.
 
+### Invocation Syntax
+
+You can invoke the bot using either dashes or spaces:
+
+**Dash format (classic):**
+- `/agent-resolve` — resolve mode, default model
+- `/agent-resolve-claude-large` — resolve mode with specific model
+- `/agent-design` — design mode, default model
+
+**Space format (mobile-friendly):**
+- `/agent resolve` — resolve mode, default model
+- `/agent resolve claude large` — resolve mode with specific model
+- `/agent design` — design mode, default model
+
+Both formats work identically. Use whichever is more convenient (spaces are easier on mobile keyboards).
+
 ### Key Files
 - `remote-dev-bot.yaml` — model aliases and OpenHands settings
 - `runbook.md` — setup instructions (designed to be followed by humans or AI assistants)
@@ -20,11 +36,11 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 - `.openhands/microagents/repo.md` — (in target repos) context for the agent
 
 ### How It Works
-1. User comments `/agent-resolve[-<model>]` or `/agent-design[-<model>]` on a GitHub issue
+1. User comments `/agent-resolve` (or `/agent resolve`) on a GitHub issue
 2. Target repo's shim workflow calls `resolve.yml` from this repo
 3. Reusable workflow parses the mode and model, dispatches to the right job
 4. Resolve mode: OpenHands runs, edits code, opens a draft PR. Design mode: LLM analyzes the issue, posts a comment.
-5. Iterative: comment `/agent-resolve` again on the PR with feedback for another pass
+5. Iterative: comment `/agent-resolve` (or `/agent resolve`) again on the PR with feedback for another pass
 
 ### Dev Cycle (detailed)
 
