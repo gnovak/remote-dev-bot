@@ -29,6 +29,8 @@ Or use `/agent-design` to get AI design analysis posted as a comment (no code ch
 
 Modes and model aliases are configured in `remote-dev-bot.yaml`.
 
+**Note:** Commands are case-insensitive. `/agent-resolve-Claude-Large` works the same as `/agent-resolve-claude-large`. This helps on mobile devices where autocorrect may capitalize words like "Claude".
+
 ### Understanding Model Names
 
 Model aliases (like `claude-medium`) map to **LiteLLM model identifiers** in `remote-dev-bot.yaml`. LiteLLM is the library OpenHands uses to talk to different LLM providers through a unified interface.
