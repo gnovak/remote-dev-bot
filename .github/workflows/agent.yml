@@ -31,9 +31,10 @@ jobs:
     # OWNER = repo owner, COLLABORATOR = explicitly invited, MEMBER = org member.
     # This prevents arbitrary users from triggering runs that consume API credits.
     # To restrict further, remove roles from the list (e.g., '["OWNER"]' for owner-only).
+    # Supports both "/agent-resolve" (dash) and "/agent resolve" (space) syntax.
     if: >
       (github.event.issue || github.event.pull_request) &&
-      startsWith(github.event.comment.body, '/agent-') &&
+      (startsWith(github.event.comment.body, '/agent-') || startsWith(github.event.comment.body, '/agent ')) &&
       contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), github.event.comment.author_association)
     uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@main
     secrets:
