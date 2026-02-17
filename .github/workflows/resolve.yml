@@ -63,8 +63,10 @@ jobs:
         run: |
           COMMENT="${{ github.event.comment.body }}"
           # Extract command string: "/agent-resolve-claude-large do X" -> "resolve-claude-large"
+          # Commands are case-insensitive, so we extract with [a-zA-Z0-9-]+ and lowercase it
           # Bare "/agent" produces empty string, which config.py will reject
-          COMMAND=$(echo "$COMMENT" | grep -oP '^/agent-\K[a-z0-9-]+' || echo "")
+          COMMAND=$(echo "$COMMENT" | grep -oP '^/agent-\K[a-zA-Z0-9-]+' || echo "")
+          COMMAND=$(echo "$COMMAND" | tr '[:upper:]' '[:lower:]')
 
           python3 .remote-dev-bot/lib/config.py "$COMMAND"
 

@@ -57,6 +57,8 @@ def parse_command(command_string, known_modes):
     The command string is what follows '/agent-' in the comment.
     Grammar: <verb>[-<model>]
 
+    Commands are case-insensitive (e.g., /agent-resolve-Claude-Large works).
+
     If the command string is empty, raises ValueError (bare /agent not allowed).
     The first segment must be a known mode; remaining segments form the model alias.
 
@@ -68,12 +70,17 @@ def parse_command(command_string, known_modes):
     ('design', '')
     >>> parse_command("design-claude-large", {"resolve", "design"})
     ('design', 'claude-large')
+    >>> parse_command("Resolve-Claude-Large", {"resolve", "design"})
+    ('resolve', 'claude-large')
     """
     if not command_string:
         raise ValueError(
             "Bare /agent is not supported. "
             f"Use /agent-<mode> where mode is one of: {sorted(known_modes)}"
         )
+
+    # Normalize to lowercase for case-insensitive matching
+    command_string = command_string.lower()
 
     parts = command_string.split("-", 1)
     verb = parts[0]

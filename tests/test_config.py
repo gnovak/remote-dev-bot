@@ -111,6 +111,27 @@ def test_parse_command_unknown_mode_with_model():
         parse_command("frobnicate-claude-large", KNOWN_MODES)
 
 
+def test_parse_command_case_insensitive_mode():
+    """Commands should be case-insensitive."""
+    assert parse_command("Resolve", KNOWN_MODES) == ("resolve", "")
+    assert parse_command("RESOLVE", KNOWN_MODES) == ("resolve", "")
+    assert parse_command("Design", KNOWN_MODES) == ("design", "")
+    assert parse_command("DESIGN", KNOWN_MODES) == ("design", "")
+
+
+def test_parse_command_case_insensitive_model():
+    """Model aliases should be normalized to lowercase."""
+    assert parse_command("resolve-Claude-Large", KNOWN_MODES) == ("resolve", "claude-large")
+    assert parse_command("resolve-CLAUDE-LARGE", KNOWN_MODES) == ("resolve", "claude-large")
+    assert parse_command("design-OpenAI-Small", KNOWN_MODES) == ("design", "openai-small")
+
+
+def test_parse_command_case_insensitive_mixed():
+    """Mixed case in both mode and model should work."""
+    assert parse_command("Resolve-Claude-Large", KNOWN_MODES) == ("resolve", "claude-large")
+    assert parse_command("DESIGN-openai-SMALL", KNOWN_MODES) == ("design", "openai-small")
+
+
 # --- resolve_config ---
 
 
@@ -305,3 +326,23 @@ def test_resolve_config_malformed_yaml(tmp_path):
     bad_yaml.write_text(": this is not valid yaml\n  - broken:\nindent")
     with pytest.raises(yaml.YAMLError):
         resolve_config(str(bad_yaml), "nonexistent.yaml", "resolve")
+
+
+def test_resolve_config_case_insensitive(config_dir):
+    """Commands should be case-insensitive in resolve_config."""
+    tmp_path, base_path = config_dir
+    # Test uppercase mode
+    result = resolve_config(base_path, "nonexistent.yaml", "RESOLVE")
+    assert result["mode"] == "resolve"
+    assert result["alias"] == "claude-medium"
+
+    # Test mixed case mode and model
+    result = resolve_config(base_path, "nonexistent.yaml", "Resolve-Claude-Small")
+    assert result["mode"] == "resolve"
+    assert result["alias"] == "claude-small"
+    assert result["model"] == "anthropic/claude-haiku-4-5"
+
+    # Test all uppercase
+    result = resolve_config(base_path, "nonexistent.yaml", "DESIGN-CLAUDE-SMALL")
+    assert result["mode"] == "design"
+    assert result["alias"] == "claude-small"
