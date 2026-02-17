@@ -194,7 +194,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: agent-output
-          path: output.jsonl
+          path: output/output.jsonl
           retention-days: 30
 
       - name: Calculate and post cost
@@ -207,15 +207,15 @@ jobs:
           ALIAS="${{ needs.parse.outputs.alias }}"
           MODE="${{ needs.parse.outputs.mode }}"
 
-          # Check if output.jsonl exists
-          if [ ! -f output.jsonl ]; then
-            echo "No output.jsonl found, skipping cost calculation"
+          # Check if output/output.jsonl exists
+          if [ ! -f output/output.jsonl ]; then
+            echo "No output/output.jsonl found, skipping cost calculation"
             exit 0
           fi
 
-          # Parse metrics from output.jsonl
+          # Parse metrics from output/output.jsonl
           # OpenHands writes metrics at the end of the run
-          METRICS=$(tail -20 output.jsonl | grep -E '"metrics"' | tail -1 || echo "")
+          METRICS=$(tail -20 output/output.jsonl | grep -E '"metrics"' | tail -1 || echo "")
 
           if [ -n "$METRICS" ]; then
             # Extract accumulated cost and tokens from metrics
@@ -224,8 +224,8 @@ jobs:
             OUTPUT_TOKENS=$(echo "$METRICS" | python3 -c "import sys,json; d=json.load(sys.stdin); m=d.get('metrics',{}); print(m.get('accumulated_output_tokens', m.get('completion_tokens',0)))" 2>/dev/null || echo "0")
           else
             # Fallback: try to sum up from individual events
-            INPUT_TOKENS=$(grep -o '"prompt_tokens":[0-9]*' output.jsonl | cut -d: -f2 | awk '{s+=$1}END{print s+0}')
-            OUTPUT_TOKENS=$(grep -o '"completion_tokens":[0-9]*' output.jsonl | cut -d: -f2 | awk '{s+=$1}END{print s+0}')
+            INPUT_TOKENS=$(grep -o '"prompt_tokens":[0-9]*' output/output.jsonl | cut -d: -f2 | awk '{s+=$1}END{print s+0}')
+            OUTPUT_TOKENS=$(grep -o '"completion_tokens":[0-9]*' output/output.jsonl | cut -d: -f2 | awk '{s+=$1}END{print s+0}')
             COST="0"
           fi
 
