@@ -5,16 +5,16 @@
 #   /agent-design              — design discussion, post comment
 #   /agent-design-claude-large  — design discussion with specific model
 
-default_model: claude-medium
+default_model: claude-small
 
 # Modes define what the agent does. Each mode has an action and optional defaults.
 modes:
   resolve:
     action: pr               # Run OpenHands, open a draft PR
-    default_model: claude-medium
+    default_model: claude-small
   design:
     action: comment           # Post analysis as an issue comment (no code changes)
-    default_model: claude-medium
+    default_model: claude-small
     context_files:
       - README.md
       - CONTRIBUTING.md
@@ -36,10 +36,6 @@ modes:
 
 models:
   claude-small:
-    id: anthropic/claude-haiku-4-5
-    description: "Fast and cheap — good for straightforward tasks"
-
-  claude-medium:
     id: anthropic/claude-sonnet-4-5
     description: "Balanced cost/capability — good default for most tasks"
 
@@ -48,24 +44,16 @@ models:
     description: "Most capable — for complex multi-file features"
 
   openai-small:
-    id: openai/gpt-5-nano
-    description: "OpenAI GPT-5 Nano — cheapest"
-
-  openai-medium:
     id: openai/gpt-5.1-codex-mini
-    description: "OpenAI GPT-5.1 Codex Mini"
+    description: "OpenAI GPT-5.1 Codex Mini — good default"
 
   openai-large:
     id: openai/gpt-5.2-codex
     description: "OpenAI GPT-5.2 Codex — best coding model"
 
   gemini-small:
-    id: gemini/gemini-2.5-flash-lite
-    description: "Google Gemini 2.5 Flash-Lite — cheapest"
-
-  gemini-medium:
     id: gemini/gemini-2.5-flash
-    description: "Google Gemini 2.5 Flash"
+    description: "Google Gemini 2.5 Flash — good default"
 
   gemini-large:
     id: gemini/gemini-2.5-pro

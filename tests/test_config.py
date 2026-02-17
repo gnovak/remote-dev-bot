@@ -91,7 +91,7 @@ def test_parse_command_design_with_model():
 
 def test_parse_command_multi_segment_model():
     """Model aliases with hyphens should be preserved."""
-    assert parse_command("resolve-openai-small", KNOWN_MODES) == ("resolve", "openai-small")
+    assert parse_command("resolve-openai-large", KNOWN_MODES) == ("resolve", "openai-large")
 
 
 def test_parse_command_bare_agent_errors():
@@ -120,20 +120,20 @@ def config_dir(tmp_path):
     base = tmp_path / "base"
     base.mkdir()
     config = {
-        "default_model": "claude-medium",
+        "default_model": "claude-small",
         "models": {
-            "claude-small": {"id": "anthropic/claude-haiku-4-5"},
-            "claude-medium": {"id": "anthropic/claude-sonnet-4-5"},
-            "openai-small": {"id": "openai/gpt-5-nano"},
+            "claude-small": {"id": "anthropic/claude-sonnet-4-5"},
+            "claude-large": {"id": "anthropic/claude-opus-4-5"},
+            "openai-small": {"id": "openai/gpt-5.1-codex-mini"},
         },
         "modes": {
             "resolve": {
                 "action": "pr",
-                "default_model": "claude-medium",
+                "default_model": "claude-small",
             },
             "design": {
                 "action": "comment",
-                "default_model": "claude-medium",
+                "default_model": "claude-small",
                 "prompt_prefix": "You are analyzing this issue.",
             },
         },
@@ -152,16 +152,16 @@ def test_resolve_config_resolve_default_model(config_dir):
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
     assert result["mode"] == "resolve"
     assert result["action"] == "pr"
-    assert result["alias"] == "claude-medium"
+    assert result["alias"] == "claude-small"
     assert result["model"] == "anthropic/claude-sonnet-4-5"
 
 
 def test_resolve_config_resolve_explicit_model(config_dir):
     tmp_path, base_path = config_dir
-    result = resolve_config(base_path, "nonexistent.yaml", "resolve-claude-small")
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve-claude-large")
     assert result["mode"] == "resolve"
-    assert result["alias"] == "claude-small"
-    assert result["model"] == "anthropic/claude-haiku-4-5"
+    assert result["alias"] == "claude-large"
+    assert result["model"] == "anthropic/claude-opus-4-5"
 
 
 def test_resolve_config_design_mode(config_dir):
@@ -169,17 +169,17 @@ def test_resolve_config_design_mode(config_dir):
     result = resolve_config(base_path, "nonexistent.yaml", "design")
     assert result["mode"] == "design"
     assert result["action"] == "comment"
-    assert result["alias"] == "claude-medium"
+    assert result["alias"] == "claude-small"
     assert "prompt_prefix" in result
     assert "analyzing" in result["prompt_prefix"]
 
 
 def test_resolve_config_design_with_model(config_dir):
     tmp_path, base_path = config_dir
-    result = resolve_config(base_path, "nonexistent.yaml", "design-claude-small")
+    result = resolve_config(base_path, "nonexistent.yaml", "design-claude-large")
     assert result["mode"] == "design"
-    assert result["alias"] == "claude-small"
-    assert result["model"] == "anthropic/claude-haiku-4-5"
+    assert result["alias"] == "claude-large"
+    assert result["model"] == "anthropic/claude-opus-4-5"
 
 
 def test_resolve_config_unknown_model(config_dir):
@@ -215,7 +215,7 @@ def test_resolve_config_override_wins(config_dir):
 
     result = resolve_config(base_path, override_path, "resolve")
     assert result["alias"] == "openai-small"
-    assert result["model"] == "openai/gpt-5-nano"
+    assert result["model"] == "openai/gpt-5.1-codex-mini"
     assert result["max_iterations"] == 10
     # Version should come from base (not overridden)
     assert result["oh_version"] == "1.3.0"

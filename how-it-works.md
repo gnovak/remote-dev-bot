@@ -51,7 +51,7 @@ This is the "engine" — the shared infrastructure that all target repos use.
 | File | Purpose |
 |------|---------|
 | `.github/workflows/resolve.yml` | The reusable workflow. Contains all the logic: parses model aliases, installs OpenHands, resolves issues, creates PRs. Target repos call this. |
-| `remote-dev-bot.yaml` | Base configuration. Defines model aliases (claude-small, claude-large, etc.) and OpenHands settings (version, max iterations, PR type). |
+| `remote-dev-bot.yaml` | Base configuration. Defines model aliases (`claude-small`, `claude-large`, etc.) and OpenHands settings (version, max iterations, PR type). |
 | `lib/config.py` | Config parsing logic. Loads base config, merges with target repo overrides, resolves aliases. Used by resolve.yml at runtime. |
 | `.github/workflows/agent.yml` | Shim workflow. Also serves as the template — copy this to target repos. |
 | `runbook.md` | Step-by-step setup instructions for humans or AI assistants. |
@@ -116,18 +116,18 @@ Configuration is layered: target repo settings override remote-dev-bot defaults.
 
 ```yaml
 # remote-dev-bot/remote-dev-bot.yaml (base)
-default_model: claude-medium
+default_model: claude-small
 openhands:
   max_iterations: 50
   pr_type: ready
 
 # target-repo/remote-dev-bot.yaml (override)
-default_model: claude-small
+default_model: claude-large
 openhands:
   max_iterations: 30
 ```
 
-Result: `default_model: claude-small`, `max_iterations: 30`, `pr_type: ready` (inherited from base).
+Result: `default_model: claude-large`, `max_iterations: 30`, `pr_type: ready` (inherited from base).
 
 This lets you:
 - Use different default models per repo

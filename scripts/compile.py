@@ -76,7 +76,7 @@ def inline_config_parsing(config_yaml, mode):
     modes_config = config_yaml.get("modes", {})
     mode_config = modes_config.get(mode, {})
     default_model = mode_config.get("default_model",
-                                     config_yaml.get("default_model", "claude-medium"))
+                                     config_yaml.get("default_model", "claude-small"))
 
     models = config_yaml.get("models", {})
     oh = config_yaml.get("openhands", {})

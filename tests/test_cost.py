@@ -196,11 +196,11 @@ def test_format_cost_comment_basic():
         output_tokens=2000,
         total_cost=0.06,
         mode="resolve",
-        alias="claude-medium",
+        alias="claude-small",
     )
 
     assert "### 💰 Cost Summary" in comment
-    assert "claude-medium" in comment
+    assert "claude-small" in comment
     assert "anthropic/claude-sonnet-4-5" in comment
     assert "resolve" in comment
     assert "10,000" in comment
@@ -228,15 +228,15 @@ def test_format_cost_comment_no_cost():
 def test_format_cost_comment_calculates_cost():
     """Test that format_cost_comment calculates cost if not provided."""
     comment = format_cost_comment(
-        model="anthropic/claude-haiku-4-5",
+        model="anthropic/claude-sonnet-4-5",
         input_tokens=100000,
         output_tokens=20000,
         mode="resolve",
         alias="claude-small",
     )
 
-    # Should calculate: (100000/1M * 0.25) + (20000/1M * 1.25) = 0.025 + 0.025 = 0.05
-    assert "$0.0500" in comment
+    # Should calculate: (100000/1M * 3.00) + (20000/1M * 15.00) = 0.30 + 0.30 = 0.60
+    assert "$0.6000" in comment
 
 
 def test_format_cost_comment_large_numbers():

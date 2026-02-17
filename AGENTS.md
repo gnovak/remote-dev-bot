@@ -57,7 +57,7 @@ This project has an unusual dev cycle because GitHub Actions only runs workflows
 1. Create a feature branch from `main`: `git checkout -b my-feature main`
 2. Make changes, commit freely (work log mode)
 3. Point dev at your branch: `git branch -f dev my-feature && git push --force-with-lease origin dev`
-4. In `remote-dev-bot-test`: create an issue, comment `/agent-resolve-claude-medium`
+4. In `remote-dev-bot-test`: create an issue, comment `/agent-resolve-claude-small`
 5. Monitor: `gh run list --repo gnovak/remote-dev-bot-test --workflow=agent.yml --limit 3`
 6. If it fails: check logs, fix, commit, push dev again, re-trigger
 7. If it works: clean up git history (rebase), open a PR (dev → main), merge
@@ -69,7 +69,7 @@ gh issue create --repo gnovak/remote-dev-bot-test \
   --title "Test: description" --body "What to do"
 # Trigger agent
 gh issue comment ISSUE_NUM --repo gnovak/remote-dev-bot-test \
-  --body "/agent-resolve-claude-medium"
+  --body "/agent-resolve-claude-small"
 # Monitor
 gh run list --repo gnovak/remote-dev-bot-test --workflow=agent.yml --limit 3
 # Check logs on failure
