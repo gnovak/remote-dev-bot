@@ -71,7 +71,7 @@ Prefix the model string with the provider name in `remote-dev-bot.yaml` (e.g., `
 
 **For most tasks:** Use the default (`/agent-resolve`). Claude Sonnet (`claude-small`) offers a good balance of capability and cost.
 
-**For complex multi-file features:** Use `/agent-resolve-claude-large` (Opus) or `/agent-resolve-openai-large` (GPT Codex). These models handle larger contexts and more intricate reasoning.
+**For complex multi-file features:** Use `/agent-resolve-claude-large` (Opus) or `/agent-resolve-gpt-large` (GPT Codex). These models handle larger contexts and more intricate reasoning.
 
 **For coding-heavy tasks:** Models with "codex" in the name (e.g., `openai/gpt-5.1-codex-mini`) are specifically tuned for code generation and may perform better on implementation tasks.
 

@@ -91,7 +91,7 @@ def test_parse_command_design_with_model():
 
 def test_parse_command_multi_segment_model():
     """Model aliases with hyphens should be preserved."""
-    assert parse_command("resolve-openai-large", KNOWN_MODES) == ("resolve", "openai-large")
+    assert parse_command("resolve-gpt-large", KNOWN_MODES) == ("resolve", "gpt-large")
 
 
 def test_parse_command_bare_agent_errors():
@@ -124,7 +124,7 @@ def config_dir(tmp_path):
         "models": {
             "claude-small": {"id": "anthropic/claude-sonnet-4-5"},
             "claude-large": {"id": "anthropic/claude-opus-4-5"},
-            "openai-small": {"id": "openai/gpt-5.1-codex-mini"},
+            "gpt-small": {"id": "openai/gpt-5.1-codex-mini"},
         },
         "modes": {
             "resolve": {
@@ -204,9 +204,9 @@ def test_resolve_config_override_wins(config_dir):
     tmp_path, base_path = config_dir
     override_path = str(tmp_path / "override.yaml")
     override = {
-        "default_model": "openai-small",
+        "default_model": "gpt-small",
         "modes": {
-            "resolve": {"default_model": "openai-small"},
+            "resolve": {"default_model": "gpt-small"},
         },
         "openhands": {"max_iterations": 10},
     }
@@ -214,7 +214,7 @@ def test_resolve_config_override_wins(config_dir):
         yaml.dump(override, f)
 
     result = resolve_config(base_path, override_path, "resolve")
-    assert result["alias"] == "openai-small"
+    assert result["alias"] == "gpt-small"
     assert result["model"] == "openai/gpt-5.1-codex-mini"
     assert result["max_iterations"] == 10
     # Version should come from base (not overridden)
