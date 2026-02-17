@@ -10,7 +10,7 @@
 #
 #   --branch      Branch to test (default: main). Sets dev pointer to this branch.
 #   --test        Run a specific test only (default: all)
-#   --provider    Run only tests for a specific provider (anthropic/openai/gemini)
+#   --provider    Run only tests for a specific model family (claude/gpt/gemini)
 #   --all-models  Test every model alias, not just one per provider
 #   --compiled    Test compiled workflows instead of shim (pre-release validation)
 
@@ -67,20 +67,23 @@ if $ALL_MODELS; then
         exit 1
     fi
 
-    # Read all model aliases and their provider prefixes from the config
-    while IFS='|' read -r alias provider; do
+    # Read all model aliases and their model family names from the config
+    while IFS='|' read -r alias model_family; do
         safe_alias="${alias//-/_}"
         add_test "$alias" "Test ($alias): add hello_${safe_alias}.py" \
             "Create a file hello_${safe_alias}.py with a function hello() that returns 'Hello from ${alias}!'" \
-            "/agent-resolve-$alias" "$provider" "resolve"
+            "/agent-resolve-$alias" "$model_family" "resolve"
     done < <(python3 -c "
 import yaml, sys
 with open('$config_file') as f:
     config = yaml.safe_load(f)
+# Map provider prefixes to model family names
+provider_to_family = {'anthropic': 'claude', 'openai': 'gpt', 'gemini': 'gemini'}
 for alias, info in config.get('models', {}).items():
     model_id = info.get('id', '')
     provider = model_id.split('/')[0] if '/' in model_id else 'unknown'
-    print(f'{alias}|{provider}')
+    model_family = provider_to_family.get(provider, provider)
+    print(f'{alias}|{model_family}')
 ")
 
     # Default model test (resolve mode, no alias)
@@ -93,17 +96,17 @@ else
         "Create a file hello.py with a function hello() that returns 'Hello, world!'" \
         "/agent-resolve" "all" "resolve"
 
-    add_test "anthropic" "Test: add greet.py" \
+    add_test "claude" "Test: add greet.py" \
         "Create a file greet.py with a function greet(name) that returns f'Hello, {name}!'" \
-        "/agent-resolve-claude-medium" "anthropic" "resolve"
+        "/agent-resolve-claude-small" "claude" "resolve"
 
-    add_test "openai" "Test: add wave.py" \
+    add_test "gpt" "Test: add wave.py" \
         "Create a file wave.py with a function wave() that returns 'Wave!'" \
-        "/agent-resolve-openai-medium" "openai" "resolve"
+        "/agent-resolve-gpt-small" "gpt" "resolve"
 
     add_test "gemini" "Test: add hi.py" \
         "Create a file hi.py with a function hi() that returns 'Hi!'" \
-        "/agent-resolve-gemini-medium" "gemini" "resolve"
+        "/agent-resolve-gemini-small" "gemini" "resolve"
 
     # Design mode smoke test
     add_test "design" "Test: design analysis" \

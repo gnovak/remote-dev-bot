@@ -43,11 +43,11 @@ models:
     id: anthropic/claude-opus-4-5
     description: "Most capable — for complex multi-file features"
 
-  openai-small:
+  gpt-small:
     id: openai/gpt-5.1-codex-mini
     description: "OpenAI GPT-5.1 Codex Mini — good default"
 
-  openai-large:
+  gpt-large:
     id: openai/gpt-5.2-codex
     description: "OpenAI GPT-5.2 Codex — best coding model"
 

@@ -175,8 +175,8 @@ def test_both_inline_model_aliases(compiled_dir):
         content = _read_text(compiled_dir / fname)
         assert "claude-small" in content
         assert "claude-large" in content
-        assert "openai-small" in content
-        assert "openai-large" in content
+        assert "gpt-small" in content
+        assert "gpt-large" in content
         assert "gemini-small" in content
         assert "gemini-large" in content
         assert "anthropic/claude-sonnet-4-5" in content

@@ -54,7 +54,7 @@ See [AGENTS.md](AGENTS.md) for the full dev cycle documentation, including how t
 
 ### E2E tests (`tests/e2e.sh`)
 - Creates issues in remote-dev-bot-test, triggers agent, polls for completion
-- Modes: `--provider anthropic` (one provider), `--all-models` (every alias)
+- Modes: `--provider claude` (one model family), `--all-models` (every alias)
 - Run via GitHub Actions: `.github/workflows/e2e.yml` (workflow_dispatch)
 - See `./tests/e2e.sh --help` for options
 
@@ -93,12 +93,12 @@ Releases distribute two compiled workflows (`agent-resolve.yml` and `agent-desig
 
 2. **Run E2E tests against the shim-based workflow** (tests the reusable workflow on main):
    ```bash
-   ./tests/e2e.sh --provider anthropic
+   ./tests/e2e.sh --provider claude
    ```
 
 3. **Run E2E tests against the compiled workflows** (tests the standalone install):
    ```bash
-   ./tests/e2e.sh --compiled --provider anthropic
+   ./tests/e2e.sh --compiled --provider claude
    ```
 
    Both must pass before proceeding.
