@@ -474,6 +474,7 @@ jobs:
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           MODE="${{ needs.parse.outputs.mode }}"
           ALIAS="${{ needs.parse.outputs.alias }}"
+          MODEL="${{ needs.parse.outputs.model }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           # Check if the response was blocked due to /agent command detection
@@ -487,7 +488,7 @@ jobs:
               echo "See the [workflow run logs]($RUN_URL) for the full response content."
               echo ""
               echo "---"
-              echo "_Blocked by \`/agent-${MODE}-${ALIAS}\` safety check_"
+              echo "_Blocked by \`/agent-${MODE}-${ALIAS}\` (${MODEL}) safety check_"
             } > /tmp/comment_body.md
           else
             # Add footer with metadata
@@ -495,7 +496,7 @@ jobs:
               cat /tmp/llm_response.md
               echo ""
               echo "---"
-              echo "_Design analysis by \`/agent-${MODE}-${ALIAS}\`_"
+              echo "_Design analysis by \`/agent-${MODE}-${ALIAS}\` (${MODEL})_"
             } > /tmp/comment_body.md
           fi
 
