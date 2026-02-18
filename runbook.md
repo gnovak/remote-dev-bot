@@ -13,6 +13,7 @@ This runbook will guide you through setting up Remote Dev Bot on your GitHub rep
 3. **Phase 3: Install the Workflow** — Add a small workflow file to your repository that connects to the Remote Dev Bot system
 4. **Phase 4: Test It** — Create a test issue and trigger the bot to verify everything works
 5. **Phase 5: Customize (Optional)** — Add repository context, adjust model settings, and tune iteration limits
+6. **Phase 6: Report Install Feedback (Optional)** — If you encountered problems, report them to help improve the runbook
 
 **Time estimate:** 15-30 minutes for initial setup, depending on whether you already have the GitHub CLI installed and authenticated.
 
@@ -566,6 +567,161 @@ If using cheaper models that tend to loop, consider lowering to 30.
 
 ---
 
+## Phase 6: Report Install Feedback (Optional)
+
+> **This phase only applies if you encountered problems during installation.** If everything worked perfectly, you're done! Skip to the Troubleshooting section if you need help with specific issues.
+
+### Why Report Feedback?
+
+If your install required workarounds or failed at certain steps, reporting this helps improve the runbook for future users. Your feedback tells us exactly what needs to be fixed.
+
+### What Gets Reported
+
+The report includes:
+- **Environment info**: Operating system, shell type
+- **What went wrong**: Which steps failed or required deviations
+- **What you did instead**: The workaround or fix you used (if any)
+
+The report does **not** include:
+- API keys or secrets
+- Repository contents
+- Personal information beyond your GitHub username (which is public anyway)
+
+### Step 6.1: Review Problems Encountered
+
+Before reporting, gather the problems you encountered during installation. For each problem, note:
+
+1. **Which step failed** (e.g., "Step 2.1: Enable Actions Permissions")
+2. **What the error was** (e.g., "gh api returned 403 Forbidden")
+3. **What you did instead** (e.g., "Used web UI instead of CLI")
+4. **Suggested fix** (
+        step="2.1",
+        title="Enable Actions Permissions",
+        result="deviate",
+        expected="CLI method",
+        actual="403 error",
+        workaround="Used web UI",
+        suggested_fix="Add admin note",
+    )
+
+    d = report.to_dict()
+    assert d["os"] == "Linux-5.4.0"
+    assert d["shell"] == "/bin/bash"
+    assert len(d["problems"]) == 1
+    assert d["problems"][0]["step"] == "2.1"
+    assert d["problems"][0]["workaround"] == "Used web UI"
+
+
+def test_install_report_to_json():
+    """InstallReport.to_json should return valid JSON."""
+    report = InstallReport(os_info="Darwin-24.6.0", shell="/bin/zsh")
+    report.add_problem(
+        step="1.1",
+        title="Check gh",
+        result="fail",
+        expected="version shown",
+        actual="not found",
+    )
+
+    json_str = report.to_json()
+    parsed = json.loads(json_str)
+    assert parsed["os"] == "Darwin-24.6.0"
+    assert len(parsed["problems"]) == 1
+
+
+# --- Formatting functions ---
+
+
+def test_format_issue_title():
+    """format_issue_title should create proper title format."""
+    problem = InstallProblem(
+        step="2.1",
+        title="Enable Actions Permissions",
+        result="fail",
+        expected="x",
+        actual="y",
+    )
+    title = format_issue_title(problem)
+    assert title == "Runbook: [Step 2.1] Enable Actions Permissions"
+
+
+def test_format_issue_body():
+    """format_issue_body should include all sections."""
+    problem = InstallProblem(
+        step="2.1",
+        title="Enable Actions Permissions",
+        result="fail",
+        expected="gh api should succeed",
+        actual="403 Forbidden",
+        workaround="Used web UI",
+        suggested_fix="Add admin note",
+    )
+    env_info = {"os": "Linux-5.4.0", "shell": "/bin/bash"}
+
+    body = format_issue_body(problem, env_info)
+
+    assert "## Environment" in body
+    assert "Linux-5.4.0" in body
+    assert "/bin/bash" in body
+    assert "## Step that failed" in body
+    assert "Step 2.1" in body
+    assert "## Expected behavior" in body
+    assert "gh api should succeed" in body
+    assert "## Actual behavior" in body
+    assert "403 Forbidden" in body
+    assert "## Workaround" in body
+    assert "Used web UI" in body
+    assert "## Suggested fix" in body
+    assert "Add admin note" in body
+
+
+def test_format_issue_body_without_optional_fields():
+    """format_issue_body should omit optional sections when not provided."""
+    problem = InstallProblem(
+        step="1.1",
+        title="Check gh",
+        result="fail",
+        expected="version shown",
+        actual="not found",
+    )
+    env_info = {"os": "Linux-5.4.0", "shell": "/bin/bash"}
+
+    body = format_issue_body(problem, env_info)
+
+    assert "## Workaround" not in body
+    assert "## Suggested fix" not in body
+
+
+def test_format_metoo_comment():
+    """format_metoo_comment should create proper comment format."""
+    problem = InstallProblem(
+        step="2.1",
+        title="Enable Actions Permissions",
+        result="fail",
+        expected="x",
+        actual="403 Forbidden",
+        workaround="Used web UI",
+    )
+    env_info = {"os": "Darwin-24.6.0", "shell": "/bin/zsh"}
+
+    comment = format_metoo_comment(problem, env_info)
+
+    assert "**Me too**" in comment
+    assert "Darwin-24.6.0" in comment
+    assert "/bin/zsh" in comment
+    assert "403 Forbidden" in comment
+    assert "Used web UI" in comment
+
+
+def test_format_summary_issue_body():
+    """format_summary_issue_body should list all problems."""
+    report = InstallReport(os_info="Linux-5.4.0", shell="/bin/bash")
+    report.add_problem(
+        step="1.1", title="Problem 1", result="fail", expected="a", actual="b"
+    )
+    report.add_problem(
+        step="2.1",
+        title="Problem 2",
 ## Troubleshooting
 
 ### Cross-repo reusable workflow access (shim install only)
