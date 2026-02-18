@@ -3,9 +3,10 @@ name: Resolve Issue
 # Reusable workflow — called by thin shims in target repos.
 # See .github/workflows/agent.yml for the shim template.
 #
-# Supports two modes via /agent-<mode>[-<model>]:
-#   /agent-resolve[-<model>]  — run OpenHands to resolve the issue, open a PR
-#   /agent-design[-<model>]   — post a design analysis comment (no code changes)
+# Supports two modes via /agent-<mode>[-<model>] or /agent <mode> [<model>]:
+#   /agent-resolve[-<model>] or /agent resolve [<model>]  — run OpenHands to resolve the issue, open a PR
+#   /agent-design[-<model>] or /agent design [<model>]    — post a design analysis comment (no code changes)
+# Both dash and space separators are supported for mobile-friendly typing.
 
 on:
   workflow_call:
@@ -62,10 +63,11 @@ jobs:
         id: parse
         run: |
           COMMENT="${{ github.event.comment.body }}"
-          # Extract command string: "/agent-resolve-claude-large do X" -> "resolve-claude-large"
-          # Commands are case-insensitive, so we extract with [a-zA-Z0-9-]+ and lowercase it
+          # Extract command string: "/agent-resolve-claude-large" or "/agent resolve claude large" -> "resolve-claude-large"
+          # Supports both dash and space separators; normalizes to lowercase dashes
+          # Matches up to 3 tokens (mode + optional model alias parts) to avoid capturing extra text
           # Bare "/agent" produces empty string, which config.py will reject
-          COMMAND=$(echo "$COMMENT" | grep -oP '^/agent-\K[a-zA-Z0-9-]+' || echo "")
+          COMMAND=$(echo "$COMMENT" | grep -oP '^/agent[- ]\K[a-zA-Z0-9]+(?:[- ][a-zA-Z0-9]+){0,2}' | tr ' ' '-' || echo "")
           COMMAND=$(echo "$COMMAND" | tr '[:upper:]' '[:lower:]')
 
           python3 .remote-dev-bot/lib/config.py "$COMMAND"

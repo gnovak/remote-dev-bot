@@ -214,3 +214,79 @@ class TestLoopPreventionRegex:
         """Ensure /agent/agent bypass attempt is detected."""
         text = "/agent/agent-resolve\nContent"
         assert self.contains_agent_command(text) is True
+
+    def test_detects_space_separated_command(self):
+        """Ensure /agent with space separator is detected."""
+        text = "/agent resolve claude large\nHere is my analysis..."
+        assert self.contains_agent_command(text) is True
+
+    def test_detects_space_separated_on_later_line(self):
+        """Ensure /agent with space on any line is detected."""
+        text = "Some normal content\n/agent resolve\nMore content"
+        assert self.contains_agent_command(text) is True
+
+
+class TestCommandExtractionRegex:
+    """Test the regex pattern used to extract command from /agent comments.
+
+    This mirrors the regex in resolve.yml that extracts the command string
+    from comments like "/agent-resolve-claude-large" or "/agent resolve claude large".
+    """
+
+    import re
+
+    def extract_command(self, comment):
+        """Extract command using the same regex as resolve.yml, normalized to dashes."""
+        # This mirrors: grep -oP '^/agent[- ]\K[a-z0-9]+(?:[- ][a-z0-9]+){0,2}' | tr ' ' '-'
+        match = self.re.search(r'^/agent[- ]([a-z0-9]+(?:[- ][a-z0-9]+){0,2})', comment)
+        if match:
+            return match.group(1).replace(' ', '-')
+        return ""
+
+    def test_dash_format_mode_only(self):
+        """Test /agent-resolve extracts 'resolve'."""
+        assert self.extract_command("/agent-resolve") == "resolve"
+
+    def test_dash_format_with_model(self):
+        """Test /agent-resolve-claude-large extracts 'resolve-claude-large'."""
+        assert self.extract_command("/agent-resolve-claude-large") == "resolve-claude-large"
+
+    def test_space_format_mode_only(self):
+        """Test /agent resolve extracts 'resolve'."""
+        assert self.extract_command("/agent resolve") == "resolve"
+
+    def test_space_format_with_model(self):
+        """Test /agent resolve claude large extracts 'resolve-claude-large'."""
+        assert self.extract_command("/agent resolve claude large") == "resolve-claude-large"
+
+    def test_mixed_format(self):
+        """Test /agent resolve-claude large extracts 'resolve-claude-large'."""
+        assert self.extract_command("/agent resolve-claude large") == "resolve-claude-large"
+
+    def test_design_mode_dash(self):
+        """Test /agent-design extracts 'design'."""
+        assert self.extract_command("/agent-design") == "design"
+
+    def test_design_mode_space(self):
+        """Test /agent design extracts 'design'."""
+        assert self.extract_command("/agent design") == "design"
+
+    def test_design_with_model_space(self):
+        """Test /agent design claude small extracts 'design-claude-small'."""
+        assert self.extract_command("/agent design claude small") == "design-claude-small"
+
+    def test_extra_text_ignored(self):
+        """Test that extra text after command is ignored (max 3 tokens)."""
+        assert self.extract_command("/agent resolve claude large extra text") == "resolve-claude-large"
+
+    def test_newline_stops_extraction(self):
+        """Test that newline stops command extraction."""
+        assert self.extract_command("/agent resolve claude\nsome context") == "resolve-claude"
+
+    def test_bare_agent_returns_empty(self):
+        """Test that bare /agent returns empty string."""
+        assert self.extract_command("/agent") == ""
+
+    def test_no_match_returns_empty(self):
+        """Test that non-matching text returns empty string."""
+        assert self.extract_command("some random text") == ""
