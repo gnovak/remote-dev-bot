@@ -485,3 +485,77 @@ def test_parse_litellm_logs_malformed_json():
     assert result["output_tokens"] == 400
     assert result["total_cost"] == pytest.approx(0.02)
     assert result["call_count"] == 1
+
+
+def test_parse_litellm_logs_real_format():
+    """Test parsing actual LiteLLM StandardLoggingPayload format.
+
+    In real LiteLLM >=1.74, tokens are nested in metadata.usage_object,
+    not at the top level. This is the format produced by OpenHands 1.3.0
+    when LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD=1 is set.
+    """
+    log_content = """
+22:32:09 - openhands:INFO: conversation_stats.py:73 - Saved conversation stats
+{
+    "status": "success",
+    "status_fields": {
+        "llm_api_status": "success"
+    },
+    "custom_llm_provider": "anthropic",
+    "model": "claude-opus-4-5",
+    "response_cost": 0.08124,
+    "metadata": {
+        "usage_object": {
+            "completion_tokens": 92,
+            "prompt_tokens": 12631,
+            "total_tokens": 12723
+        }
+    }
+}
+22:32:11 - openhands:INFO: conversation_stats.py:73 - Saved conversation stats
+{
+    "status": "success",
+    "custom_llm_provider": "anthropic",
+    "model": "claude-opus-4-5",
+    "response_cost": 0.03802,
+    "metadata": {
+        "usage_object": {
+            "completion_tokens": 210,
+            "prompt_tokens": 8900,
+            "total_tokens": 9110
+        }
+    }
+}
+"""
+    result = parse_litellm_logs(log_content)
+    assert result["input_tokens"] == 12631 + 8900
+    assert result["output_tokens"] == 92 + 210
+    assert result["total_cost"] == pytest.approx(0.08124 + 0.03802)
+    assert result["call_count"] == 2
+    assert result["source"] == "litellm_logs"
+
+
+def test_parse_litellm_logs_unbalanced_braces_in_strings():
+    """Test that payloads containing { } inside string values are parsed correctly.
+
+    Brace-counting parsers fail when JSON string values contain unbalanced
+    braces (e.g. code snippets, file contents in conversation history).
+    The raw_decode approach handles this correctly.
+    """
+    log_content = """
+{
+    "response_cost": 0.05,
+    "metadata": {
+        "usage_object": {
+            "prompt_tokens": 5000,
+            "completion_tokens": 500
+        },
+        "conversation_snippet": "if x > 0: { do_something() # unclosed brace"
+    }
+}
+"""
+    result = parse_litellm_logs(log_content)
+    assert result["input_tokens"] == 5000
+    assert result["output_tokens"] == 500
+    assert result["total_cost"] == pytest.approx(0.05)
+    assert result["call_count"] == 1
