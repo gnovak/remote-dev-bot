@@ -167,6 +167,19 @@ def test_design_has_cost_step(compiled_dir):
     assert "Output tokens" in content
 
 
+def test_design_comment_footer_includes_model(compiled_dir):
+    """Design mode comment footer should show both alias and model identity."""
+    content = _read_text(compiled_dir / "agent-design.yml")
+    # Check that the footer includes both alias and model in the format:
+    # _Design analysis by `/agent-${MODE}-${ALIAS}` (${MODEL})_
+    assert "_Design analysis by " in content
+    assert "(${MODEL})_" in content or "(${{ steps.parse.outputs.model }})_" in content
+    # Also check the blocked case footer
+    assert "_Blocked by " in content
+    # Verify MODEL variable is assigned in the Post comment step
+    assert 'MODEL="${{ steps.parse.outputs.model }}"' in content
+
+
 # --- Both: model aliases ---
 
 
