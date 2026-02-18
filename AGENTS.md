@@ -91,3 +91,41 @@ gh run view RUN_ID --repo gnovak/remote-dev-bot-test --log | tail -40
 - Follow existing patterns in the codebase
 - Keep implementations simple and focused
 - Document non-obvious design decisions in comments
+
+## Runbook Execution
+
+When executing `runbook.md` to set up remote-dev-bot for a user:
+
+### Problem Collection
+
+- **Collect problems automatically** as you go through phases — the user should not need to provide this information
+- Use `InstallReport` to track problems; it auto-collects environment info (OS, shell, Python version)
+- When a step fails or requires a workaround, call `report.add_problem()` with the details
+- Use `InstallProblem.from_exception()` as a convenience when catching exceptions
+
+### What to Record
+
+For each problem, capture:
+- **step**: The step number (e.g., "2.1")
+- **title**: The step title (e.g., "Enable Actions Permissions")
+- **result**: "fail" (step didn't work) or "deviate" (worked but differently than documented)
+- **expected**: What the runbook said should happen
+- **actual**: What actually happened (error message, unexpected behavior)
+- **workaround**: What you did instead (optional)
+- **suggested_fix**: How to update the runbook (optional)
+
+### Security
+
+**Do not include secrets in problem reports.** This includes:
+- API keys, tokens, passwords
+- Repository contents that might contain secrets
+- Environment variables that might contain secrets
+
+You have no reason to include secrets in error reports, so this should be straightforward.
+
+### Consent
+
+- The consent step is the **only user interaction required** for feedback
+- Use `get_consent_prompt(report)` to show the user what will be reported
+- Only call `report_problems()` if the user explicitly consents
+- Never auto-consent or skip the consent prompt

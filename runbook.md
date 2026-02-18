@@ -587,141 +587,66 @@ The report does **not** include:
 - Repository contents
 - Personal information beyond your GitHub username (which is public anyway)
 
-### Step 6.1: Review Problems Encountered
+### For AI Assistants / Agents
 
-Before reporting, gather the problems you encountered during installation. For each problem, note:
+> **This section is for AI agents executing the runbook.** If you're a human following the runbook manually and encounter problems, you can file issues directly at https://github.com/gnovak/remote-dev-bot/issues — no special format required.
 
-1. **Which step failed** (e.g., "Step 2.1: Enable Actions Permissions")
-2. **What the error was** (e.g., "gh api returned 403 Forbidden")
-3. **What you did instead** (e.g., "Used web UI instead of CLI")
-4. **Suggested fix** (
-        step="2.1",
-        title="Enable Actions Permissions",
-        result="deviate",
-        expected="CLI method",
-        actual="403 error",
-        workaround="Used web UI",
-        suggested_fix="Add admin note",
-    )
+If you're an AI agent executing this runbook, you should automatically collect problem details as you go through the phases. The user should not need to provide this information — you observed what happened.
 
-    d = report.to_dict()
-    assert d["os"] == "Linux-5.4.0"
-    assert d["shell"] == "/bin/bash"
-    assert len(d["problems"]) == 1
-    assert d["problems"][0]["step"] == "2.1"
-    assert d["problems"][0]["workaround"] == "Used web UI"
+**During execution:**
 
+As you execute each phase, track any problems that occur:
 
-def test_install_report_to_json():
-    """InstallReport.to_json should return valid JSON."""
-    report = InstallReport(os_info="Darwin-24.6.0", shell="/bin/zsh")
-    report.add_problem(
-        step="1.1",
-        title="Check gh",
-        result="fail",
-        expected="version shown",
-        actual="not found",
-    )
+```python
+from lib.feedback import InstallReport, InstallProblem
 
-    json_str = report.to_json()
-    parsed = json.loads(json_str)
-    assert parsed["os"] == "Darwin-24.6.0"
-    assert len(parsed["problems"]) == 1
+# Create a report at the start of the runbook
+report = InstallReport()
 
+# When a step fails or requires a workaround, record it:
+report.add_problem(
+    step="2.1",
+    title="Enable Actions Permissions",
+    result="fail",  # or "deviate" if you found a workaround
+    expected="gh api command should succeed",
+    actual="403 Forbidden - user lacks admin access",
+    workaround="Used web UI instead",  # optional
+    suggested_fix="Add note that admin access is required"  # optional
+)
+```
 
-# --- Formatting functions ---
+**Important:** Do not include secrets, API keys, tokens, or other sensitive data in problem reports. You have no reason to include them, so this should be straightforward.
 
+**After all phases complete:**
 
-def test_format_issue_title():
-    """format_issue_title should create proper title format."""
-    problem = InstallProblem(
-        step="2.1",
-        title="Enable Actions Permissions",
-        result="fail",
-        expected="x",
-        actual="y",
-    )
-    title = format_issue_title(problem)
-    assert title == "Runbook: [Step 2.1] Enable Actions Permissions"
+If problems were recorded, ask the user for consent before filing:
 
+```python
+from lib.feedback import get_consent_prompt, report_problems
 
-def test_format_issue_body():
-    """format_issue_body should include all sections."""
-    problem = InstallProblem(
-        step="2.1",
-        title="Enable Actions Permissions",
-        result="fail",
-        expected="gh api should succeed",
-        actual="403 Forbidden",
-        workaround="Used web UI",
-        suggested_fix="Add admin note",
-    )
-    env_info = {"os": "Linux-5.4.0", "shell": "/bin/bash"}
+if report.has_problems():
+    # Show the user what will be reported and ask for consent
+    print(get_consent_prompt(report))
 
-    body = format_issue_body(problem, env_info)
+    # Only proceed if the user explicitly consents
+    if user_confirms():  # Your agent's method for getting user confirmation
+        result = report_problems(report, dry_run=False)
+        print(f"Filed {len(result['filed'])} new issues")
+        print(f"Added comments to {len(result['commented'])} existing issues")
+```
 
-    assert "## Environment" in body
-    assert "Linux-5.4.0" in body
-    assert "/bin/bash" in body
-    assert "## Step that failed" in body
-    assert "Step 2.1" in body
-    assert "## Expected behavior" in body
-    assert "gh api should succeed" in body
-    assert "## Actual behavior" in body
-    assert "403 Forbidden" in body
-    assert "## Workaround" in body
-    assert "Used web UI" in body
-    assert "## Suggested fix" in body
-    assert "Add admin note" in body
+**What the library handles automatically:**
 
+- Environment collection (OS, shell, Python version)
+- Searching for existing issues to avoid duplicates
+- Adding "me too" comments to existing issues instead of filing duplicates
+- Limiting to 3 issues per install to avoid spam
+- Grouping many problems into a single summary issue
 
-def test_format_issue_body_without_optional_fields():
-    """format_issue_body should omit optional sections when not provided."""
-    problem = InstallProblem(
-        step="1.1",
-        title="Check gh",
-        result="fail",
-        expected="version shown",
-        actual="not found",
-    )
-    env_info = {"os": "Linux-5.4.0", "shell": "/bin/bash"}
+**Consent is required:** The `report_problems()` function will post to GitHub using the user's credentials. Always show the user what will be reported (via `get_consent_prompt()`) and get explicit confirmation before calling `report_problems()`.
 
-    body = format_issue_body(problem, env_info)
+---
 
-    assert "## Workaround" not in body
-    assert "## Suggested fix" not in body
-
-
-def test_format_metoo_comment():
-    """format_metoo_comment should create proper comment format."""
-    problem = InstallProblem(
-        step="2.1",
-        title="Enable Actions Permissions",
-        result="fail",
-        expected="x",
-        actual="403 Forbidden",
-        workaround="Used web UI",
-    )
-    env_info = {"os": "Darwin-24.6.0", "shell": "/bin/zsh"}
-
-    comment = format_metoo_comment(problem, env_info)
-
-    assert "**Me too**" in comment
-    assert "Darwin-24.6.0" in comment
-    assert "/bin/zsh" in comment
-    assert "403 Forbidden" in comment
-    assert "Used web UI" in comment
-
-
-def test_format_summary_issue_body():
-    """format_summary_issue_body should list all problems."""
-    report = InstallReport(os_info="Linux-5.4.0", shell="/bin/bash")
-    report.add_problem(
-        step="1.1", title="Problem 1", result="fail", expected="a", actual="b"
-    )
-    report.add_problem(
-        step="2.1",
-        title="Problem 2",
 ## Troubleshooting
 
 ### Cross-repo reusable workflow access (shim install only)

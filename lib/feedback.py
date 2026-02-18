@@ -9,6 +9,7 @@ Key design decisions:
 - Search for existing issues before filing new ones
 - Limit to 3 issues per install to avoid spam
 - Group related problems into single issues
+- Environment info is mandatory (auto-collected)
 """
 
 import json
@@ -31,13 +32,67 @@ class InstallProblem:
     workaround: Optional[str] = None  # What the user did instead
     suggested_fix: Optional[str] = None  # How to update the runbook
 
+    @classmethod
+    def from_exception(
+        cls,
+        step: str,
+        title: str,
+        exc: Exception,
+        expected: str,
+        workaround: Optional[str] = None,
+        suggested_fix: Optional[str] = None,
+    ) -> "InstallProblem":
+        """Create an InstallProblem from an exception during runbook execution.
+
+        This is a convenience method for agents to easily capture failures.
+
+        Args:
+            step: The step number (e.g., "2.1")
+            title: The step title (e.g., "Enable Actions Permissions")
+            exc: The exception that was raised
+            expected: What the runbook said should happen
+            workaround: What was done instead (if any)
+            suggested_fix: How to update the runbook (if any)
+
+        Returns:
+            An InstallProblem with result="fail" and the exception details in actual.
+        """
+        return cls(
+            step=step,
+            title=title,
+            result="fail",
+            expected=expected,
+            actual=f"{type(exc).__name__}: {str(exc)}",
+            workaround=workaround,
+            suggested_fix=suggested_fix,
+        )
+
+
+def _get_default_os_info() -> str:
+    """Get default OS info string."""
+    return f"{platform.system()}-{platform.release()}"
+
+
+def _get_default_shell() -> str:
+    """Get default shell string."""
+    return os.environ.get("SHELL", "unknown")
+
+
+def _get_default_python_version() -> str:
+    """Get default Python version string."""
+    return platform.python_version()
+
 
 @dataclass
 class InstallReport:
-    """Collection of problems from a single install attempt."""
+    """Collection of problems from a single install attempt.
 
-    os_info: str = field(default_factory=lambda: f"{platform.system()}-{platform.release()}")
-    shell: str = field(default_factory=lambda: os.environ.get("SHELL", "unknown"))
+    Environment info is mandatory and auto-collected by default.
+    """
+
+    os_info: str = field(default_factory=_get_default_os_info)
+    shell: str = field(default_factory=_get_default_shell)
+    python_version: str = field(default_factory=_get_default_python_version)
     problems: list[InstallProblem] = field(default_factory=list)
 
     def add_problem(
@@ -72,6 +127,7 @@ class InstallReport:
         return {
             "os": self.os_info,
             "shell": self.shell,
+            "python": self.python_version,
             "problems": [
                 {
                     "step": p.step,
@@ -115,6 +171,7 @@ def format_issue_body(problem: InstallProblem, env_info: dict) -> str:
     body = f"""## Environment
 - OS: {env_info['os']}
 - Shell: {env_info['shell']}
+- Python: {env_info['python']}
 
 ## Step that failed
 Step {problem.step}: {problem.title}
@@ -148,6 +205,7 @@ def format_metoo_comment(problem: InstallProblem, env_info: dict) -> str:
 **Environment:**
 - OS: {env_info['os']}
 - Shell: {env_info['shell']}
+- Python: {env_info['python']}
 
 **What happened:**
 {problem.actual}
@@ -168,6 +226,7 @@ def format_summary_issue_body(report: InstallReport) -> str:
     body = f"""## Environment
 - OS: {env_info['os']}
 - Shell: {env_info['shell']}
+- Python: {env_info['python']}
 
 ## Summary
 This install encountered {len(report.problems)} problems, suggesting a fundamental issue.
