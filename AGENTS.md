@@ -78,7 +78,7 @@ gh run view RUN_ID --repo gnovak/remote-dev-bot-test --log | tail -40
 
 ## PR Policy
 
-- **All changes go through a PR.** No direct commits to main. This keeps GitHub's PR list as a complete, searchable record of every change.
+- **All changes go through a PR. Never commit or push directly to main.** Open a PR and let the user merge it. This keeps GitHub's PR list as a complete, searchable record of every change.
 - For small changes, a single-commit PR self-merged immediately is fine — the point is the artifact, not the review ceremony.
 
 ## Compiler: two-file output

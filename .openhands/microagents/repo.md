@@ -1,1 +1,1 @@
-See AGENTS.md in the repository root for all project conventions, key files, dev cycle, and code style guidelines.
+**Read AGENTS.md in the repository root now before doing anything else.** It contains project conventions, key files, dev cycle, PR policy, and code style guidelines that govern all work in this repo.
