@@ -13,6 +13,7 @@ This runbook will guide you through setting up Remote Dev Bot on your GitHub rep
 3. **Phase 3: Install the Workflow** — Add a small workflow file to your repository that connects to the Remote Dev Bot system
 4. **Phase 4: Test It** — Create a test issue and trigger the bot to verify everything works
 5. **Phase 5: Customize (Optional)** — Add repository context, adjust model settings, and tune iteration limits
+6. **Phase 6: Report Install Feedback (Optional)** — If you encountered problems, report them to help improve the runbook
 
 **Time estimate:** 15-30 minutes for initial setup, depending on whether you already have the GitHub CLI installed and authenticated.
 
@@ -600,6 +601,86 @@ Create `.openhands/microagents/repo.md` in your target repo with any context the
 **Shim install:** Create or edit `remote-dev-bot.yaml` in your repo root and set `openhands.max_iterations`.
 
 If using cheaper models that tend to loop, consider lowering to 30.
+
+---
+
+## Phase 6: Report Install Feedback (Optional)
+
+> **This phase only applies if you encountered problems during installation.** If everything worked perfectly, you're done! Skip to the Troubleshooting section if you need help with specific issues.
+
+### Why Report Feedback?
+
+If your install required workarounds or failed at certain steps, reporting this helps improve the runbook for future users. Your feedback tells us exactly what needs to be fixed.
+
+### What Gets Reported
+
+The report includes:
+- **Environment info**: Operating system, shell type
+- **What went wrong**: Which steps failed or required deviations
+- **What you did instead**: The workaround or fix you used (if any)
+
+The report does **not** include:
+- API keys or secrets
+- Repository contents
+- Personal information beyond your GitHub username (which is public anyway)
+
+### For AI Assistants / Agents
+
+> **This section is for AI agents executing the runbook.** If you're a human following the runbook manually and encounter problems, you can file issues directly at https://github.com/gnovak/remote-dev-bot/issues — no special format required.
+
+If you're an AI agent executing this runbook, you should automatically collect problem details as you go through the phases. The user should not need to provide this information — you observed what happened.
+
+**During execution:**
+
+As you execute each phase, track any problems that occur:
+
+```python
+from lib.feedback import InstallReport, InstallProblem
+
+# Create a report at the start of the runbook
+report = InstallReport()
+
+# When a step fails or requires a workaround, record it:
+report.add_problem(
+    step="2.1",
+    title="Enable Actions Permissions",
+    result="fail",  # or "deviate" if you found a workaround
+    expected="gh api command should succeed",
+    actual="403 Forbidden - user lacks admin access",
+    workaround="Used web UI instead",  # optional
+    suggested_fix="Add note that admin access is required"  # optional
+)
+```
+
+**Important:** Do not include secrets, API keys, tokens, or other sensitive data in problem reports. You have no reason to include them, so this should be straightforward.
+
+**After all phases complete:**
+
+If problems were recorded, ask the user for consent before filing:
+
+```python
+from lib.feedback import get_consent_prompt, report_problems
+
+if report.has_problems():
+    # Show the user what will be reported and ask for consent
+    print(get_consent_prompt(report))
+
+    # Only proceed if the user explicitly consents
+    if user_confirms():  # Your agent's method for getting user confirmation
+        result = report_problems(report, dry_run=False)
+        print(f"Filed {len(result['filed'])} new issues")
+        print(f"Added comments to {len(result['commented'])} existing issues")
+```
+
+**What the library handles automatically:**
+
+- Environment collection (OS, shell, Python version)
+- Searching for existing issues to avoid duplicates
+- Adding "me too" comments to existing issues instead of filing duplicates
+- Limiting to 3 issues per install to avoid spam
+- Grouping many problems into a single summary issue
+
+**Consent is required:** The `report_problems()` function will post to GitHub using the user's credentials. Always show the user what will be reported (via `get_consent_prompt()`) and get explicit confirmation before calling `report_problems()`.
 
 ---
 
