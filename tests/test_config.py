@@ -6,7 +6,7 @@ import tempfile
 import pytest
 import yaml
 
-from lib.config import deep_merge, detect_api_provider, parse_command, resolve_config
+from lib.config import deep_merge, detect_api_provider, parse_command, resolve_config, resolve_commit_trailer
 
 
 # --- deep_merge ---
@@ -346,3 +346,130 @@ def test_resolve_config_case_insensitive(config_dir):
     result = resolve_config(base_path, "nonexistent.yaml", "DESIGN-CLAUDE-SMALL")
     assert result["mode"] == "design"
     assert result["alias"] == "claude-small"
+
+
+# --- resolve_commit_trailer ---
+
+
+def test_resolve_commit_trailer_basic():
+    """Basic template substitution."""
+    result = resolve_commit_trailer(
+        "Model: {model_alias} ({model_id}), openhands-ai v{oh_version}",
+        "claude-large",
+        "anthropic/claude-opus-4-5",
+        "1.3.0",
+    )
+    assert result == "Model: claude-large (anthropic/claude-opus-4-5), openhands-ai v1.3.0"
+
+
+def test_resolve_commit_trailer_empty_template():
+    """Empty template returns empty string."""
+    assert resolve_commit_trailer("", "alias", "model", "1.0") == ""
+    assert resolve_commit_trailer(None, "alias", "model", "1.0") == ""
+
+
+def test_resolve_commit_trailer_partial_template():
+    """Template with only some variables."""
+    result = resolve_commit_trailer("Model: {model_alias}", "claude-small", "anthropic/claude-sonnet-4-5", "1.3.0")
+    assert result == "Model: claude-small"
+
+
+def test_resolve_commit_trailer_no_variables():
+    """Template with no variables."""
+    result = resolve_commit_trailer("Static trailer", "alias", "model", "1.0")
+    assert result == "Static trailer"
+
+
+# --- commit_trailer in resolve_config ---
+
+
+def test_resolve_config_commit_trailer_default(config_dir):
+    """Config without commit_trailer returns empty string."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert "commit_trailer" in result
+    assert result["commit_trailer"] == ""
+
+
+def test_resolve_config_commit_trailer_with_template():
+    """Config with commit_trailer template resolves variables."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(
+            {
+                "default_model": "m1",
+                "models": {"m1": {"id": "anthropic/test-model"}},
+                "modes": {"resolve": {"action": "pr"}},
+                "openhands": {"version": "1.3.0"},
+                "commit_trailer": "Model: {model_alias} ({model_id}), v{oh_version}",
+            },
+            f,
+        )
+        path = f.name
+    try:
+        result = resolve_config(path, "nonexistent.yaml", "resolve")
+        assert result["commit_trailer"] == "Model: m1 (anthropic/test-model), v1.3.0"
+    finally:
+        os.unlink(path)
+
+
+def test_resolve_config_commit_trailer_override():
+    """Override config can change commit_trailer."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as base_f:
+        yaml.dump(
+            {
+                "default_model": "m1",
+                "models": {"m1": {"id": "anthropic/test-model"}},
+                "modes": {"resolve": {"action": "pr"}},
+                "openhands": {"version": "1.3.0"},
+                "commit_trailer": "Base trailer: {model_alias}",
+            },
+            base_f,
+        )
+        base_path = base_f.name
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as override_f:
+        yaml.dump(
+            {
+                "commit_trailer": "Override trailer: {model_id}",
+            },
+            override_f,
+        )
+        override_path = override_f.name
+
+    try:
+        result = resolve_config(base_path, override_path, "resolve")
+        assert result["commit_trailer"] == "Override trailer: anthropic/test-model"
+    finally:
+        os.unlink(base_path)
+        os.unlink(override_path)
+
+
+def test_resolve_config_commit_trailer_disable_via_override():
+    """Override config can disable commit_trailer by setting empty string."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as base_f:
+        yaml.dump(
+            {
+                "default_model": "m1",
+                "models": {"m1": {"id": "anthropic/test-model"}},
+                "modes": {"resolve": {"action": "pr"}},
+                "commit_trailer": "Base trailer: {model_alias}",
+            },
+            base_f,
+        )
+        base_path = base_f.name
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as override_f:
+        yaml.dump(
+            {
+                "commit_trailer": "",
+            },
+            override_f,
+        )
+        override_path = override_f.name
+
+    try:
+        result = resolve_config(base_path, override_path, "resolve")
+        assert result["commit_trailer"] == ""
+    finally:
+        os.unlink(base_path)
+        os.unlink(override_path)

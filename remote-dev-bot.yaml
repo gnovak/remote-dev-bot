@@ -7,6 +7,11 @@
 
 default_model: claude-small
 
+# Commit trailer appended to OpenHands commits (resolve mode only).
+# Supported variables: {model_alias}, {model_id}, {oh_version}
+# Set to empty string to disable.
+commit_trailer: "Model: {model_alias} ({model_id}), openhands-ai v{oh_version}"
+
 # Modes define what the agent does. Each mode has an action and optional defaults.
 modes:
   resolve:
