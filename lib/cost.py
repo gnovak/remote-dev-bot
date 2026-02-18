@@ -5,6 +5,7 @@ Used by resolve.yml to post cost transparency comments after agent runs.
 """
 
 import json
+import math
 import os
 import re
 from typing import Optional
@@ -255,7 +256,13 @@ def format_cost_comment(
     ]
 
     if total_cost is not None:
-        lines.append(f"| **Estimated cost** | **${total_cost:.4f}** |")
+        # Round up to the nearest penny. This ensures:
+        # 1. Cost estimates align with natural scale (pennies, not fractional pennies)
+        # 2. Exactly $0.00 indicates broken cost estimates (helpful for debugging)
+        # 3. Non-zero costs always show at least $0.01 (giving visibility into usage)
+        # Always rounding UP (not standard rounding) prevents masking tiny costs as $0.00
+        rounded_cost = math.ceil(total_cost * 100) / 100
+        lines.append(f"| **Estimated cost** | **${rounded_cost:.2f}** |")
     else:
         lines.append("| Estimated cost | _(pricing unavailable)_ |")
 
