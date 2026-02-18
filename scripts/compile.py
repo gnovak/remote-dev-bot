@@ -365,9 +365,13 @@ def compile_design(shim, workflow, config_yaml, output_path):
         escaped_prefix = ""
     llm_run = llm_step.get("run", "")
     # Replace the config-loading block with a simple variable assignment
+    # Note: re.sub interprets backslash sequences in the replacement string,
+    # so we need to escape backslashes again to preserve \n as literal \n
+    replacement = f'prompt_prefix = "{escaped_prefix}"\n'
+    replacement_escaped = replacement.replace('\\', '\\\\')
     llm_run = re.sub(
         r'# Load prompt_prefix from config.*?break\n',
-        f'prompt_prefix = "{escaped_prefix}"\n',
+        replacement_escaped,
         llm_run,
         flags=re.DOTALL,
     )

@@ -91,7 +91,7 @@ for alias, info in config.get('models', {}).items():
         "Create a file hello_default.py with a function hello() that returns 'Hello from default!'" \
         "/agent-resolve" "all" "resolve"
 else
-    # Smoke tests: one medium model per provider + default
+    # Smoke tests: one small model per provider + default
     add_test "default-model" "Test: add hello.py" \
         "Create a file hello.py with a function hello() that returns 'Hello, world!'" \
         "/agent-resolve" "all" "resolve"
