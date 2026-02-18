@@ -96,6 +96,20 @@ models:
 
 You can also create a `remote-dev-bot.yaml` in your target repo to override the defaults. See `runbook.md` Phase 5 for details.
 
+### Commit Trailers
+
+By default, each OpenHands commit includes a trailer identifying the model used:
+
+```
+Model: claude-large (anthropic/claude-opus-4-5), openhands-ai v0.39.0
+```
+
+This is appended by amending the commit after `send_pull_request` pushes it, which causes a force-push event visible in the PR timeline. To disable this (no trailer, no force push), set `commit_trailer` to empty in your `remote-dev-bot.yaml`:
+
+```yaml
+commit_trailer: ""
+```
+
 ## Architecture
 
 The system has two parts:

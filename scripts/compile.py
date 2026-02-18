@@ -296,14 +296,14 @@ def compile_resolve(shim, workflow, config_yaml, output_path):
     resolve_step["env"]["GITHUB_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(resolve_step)
 
-    # Amend commit with model info
-    amend_step = find_step(resolve_steps, "Amend commit with model info").copy()
-    steps.append(amend_step)
-
     # Create pull request (update token)
     pr_step = find_step(resolve_steps, "Create pull request").copy()
     pr_step["env"]["GITHUB_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(pr_step)
+
+    # Amend commit with model info
+    amend_step = find_step(resolve_steps, "Amend commit with model info").copy()
+    steps.append(amend_step)
 
     # Upload artifact
     steps.append(find_step(resolve_steps, "Upload output artifact").copy())
