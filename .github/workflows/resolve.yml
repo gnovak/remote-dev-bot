@@ -188,8 +188,6 @@ jobs:
       - name: Amend commit with model info
         if: needs.parse.outputs.commit_trailer != ''
         run: |
-          git config user.email "openhands@all-hands.dev"
-          git config user.name "openhands"
           TRAILER="${{ needs.parse.outputs.commit_trailer }}"
           CURRENT_MSG=$(git log -1 --format=%B)
           git commit --amend -m "${CURRENT_MSG}
