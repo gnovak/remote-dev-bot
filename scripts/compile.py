@@ -84,6 +84,11 @@ def inline_config_parsing(config_yaml, mode):
     oh_version = oh.get("version", "1.3.0")
     pr_type = oh.get("pr_type", "ready")
 
+    # Commit trailer template (resolve mode only)
+    commit_trailer_template = config_yaml.get("commit_trailer", "")
+    # Escape for Python string literal
+    commit_trailer_escaped = commit_trailer_template.replace('\\', '\\\\').replace('"', '\\"')
+
     # Build models dict as Python code
     models_dict_lines = []
     for alias, model_info in models.items():
@@ -112,6 +117,10 @@ OH_VERSION = "{oh_version}"
 # --- PR_STYLE: "draft" or "ready" ---
 PR_TYPE = "{pr_type}"
 
+# --- COMMIT_TRAILER: appended to commit messages (resolve mode only) ---
+# Supported variables: {{model_alias}}, {{model_id}}, {{oh_version}}
+COMMIT_TRAILER_TEMPLATE = "{commit_trailer_escaped}"
+
 # Parse alias from comment — mode is known at compile time
 comment = os.environ.get("COMMENT", "")
 # Strip the known prefix: "/agent-{mode}-claude-large do X" -> "claude-large"
@@ -127,6 +136,15 @@ if alias not in MODELS:
 
 model = MODELS[alias]
 
+# Resolve commit trailer template
+commit_trailer = ""
+if COMMIT_TRAILER_TEMPLATE:
+    commit_trailer = COMMIT_TRAILER_TEMPLATE.format(
+        model_alias=alias,
+        model_id=model,
+        oh_version=OH_VERSION,
+    )
+
 # Write outputs
 output_file = os.environ.get("GITHUB_OUTPUT")
 if output_file:
@@ -136,6 +154,7 @@ if output_file:
         f.write(f"max_iterations={{MAX_ITERATIONS}}\\n")
         f.write(f"oh_version={{OH_VERSION}}\\n")
         f.write(f"pr_type={{PR_TYPE}}\\n")
+        f.write(f"commit_trailer={{commit_trailer}}\\n")
 
 # Log for visibility
 print(f"Mode: {mode}")
@@ -264,6 +283,10 @@ def compile_resolve(shim, workflow, config_yaml, output_path):
                            if k != "E2E_TEST_SECRET"}
     resolve_step["env"]["GITHUB_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
     steps.append(resolve_step)
+
+    # Amend commit with model info
+    amend_step = find_step(resolve_steps, "Amend commit with model info").copy()
+    steps.append(amend_step)
 
     # Create pull request (update token)
     pr_step = find_step(resolve_steps, "Create pull request").copy()

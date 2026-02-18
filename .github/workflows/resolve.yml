@@ -36,6 +36,7 @@ jobs:
       oh_version: ${{ steps.parse.outputs.oh_version }}
       pr_type: ${{ steps.parse.outputs.pr_type }}
       context_files: ${{ steps.parse.outputs.context_files }}
+      commit_trailer: ${{ steps.parse.outputs.commit_trailer }}
 
     steps:
       - name: Checkout target repository
@@ -183,6 +184,15 @@ jobs:
             --issue-type "$ISSUE_TYPE" \
             --max-iterations ${{ needs.parse.outputs.max_iterations }} \
             2>&1 | tee /tmp/resolve_output.log
+
+      - name: Amend commit with model info
+        if: needs.parse.outputs.commit_trailer != ''
+        run: |
+          TRAILER="${{ needs.parse.outputs.commit_trailer }}"
+          CURRENT_MSG=$(git log -1 --format=%B)
+          git commit --amend -m "${CURRENT_MSG}
+
+          ${TRAILER}"
 
       - name: Create pull request
         env:

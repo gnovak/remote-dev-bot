@@ -94,6 +94,21 @@ def parse_command(command_string, known_modes):
     return verb, model_alias
 
 
+def resolve_commit_trailer(template, alias, model_id, oh_version):
+    """Resolve template variables in commit_trailer.
+
+    Supported variables: {model_alias}, {model_id}, {oh_version}
+    Returns empty string if template is empty/None.
+    """
+    if not template:
+        return ""
+    return template.format(
+        model_alias=alias,
+        model_id=model_id,
+        oh_version=oh_version,
+    )
+
+
 def resolve_config(base_path, override_path, command_string):
     """Load configs, merge, resolve mode + alias, return outputs dict.
 
@@ -164,6 +179,12 @@ def resolve_config(base_path, override_path, command_string):
     if "context_files" in mode_config:
         result["context_files"] = mode_config["context_files"]
 
+    # Resolve commit_trailer template (for resolve mode)
+    commit_trailer_template = config.get("commit_trailer", "")
+    result["commit_trailer"] = resolve_commit_trailer(
+        commit_trailer_template, alias, model_id, oh_version
+    )
+
     return result
 
 
@@ -192,6 +213,7 @@ def main():
             f.write(f"pr_type={result['pr_type']}\n")
             if "context_files" in result:
                 f.write(f"context_files={json.dumps(result['context_files'])}\n")
+            f.write(f"commit_trailer={result['commit_trailer']}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"

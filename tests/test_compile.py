@@ -112,6 +112,20 @@ def test_resolve_has_openhands_steps(compiled_dir):
     assert "openhands.resolver" in content
 
 
+def test_resolve_has_amend_step(compiled_dir):
+    """Resolve mode should have the amend commit step."""
+    content = _read_text(compiled_dir / "agent-resolve.yml")
+    assert "Amend commit with model info" in content
+    assert "git commit --amend" in content
+
+
+def test_resolve_has_commit_trailer_config(compiled_dir):
+    """Resolve mode should have commit_trailer configuration."""
+    content = _read_text(compiled_dir / "agent-resolve.yml")
+    assert "COMMIT_TRAILER" in content
+    assert "commit_trailer" in content
+
+
 # --- Design-specific ---
 
 
@@ -268,6 +282,7 @@ EXPECTED_RESOLVE_STEPS = [
     "Install OpenHands",
     "Inject security guardrails",
     "Resolve issue",
+    "Amend commit with model info",
     "Create pull request",
     "Upload output artifact",
     "Calculate and post cost",
