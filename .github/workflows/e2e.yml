@@ -36,7 +36,7 @@ jobs:
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
-          token: ${{ secrets.PAT_TOKEN || github.token }}
+          token: ${{ secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Install PyYAML
         if: ${{ inputs.all_models }}
@@ -44,7 +44,7 @@ jobs:
 
       - name: Run E2E tests
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           ARGS="--branch ${{ inputs.branch }}"
           if [[ -n "${{ inputs.provider }}" && "${{ inputs.provider }}" != "all" ]]; then

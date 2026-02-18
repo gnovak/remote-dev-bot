@@ -239,7 +239,7 @@ def test_both_inline_model_aliases(compiled_dir):
 def test_both_use_github_token_fallback(compiled_dir):
     for fname in ["agent-resolve.yml", "agent-design.yml"]:
         content = _read_text(compiled_dir / fname)
-        assert "secrets.PAT_TOKEN || github.token" in content
+        assert "secrets.RDB_PAT_TOKEN || github.token" in content
 
 
 # --- Both: no cross-repo checkout ---
@@ -264,7 +264,7 @@ def test_both_have_required_markers(compiled_dir):
         assert "SECURITY_GATE" in content, f"{fname} missing SECURITY_GATE marker"
         assert "MAX_ITERATIONS" in content, f"{fname} missing MAX_ITERATIONS marker"
         assert "PR_STYLE" in content, f"{fname} missing PR_STYLE marker"
-        assert "PAT_TOKEN" in content, f"{fname} missing PAT_TOKEN documentation"
+        assert "RDB_PAT_TOKEN" in content, f"{fname} missing RDB_PAT_TOKEN documentation"
 
 
 # --- Step count tripwire ---
@@ -273,6 +273,7 @@ def test_both_have_required_markers(compiled_dir):
 
 
 EXPECTED_RESOLVE_STEPS = [
+    "Generate app token",
     "Checkout repository",
     "Set up Python",
     "Parse config and model alias",
@@ -289,6 +290,7 @@ EXPECTED_RESOLVE_STEPS = [
 ]
 
 EXPECTED_DESIGN_STEPS = [
+    "Generate app token",
     "Checkout repository",
     "Set up Python",
     "Parse config and model alias",

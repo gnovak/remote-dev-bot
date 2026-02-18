@@ -43,14 +43,14 @@ jobs:
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
-          token: ${{ secrets.PAT_TOKEN || github.token }}
+          token: ${{ secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Install PyYAML
         run: pip install PyYAML
 
       - name: Run E2E tests (shim, all models)
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.RDB_PAT_TOKEN || github.token }}
         run: ./tests/e2e.sh --branch ${{ inputs.branch }} --all-models
 
   e2e-compiled:
@@ -62,14 +62,14 @@ jobs:
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
-          token: ${{ secrets.PAT_TOKEN || github.token }}
+          token: ${{ secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Install PyYAML
         run: pip install PyYAML
 
       - name: Run E2E tests (compiled, all models)
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.RDB_PAT_TOKEN || github.token }}
         run: ./tests/e2e.sh --branch ${{ inputs.branch }} --compiled --all-models
 
   e2e-security:
@@ -81,10 +81,10 @@ jobs:
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
-          token: ${{ secrets.PAT_TOKEN || github.token }}
+          token: ${{ secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Run security E2E tests
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ secrets.RDB_PAT_TOKEN }}
           TESTER_PAT: ${{ secrets.TESTER_PAT_TOKEN }}
         run: ./tests/e2e-security.sh --branch ${{ inputs.branch }}

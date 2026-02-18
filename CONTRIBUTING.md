@@ -11,15 +11,29 @@ This file documents the development and testing infrastructure. If you're a user
 
 ## Test Accounts
 
-| Account | Purpose | PAT stored as |
-|---------|---------|---------------|
-| `gnovak` | Repo owner. Used for normal development and testing. | `PAT_TOKEN` (on both repos) |
+| Account | Purpose | Credentials stored as |
+|---------|---------|----------------------|
+| `gnovak` | Repo owner. Used for normal development and testing. | `RDB_PAT_TOKEN` (on both repos), or GitHub App (`RDB_APP_ID` variable + `RDB_APP_PRIVATE_KEY` secret) |
 | `remote-dev-bot-tester` | Simulates an unauthorized external user. NOT a collaborator on any repo. | `TESTER_PAT_TOKEN` (on remote-dev-bot) |
 
 ### remote-dev-bot-tester details
 - Classic PAT with `public_repo` scope, no expiration
 - Used by e2e security tests to verify that non-collaborators cannot trigger agent runs
 - The PAT only works on public repos — the gating test requires repos to be public
+
+## GitHub App and Reserved Identities
+
+### GitHub App: `remote-dev-bot`
+- Created at https://github.com/settings/apps/remote-dev-bot (owned by `gnovak`)
+- When used, the bot posts as `remote-dev-bot[bot]` — a clearly distinct identity from the repo owner
+- Installed on `gnovak/remote-dev-bot` and `gnovak/bridge-analysis`
+- Permissions: Contents, Issues, Pull Requests (all Read & write)
+- Webhooks: inactive (tokens are generated on-demand via `actions/create-github-app-token`)
+- Private key stored as `RDB_APP_PRIVATE_KEY` secret; App ID stored as `RDB_APP_ID` variable
+
+### Reserved GitHub username: `remote-dev-bot`
+- Reserved for potential future use as a dedicated bot account
+- Not currently active — the GitHub App approach is preferred over a dedicated user account
 
 ## Secrets Map
 
@@ -30,8 +44,15 @@ Secrets stored on `gnovak/remote-dev-bot`:
 | `ANTHROPIC_API_KEY` | Anthropic API key (for Claude models) |
 | `OPENAI_API_KEY` | OpenAI API key (for GPT models) |
 | `GEMINI_API_KEY` | Google AI API key (for Gemini models) |
-| `PAT_TOKEN` | Fine-grained PAT (gnovak). Scoped to all repos, with Contents/Issues/PRs/Workflows read-write. |
+| `RDB_PAT_TOKEN` | Fine-grained PAT (gnovak). Scoped to all repos, with Contents/Issues/PRs/Workflows read-write. |
+| `RDB_APP_PRIVATE_KEY` | (Optional) GitHub App private key, for bot identity on comments/PRs. |
 | `TESTER_PAT_TOKEN` | Classic PAT (remote-dev-bot-tester). `public_repo` scope only. For security e2e tests. |
+
+Variables stored on `gnovak/remote-dev-bot`:
+
+| Variable | What it is |
+|----------|-----------|
+| `RDB_APP_ID` | (Optional) GitHub App ID, used with `RDB_APP_PRIVATE_KEY` for bot identity. |
 
 Secrets stored on `gnovak/remote-dev-bot-test`:
 
@@ -40,7 +61,7 @@ Secrets stored on `gnovak/remote-dev-bot-test`:
 | `ANTHROPIC_API_KEY` | Same key as above (shared) |
 | `OPENAI_API_KEY` | Same key as above (shared) |
 | `GEMINI_API_KEY` | Same key as above (shared) |
-| `PAT_TOKEN` | Same PAT as above (shared) |
+| `RDB_PAT_TOKEN` | Same PAT as above (shared) |
 
 ## Dev Cycle
 

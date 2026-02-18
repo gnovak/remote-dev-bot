@@ -20,7 +20,7 @@ Remote Dev Bot uses a **shim + reusable workflow** pattern that involves two rep
 │                                                                             │
 │   Repository Secrets:                                                       │
 │     • ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY (at least one)     │
-│     • PAT_TOKEN (Personal Access Token for cross-repo access)              │
+│     • (Optional) RDB_APP_PRIVATE_KEY or RDB_PAT_TOKEN — see Auth below    │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     │ calls (via GitHub Actions)
@@ -71,7 +71,11 @@ This is where you want the AI agent to help with development.
 
 **Repository Secrets (required):**
 - At least one LLM API key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`
-- `PAT_TOKEN`: A Personal Access Token with repo access (needed for cross-repo workflow calls and PR creation)
+
+**Repository Secrets/Variables (optional — for bot identity or CI triggering):**
+- `RDB_APP_ID` (variable) + `RDB_APP_PRIVATE_KEY` (secret): GitHub App — bot posts as `app-name[bot]`, CI triggers on bot PRs
+- `RDB_PAT_TOKEN` (secret): PAT — bot posts as the PAT owner, CI triggers on bot PRs
+- Without either: bot posts as `github-actions[bot]`, bot PRs don't trigger CI
 
 ## How the Pieces Connect
 
@@ -134,7 +138,19 @@ This lets you:
 - Set lower iteration limits for repos with simpler tasks
 - Test config changes without modifying remote-dev-bot
 
-## Secrets and PAT Requirements
+## Authentication and Bot Identity
+
+### How tokens work
+
+The workflow uses a three-way token fallback: GitHub App token > `RDB_PAT_TOKEN` > `github.token`. Whichever is configured takes priority. Each option has different trade-offs:
+
+| | No config (default) | RDB_PAT_TOKEN | GitHub App |
+|---|---|---|---|
+| **Bot identity** | `github-actions[bot]` | PAT owner's personal account | `app-name[bot]` |
+| **CI triggers on bot PRs** | No | Yes | Yes |
+| **Setup effort** | None | Create PAT, add secret | Create app, add secret + variable |
+
+**For most users, the default (no config) is the right choice.** The bot posts as `github-actions[bot]`, which is clearly not you. The only downside is that CI workflows won't auto-run on bot-created PRs — you can trigger them manually.
 
 ### Cross-owner secret passing
 
@@ -146,18 +162,26 @@ GitHub Actions does not pass `secrets: inherit` across different repo owners. Si
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+      RDB_PAT_TOKEN: ${{ secrets.RDB_PAT_TOKEN }}
+      RDB_APP_PRIVATE_KEY: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 ```
 
 If you fork remote-dev-bot into your own org and your target repos are in the same org, `secrets: inherit` will work.
 
-### When is a PAT needed?
+### Advanced: GitHub App setup
 
-**Short answer: almost never.**
+A GitHub App gives the bot a distinct identity (e.g., `remote-dev-bot[bot]`) and triggers CI on bot PRs. To set one up:
 
-The shim install works without a PAT. The compiled install works without a PAT. The only thing a PAT adds is automatic CI triggering: PRs created by `github.token` (the default) won't trigger other workflows like CI checks. This is a GitHub security feature to prevent infinite loops. A PAT bypasses it.
+1. Create a GitHub App at https://github.com/settings/apps/new
+2. Grant repository permissions: Contents, Issues, Pull Requests (all Read & write)
+3. Uncheck Webhook "Active" (not needed)
+4. Install the app on your repo(s)
+5. Store the App ID as a repository **variable** `RDB_APP_ID`
+6. Generate a private key and store it as a repository **secret** `RDB_APP_PRIVATE_KEY`
 
-For most users, manually triggering CI on bot PRs is fine. Add a PAT later if you find you need auto-triggering.
+### Advanced: PAT setup
+
+A PAT is simpler than a GitHub App but the bot posts as your personal account. See the runbook for PAT creation instructions. Store it as `RDB_PAT_TOKEN`.
 
 ### Visibility requirements
 

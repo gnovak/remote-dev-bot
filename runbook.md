@@ -328,26 +328,64 @@ gh secret list --repo {owner}/{repo}
 # Should list the secrets you just set (values are hidden)
 ```
 
-### Step 2.4: Create a Personal Access Token (PAT) — Optional
+### Step 2.4: Advanced Authentication — Optional
 
-> **You can skip this step.** Both the compiled install and the shim install work without a PAT. The only thing you lose is automatic CI triggering: when the bot creates a PR, your CI checks won't run automatically. You can always trigger them manually, or come back and add a PAT later.
+> **You can skip this step.** The bot works without any additional authentication. By default it uses GitHub's built-in `GITHUB_TOKEN`, which lets it push branches, create PRs, and post comments as `github-actions[bot]`. The only limitation: bot-created PRs won't auto-trigger CI workflows. You can always trigger CI manually, or come back and set this up later.
 
 <details>
-<summary><strong>Click to expand PAT setup instructions</strong> (needed only if you want bot PRs to auto-trigger CI)</summary>
+<summary><strong>Click to expand advanced auth options</strong> (for bot identity or auto CI triggering)</summary>
 
-#### Why a PAT Helps
+#### Why you might want this
 
-GitHub's default `GITHUB_TOKEN` can push branches and create PRs, but PRs it creates won't trigger other workflows (like CI checks). This is a GitHub security feature to prevent infinite loops. A PAT bypasses this limitation.
+By default, the bot posts as `github-actions[bot]` and bot PRs don't trigger CI. If you want either of these, you have two options:
 
-The PAT only needs access to your own repo — no cross-repo scoping required.
+| Option | Bot identity | CI triggers | Setup effort |
+|--------|-------------|-------------|--------------|
+| **GitHub App** (recommended) | `your-app-name[bot]` | Yes | Create app, add variable + secret |
+| **PAT** | Posts as the PAT owner | Yes | Create PAT, add secret |
 
-#### Instructions
+#### Option A: GitHub App (recommended)
+
+A GitHub App gives the bot a clear, distinct identity and triggers CI on bot PRs. Token management is automatic — no expiring PATs to rotate.
+
+1. Go to https://github.com/settings/apps/new
+2. **Name:** Choose a name (this becomes the `name[bot]` identity)
+3. **Homepage URL:** Your repo URL is fine
+4. **Uncheck** Webhook "Active" (not needed)
+5. **Repository permissions** — set to Read & write:
+   - Contents
+   - Issues
+   - Pull requests
+6. **Where can this app be installed:** "Only on this account" is fine
+7. Click "Create GitHub App"
+8. Note the **App ID** shown on the app's settings page
+9. Scroll down and click **Generate a private key** (downloads a `.pem` file)
+10. Click **Install App** in the left sidebar, then install it on your target repo
+
+Store the credentials:
+
+```bash
+# Store App ID as a repository variable (not a secret — it's not sensitive)
+gh variable set RDB_APP_ID --repo {owner}/{repo}
+# Enter the App ID when prompted
+
+# Store the private key as a repository secret
+gh secret set RDB_APP_PRIVATE_KEY --repo {owner}/{repo} < path/to/your-app.pem
+```
+
+#### Option B: Personal Access Token (PAT)
+
+A PAT is simpler to set up but the bot will post as your personal account. This can be confusing if you're also commenting on the same issues.
+
+**Alternatives to posting as yourself:**
+- Organizations can create a dedicated GitHub user (e.g., `my-org-bot`) and use that user's PAT
+- This gives a distinct identity without the complexity of a GitHub App
 
 1. Go to https://github.com/settings/tokens?type=beta (Fine-grained tokens)
 2. Click "Generate new token"
-3. **Token name:** "remote-dev-bot" (or "remote-dev-bot-myrepo" for per-repo tokens)
+3. **Token name:** "remote-dev-bot"
 4. **Expiration:** No expiration is fine for a token scoped to one repo
-5. **Resource owner:** Your GitHub account
+5. **Resource owner:** Your GitHub account (or the bot account)
 6. **Repository access:** Select "Only select repositories" and choose your target repo
 7. **Permissions** — under "Repository permissions", set these to **Read and write**:
    - Contents
@@ -360,11 +398,9 @@ The PAT only needs access to your own repo — no cross-repo scoping required.
 Store the token as a repository secret:
 
 ```bash
-gh secret set PAT_TOKEN --repo {owner}/{repo}
+gh secret set RDB_PAT_TOKEN --repo {owner}/{repo}
 # Paste the token when prompted, then press Enter
 ```
-
-> **Already have a PAT?** If you have an existing PAT scoped to "All repositories", just set it as a secret: `gh secret set PAT_TOKEN --repo {owner}/{repo}`.
 
 </details>
 
@@ -443,12 +479,13 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+      RDB_PAT_TOKEN: ${{ secrets.RDB_PAT_TOKEN }}
+      RDB_APP_PRIVATE_KEY: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 ```
 
 **Why explicit secrets?** GitHub Actions does not pass `secrets: inherit` across different repo owners. Since your repo and `gnovak/remote-dev-bot` have different owners, secrets must be listed explicitly. You only need to set the API key(s) for the provider(s) you use — the others will be empty and that's fine.
 
-**Optional PAT:** `PAT_TOKEN` is only needed if you want bot-created PRs to auto-trigger your CI checks. See Step 2.4 for details.
+**Optional auth secrets:** `RDB_PAT_TOKEN` and `RDB_APP_PRIVATE_KEY` are only needed if you want bot-created PRs to auto-trigger CI or a distinct bot identity. See Step 2.4 for details.
 
 **Using your own fork:** For full control, fork `gnovak/remote-dev-bot` and point the `uses:` line at your fork. If the fork is in the same owner/org as your target repos, `secrets: inherit` will work. You'll need to set Actions access to `user` level on the fork (see Troubleshooting).
 

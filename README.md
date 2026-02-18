@@ -110,7 +110,9 @@ The system has two parts:
 
 See `runbook.md` for complete setup instructions. The runbook is designed so you (or an AI assistant) can follow it step-by-step to get this running in your own GitHub account.
 
-**Quick version:** You need a GitHub repo, API keys for your preferred LLM provider(s), and about 10 minutes.
+**Quick version:** You need a GitHub repo, API keys for your preferred LLM provider(s), and about 10 minutes. No PAT or special authentication is required — the bot works with GitHub's built-in token and posts as `github-actions[bot]`.
+
+**Advanced auth options:** If you want bot PRs to auto-trigger CI, or a custom bot identity (e.g., `your-app[bot]`), see the advanced auth section in the runbook. Options include a GitHub App (recommended) or a PAT.
 
 ## Development
 

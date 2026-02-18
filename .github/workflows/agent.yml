@@ -7,6 +7,11 @@
 #   - Repository secrets: at least one LLM API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY)
 #   - Actions permissions: read/write + allow PR creation
 #
+# Optional (for bot identity / CI triggering):
+#   - RDB_APP_ID (repo variable) + RDB_APP_PRIVATE_KEY (repo secret): GitHub App for bot identity
+#   - RDB_PAT_TOKEN (repo secret): PAT for CI triggering (bot posts as PAT owner)
+#   - Without either, github.token is used (bot posts as github-actions[bot], no CI on bot PRs)
+#
 # Note: secrets must be passed explicitly (not via `secrets: inherit`) because
 # GitHub Actions does not pass inherited secrets across different repo owners.
 #
@@ -41,4 +46,5 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+      RDB_PAT_TOKEN: ${{ secrets.RDB_PAT_TOKEN }}
+      RDB_APP_PRIVATE_KEY: ${{ secrets.RDB_APP_PRIVATE_KEY }}

@@ -8,7 +8,7 @@ Reads the reusable workflow (resolve.yml), the shim (agent.yml), and config
   dist/agent-design.yml   — triggers on /agent-design[-<model>]
 
 Each compiled file is self-contained: inlined config, no cross-repo checkout,
-uses github.token by default (PAT_TOKEN optional).
+uses github.token by default (RDB_PAT_TOKEN and GitHub App optional).
 
 Usage:
     python scripts/compile.py                  # writes to dist/
@@ -178,12 +178,12 @@ def make_header(mode):
 # - PR_STYLE: Search for this to switch between draft and ready PRs
 # - MAX_ITERATIONS: Search for this to adjust how many steps the agent takes
 # - SECURITY_GATE: Search for this to change who can trigger the agent
-# - PAT_TOKEN: Optional secret. Without it, github.token is used.
 #
-# About PAT_TOKEN:
-# - PAT_TOKEN is optional. If not set, github.token is used (works for most cases).
-# - Add a PAT (scoped to this repo) if you want bot-created PRs to auto-trigger CI.
-# - Without a PAT, bot PRs won't trigger CI workflows (GitHub security feature).
+# Authentication (optional — bot works without any of these):
+# - Default: github.token is used. Bot posts as github-actions[bot]. No CI on bot PRs.
+# - GitHub App: Set RDB_APP_ID (variable) + RDB_APP_PRIVATE_KEY (secret) for a custom
+#   bot identity and CI triggering on bot PRs.
+# - PAT: Set RDB_PAT_TOKEN (secret) for CI triggering. Bot posts as the PAT owner.
 #
 # Prerequisites:
 # - At least one LLM API key secret: ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY
@@ -239,11 +239,23 @@ def compile_resolve(shim, workflow, config_yaml, output_path):
 
     steps = []
 
+    # Generate app token (optional — only runs if RDB_APP_ID is set)
+    steps.append({
+        "name": "Generate app token",
+        "if": "vars.RDB_APP_ID != ''",
+        "uses": "actions/create-github-app-token@v1",
+        "id": "app-token",
+        "with": {
+            "app-id": "${{ vars.RDB_APP_ID }}",
+            "private-key": "${{ secrets.RDB_APP_PRIVATE_KEY }}",
+        },
+    })
+
     # Checkout
     steps.append({
         "name": "Checkout repository",
         "uses": "actions/checkout@v4",
-        "with": {"token": "${{ secrets.PAT_TOKEN || github.token }}"},
+        "with": {"token": "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"},
     })
 
     # Set up Python
@@ -263,12 +275,12 @@ def compile_resolve(shim, workflow, config_yaml, output_path):
     # React to comment (from parse job — the shared setup)
     parse_steps = workflow["jobs"]["parse"]["steps"]
     react_step = find_step(parse_steps, "React to comment").copy()
-    react_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    react_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(react_step)
 
     # Assign commenter to issue (from parse job)
     assign_step = find_step(parse_steps, "Assign commenter to issue").copy()
-    assign_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    assign_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(assign_step)
 
     # Install OpenHands
@@ -281,7 +293,7 @@ def compile_resolve(shim, workflow, config_yaml, output_path):
     resolve_step = find_step(resolve_steps, "Resolve issue").copy()
     resolve_step["env"] = {k: v for k, v in resolve_step["env"].items()
                            if k != "E2E_TEST_SECRET"}
-    resolve_step["env"]["GITHUB_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    resolve_step["env"]["GITHUB_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(resolve_step)
 
     # Amend commit with model info
@@ -290,7 +302,7 @@ def compile_resolve(shim, workflow, config_yaml, output_path):
 
     # Create pull request (update token)
     pr_step = find_step(resolve_steps, "Create pull request").copy()
-    pr_step["env"]["GITHUB_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    pr_step["env"]["GITHUB_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(pr_step)
 
     # Upload artifact
@@ -298,7 +310,7 @@ def compile_resolve(shim, workflow, config_yaml, output_path):
 
     # Calculate and post cost
     cost_step = find_step(resolve_steps, "Calculate and post cost").copy()
-    cost_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    cost_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(cost_step)
 
     # Fix needs.parse.outputs -> steps.parse.outputs (compiled is single-job)
@@ -338,11 +350,23 @@ def compile_design(shim, workflow, config_yaml, output_path):
 
     steps = []
 
+    # Generate app token (optional — only runs if RDB_APP_ID is set)
+    steps.append({
+        "name": "Generate app token",
+        "if": "vars.RDB_APP_ID != ''",
+        "uses": "actions/create-github-app-token@v1",
+        "id": "app-token",
+        "with": {
+            "app-id": "${{ vars.RDB_APP_ID }}",
+            "private-key": "${{ secrets.RDB_APP_PRIVATE_KEY }}",
+        },
+    })
+
     # Checkout
     steps.append({
         "name": "Checkout repository",
         "uses": "actions/checkout@v4",
-        "with": {"token": "${{ secrets.PAT_TOKEN || github.token }}"},
+        "with": {"token": "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"},
     })
 
     # Set up Python
@@ -362,12 +386,12 @@ def compile_design(shim, workflow, config_yaml, output_path):
     # React to comment — design mode doesn't have its own, use from parse job
     parse_steps = workflow["jobs"]["parse"]["steps"]
     react_step = find_step(parse_steps, "React to comment").copy()
-    react_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    react_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(react_step)
 
     # Assign commenter to issue (from parse job)
     assign_step = find_step(parse_steps, "Assign commenter to issue").copy()
-    assign_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    assign_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(assign_step)
 
     # Install dependencies (PyYAML + litellm)
@@ -375,7 +399,7 @@ def compile_design(shim, workflow, config_yaml, output_path):
 
     # Gather issue context
     gather_step = find_step(design_steps, "Gather issue context").copy()
-    gather_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    gather_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(gather_step)
 
     # Call LLM for design analysis — rewrite to inline prompt_prefix and context_files
@@ -417,12 +441,12 @@ def compile_design(shim, workflow, config_yaml, output_path):
 
     # Post comment
     post_step = find_step(design_steps, "Post comment").copy()
-    post_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    post_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(post_step)
 
     # Post cost comment
     cost_step = find_step(design_steps, "Post cost comment").copy()
-    cost_step["env"]["GH_TOKEN"] = "${{ secrets.PAT_TOKEN || github.token }}"
+    cost_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(cost_step)
 
     # Fix needs.parse.outputs -> steps.parse.outputs
