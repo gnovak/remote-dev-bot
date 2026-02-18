@@ -159,6 +159,10 @@ jobs:
           GITHUB_USERNAME: ${{ github.repository_owner }}
           GIT_USERNAME: ${{ github.repository_owner }}
           E2E_TEST_SECRET: ${{ secrets.E2E_TEST_SECRET }}
+          # Enable LiteLLM standard logging payload for cost tracking.
+          # OpenHands 1.3.0 doesn't populate token metrics, so we parse
+          # LiteLLM's output as a workaround. Remove once OpenHands fixes this.
+          LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD: "1"
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
 
@@ -169,11 +173,14 @@ jobs:
           # doesn't exist at all.
           ISSUE_TYPE=${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}
 
+          # Run resolver and capture output for cost parsing.
+          # LiteLLM prints JSON payloads to stdout when LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD=1.
           python -m openhands.resolver.resolve_issue \
             --selected-repo "${{ github.repository }}" \
             --issue-number "$ISSUE_NUMBER" \
             --issue-type "$ISSUE_TYPE" \
-            --max-iterations ${{ needs.parse.outputs.max_iterations }}
+            --max-iterations ${{ needs.parse.outputs.max_iterations }} \
+            2>&1 | tee /tmp/resolve_output.log
 
       - name: Create pull request
         env:
@@ -209,30 +216,92 @@ jobs:
           ALIAS="${{ needs.parse.outputs.alias }}"
           MODE="${{ needs.parse.outputs.mode }}"
 
-          # Parse metrics from output/output.jsonl
-          # OpenHands writes a single JSON object with a metrics field.
-          # Note: as of OpenHands 1.3.0, metrics are present but unpopulated (all zeros).
-          # This code is ready for when they start populating the fields.
-          read -r COST INPUT_TOKENS OUTPUT_TOKENS < <(python3 << 'PYEOF'
-          import json, os
+          # Parse metrics from output/output.jsonl and/or LiteLLM logs.
+          # OpenHands 1.3.0 doesn't populate metrics, so we fall back to parsing
+          # LiteLLM's standard logging payload from the resolve step output.
+          read -r COST INPUT_TOKENS OUTPUT_TOKENS SOURCE < <(python3 << 'PYEOF'
+          import json, os, re
+
+          def parse_litellm_logs(log_content):
+              """Parse LiteLLM standard logging payloads from log output."""
+              total_input = 0
+              total_output = 0
+              total_cost = 0.0
+              call_count = 0
+
+              lines = log_content.split("\n")
+              json_buffer = []
+              in_json = False
+              brace_count = 0
+
+              for line in lines:
+                  stripped = line.strip()
+                  if not in_json and stripped.startswith("{"):
+                      in_json = True
+                      json_buffer = [line]
+                      brace_count = line.count("{") - line.count("}")
+                  elif in_json:
+                      json_buffer.append(line)
+                      brace_count += line.count("{") - line.count("}")
+                      if brace_count <= 0:
+                          json_str = "\n".join(json_buffer)
+                          try:
+                              data = json.loads(json_str)
+                              if isinstance(data, dict) and "response_cost" in data and "prompt_tokens" in data:
+                                  total_input += data.get("prompt_tokens", 0) or 0
+                                  total_output += data.get("completion_tokens", 0) or 0
+                                  cost = data.get("response_cost", 0) or 0
+                                  if isinstance(cost, (int, float)):
+                                      total_cost += cost
+                                  call_count += 1
+                          except (json.JSONDecodeError, ValueError):
+                              pass
+                          in_json = False
+                          json_buffer = []
+                          brace_count = 0
+                      elif stripped.startswith("{") and brace_count > 0:
+                          json_buffer = [line]
+                          brace_count = line.count("{") - line.count("}")
+
+              return {
+                  "input_tokens": total_input,
+                  "output_tokens": total_output,
+                  "total_cost": total_cost if call_count > 0 else None,
+                  "call_count": call_count,
+              }
+
+          # Try OpenHands output.jsonl first
+          cost = 0
+          input_tokens = 0
+          output_tokens = 0
+          source = "none"
 
           path = "output/output.jsonl"
-          if not os.path.exists(path):
-              print("0 0 0")
-              raise SystemExit
+          if os.path.exists(path):
+              with open(path) as f:
+                  data = json.loads(f.read().strip())
+              m = data.get("metrics", {})
+              cost = m.get("accumulated_cost", 0) or 0
+              atu = m.get("accumulated_token_usage", {})
+              input_tokens = atu.get("prompt_tokens", 0) or 0
+              output_tokens = atu.get("completion_tokens", 0) or 0
+              if cost > 0 or input_tokens > 0 or output_tokens > 0:
+                  source = "openhands"
 
-          with open(path) as f:
-              data = json.loads(f.read().strip())
+          # If OpenHands metrics are empty, try LiteLLM logs
+          if source == "none" or (cost == 0 and input_tokens == 0 and output_tokens == 0):
+              log_path = "/tmp/resolve_output.log"
+              if os.path.exists(log_path):
+                  with open(log_path) as f:
+                      log_content = f.read()
+                  result = parse_litellm_logs(log_content)
+                  if result["call_count"] > 0:
+                      cost = result["total_cost"] or 0
+                      input_tokens = result["input_tokens"]
+                      output_tokens = result["output_tokens"]
+                      source = "litellm"
 
-          m = data.get("metrics", {})
-          cost = m.get("accumulated_cost", 0) or 0
-
-          # Tokens live under metrics.accumulated_token_usage
-          atu = m.get("accumulated_token_usage", {})
-          input_tokens = atu.get("prompt_tokens", 0) or 0
-          output_tokens = atu.get("completion_tokens", 0) or 0
-
-          print(f"{cost} {input_tokens} {output_tokens}")
+          print(f"{cost} {input_tokens} {output_tokens} {source}")
           PYEOF
           )
 
@@ -250,8 +319,8 @@ jobs:
             echo "| Input tokens | ${INPUT_TOKENS} |"
             echo "| Output tokens | ${OUTPUT_TOKENS} |"
             echo "| Total tokens | ${TOTAL_TOKENS} |"
-            if [ -n "$COST" ] && [ "$COST" != "0" ] && [ "$COST" != "0.0" ]; then
-              printf "| **Estimated cost** | **\$%.2f** |\n" "$COST"
+            if [ -n "$COST" ] && [ "$COST" != "0" ] && [ "$COST" != "0.0" ] && [ "$COST" != "None" ]; then
+              printf "| **Estimated cost** | **\$%.4f** |\n" "$COST"
             else
               echo "| Estimated cost | _(not available)_ |"
             fi

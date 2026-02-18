@@ -6,6 +6,7 @@ Used by resolve.yml to post cost transparency comments after agent runs.
 
 import json
 import os
+import re
 from typing import Optional
 
 # Pricing per 1M tokens (input, output) in USD
@@ -114,6 +115,104 @@ def parse_openhands_output(output_path: str) -> dict:
             result["total_cost"] = cost
 
     return result
+
+
+def parse_litellm_logs(log_content: str) -> dict:
+    """Parse LiteLLM standard logging payload from log output.
+
+    When LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD=1 is set, LiteLLM prints
+    JSON payloads containing cost and token information for each LLM call.
+    This function extracts and sums those values.
+
+    Args:
+        log_content: String containing log output (stdout/stderr)
+
+    Returns:
+        Dict with keys: input_tokens, output_tokens, total_cost, call_count
+    """
+    total_input = 0
+    total_output = 0
+    total_cost = 0.0
+    call_count = 0
+
+    # LiteLLM prints JSON objects with StandardLoggingPayload structure
+    # We look for JSON objects containing the expected fields
+    # The JSON is printed with indent=4, so we need to find complete objects
+
+    # Find all JSON-like blocks (starting with { and ending with })
+    # Use a simple approach: find lines that look like JSON start/end
+    lines = log_content.split("\n")
+    json_buffer = []
+    in_json = False
+    brace_count = 0
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Detect start of JSON object (line starts with { at any indentation)
+        if not in_json and stripped.startswith("{"):
+            in_json = True
+            json_buffer = [line]
+            brace_count = line.count("{") - line.count("}")
+        elif in_json:
+            json_buffer.append(line)
+            brace_count += line.count("{") - line.count("}")
+
+            # Check if we've closed all braces
+            if brace_count <= 0:
+                json_str = "\n".join(json_buffer)
+                try:
+                    data = json.loads(json_str)
+                    # Check if this looks like a StandardLoggingPayload
+                    if (
+                        isinstance(data, dict)
+                        and "response_cost" in data
+                        and "prompt_tokens" in data
+                    ):
+                        total_input += data.get("prompt_tokens", 0) or 0
+                        total_output += data.get("completion_tokens", 0) or 0
+                        cost = data.get("response_cost", 0) or 0
+                        if isinstance(cost, (int, float)):
+                            total_cost += cost
+                        call_count += 1
+                except (json.JSONDecodeError, ValueError):
+                    pass
+                in_json = False
+                json_buffer = []
+                brace_count = 0
+
+            # If we encounter a new JSON start while in_json and brace_count
+            # is still positive, the previous JSON was malformed. Reset and
+            # start fresh with this line.
+            elif stripped.startswith("{") and brace_count > 0:
+                # Try to parse what we have so far (likely will fail)
+                json_str = "\n".join(json_buffer[:-1])  # exclude current line
+                try:
+                    data = json.loads(json_str)
+                    if (
+                        isinstance(data, dict)
+                        and "response_cost" in data
+                        and "prompt_tokens" in data
+                    ):
+                        total_input += data.get("prompt_tokens", 0) or 0
+                        total_output += data.get("completion_tokens", 0) or 0
+                        cost = data.get("response_cost", 0) or 0
+                        if isinstance(cost, (int, float)):
+                            total_cost += cost
+                        call_count += 1
+                except (json.JSONDecodeError, ValueError):
+                    pass
+                # Start fresh with current line
+                json_buffer = [line]
+                brace_count = line.count("{") - line.count("}")
+
+    return {
+        "input_tokens": total_input,
+        "output_tokens": total_output,
+        "total_cost": total_cost if call_count > 0 else None,
+        "call_count": call_count,
+        "source": "litellm_logs" if call_count > 0 else None,
+    }
 
 
 def format_cost_comment(

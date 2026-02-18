@@ -10,6 +10,7 @@ from lib.cost import (
     MODEL_PRICING,
     calculate_cost,
     format_cost_comment,
+    parse_litellm_logs,
     parse_openhands_output,
 )
 
@@ -252,3 +253,169 @@ def test_format_cost_comment_large_numbers():
     assert "1,500,000" in comment
     assert "500,000" in comment
     assert "2,000,000" in comment
+
+
+# --- parse_litellm_logs ---
+
+
+def test_parse_litellm_logs_single_call():
+    """Test parsing a single LiteLLM standard logging payload."""
+    log_content = """
+Some other log output
+{
+    "id": "chatcmpl-123",
+    "response_cost": 0.0523,
+    "prompt_tokens": 1500,
+    "completion_tokens": 300,
+    "total_tokens": 1800,
+    "model": "claude-3-sonnet"
+}
+More log output
+"""
+    result = parse_litellm_logs(log_content)
+    assert result["input_tokens"] == 1500
+    assert result["output_tokens"] == 300
+    assert result["total_cost"] == pytest.approx(0.0523)
+    assert result["call_count"] == 1
+    assert result["source"] == "litellm_logs"
+
+
+def test_parse_litellm_logs_multiple_calls():
+    """Test parsing multiple LiteLLM payloads and summing them."""
+    log_content = """
+{
+    "response_cost": 0.01,
+    "prompt_tokens": 1000,
+    "completion_tokens": 200,
+    "total_tokens": 1200
+}
+Some intermediate output
+{
+    "response_cost": 0.02,
+    "prompt_tokens": 2000,
+    "completion_tokens": 400,
+    "total_tokens": 2400
+}
+{
+    "response_cost": 0.03,
+    "prompt_tokens": 3000,
+    "completion_tokens": 600,
+    "total_tokens": 3600
+}
+"""
+    result = parse_litellm_logs(log_content)
+    assert result["input_tokens"] == 6000
+    assert result["output_tokens"] == 1200
+    assert result["total_cost"] == pytest.approx(0.06)
+    assert result["call_count"] == 3
+
+
+def test_parse_litellm_logs_no_payloads():
+    """Test parsing logs with no LiteLLM payloads."""
+    log_content = """
+Just some regular log output
+No JSON here
+Another line
+"""
+    result = parse_litellm_logs(log_content)
+    assert result["input_tokens"] == 0
+    assert result["output_tokens"] == 0
+    assert result["total_cost"] is None
+    assert result["call_count"] == 0
+    assert result["source"] is None
+
+
+def test_parse_litellm_logs_empty():
+    """Test parsing empty log content."""
+    result = parse_litellm_logs("")
+    assert result["input_tokens"] == 0
+    assert result["output_tokens"] == 0
+    assert result["total_cost"] is None
+    assert result["call_count"] == 0
+
+
+def test_parse_litellm_logs_ignores_non_litellm_json():
+    """Test that non-LiteLLM JSON objects are ignored."""
+    log_content = """
+{
+    "some_other": "json",
+    "not_litellm": true
+}
+{
+    "response_cost": 0.05,
+    "prompt_tokens": 500,
+    "completion_tokens": 100,
+    "total_tokens": 600
+}
+"""
+    result = parse_litellm_logs(log_content)
+    assert result["input_tokens"] == 500
+    assert result["output_tokens"] == 100
+    assert result["total_cost"] == pytest.approx(0.05)
+    assert result["call_count"] == 1
+
+
+def test_parse_litellm_logs_handles_null_values():
+    """Test handling of null/None values in payload."""
+    log_content = """
+{
+    "response_cost": null,
+    "prompt_tokens": 1000,
+    "completion_tokens": null,
+    "total_tokens": 1000
+}
+"""
+    result = parse_litellm_logs(log_content)
+    assert result["input_tokens"] == 1000
+    assert result["output_tokens"] == 0
+    assert result["total_cost"] == pytest.approx(0.0)
+    assert result["call_count"] == 1
+
+
+def test_parse_litellm_logs_nested_json():
+    """Test parsing payload with nested JSON structures."""
+    log_content = """
+{
+    "id": "chatcmpl-123",
+    "response_cost": 0.0523,
+    "prompt_tokens": 1500,
+    "completion_tokens": 300,
+    "total_tokens": 1800,
+    "metadata": {
+        "user_api_key_hash": "abc123",
+        "nested": {
+            "deep": "value"
+        }
+    },
+    "model_map_information": {
+        "model_map_key": "claude-3-sonnet"
+    }
+}
+"""
+    result = parse_litellm_logs(log_content)
+    assert result["input_tokens"] == 1500
+    assert result["output_tokens"] == 300
+    assert result["total_cost"] == pytest.approx(0.0523)
+    assert result["call_count"] == 1
+
+
+def test_parse_litellm_logs_malformed_json():
+    """Test that malformed JSON is gracefully skipped."""
+    log_content = """
+{
+    "response_cost": 0.01,
+    "prompt_tokens": 1000,
+    incomplete json here
+{
+    "response_cost": 0.02,
+    "prompt_tokens": 2000,
+    "completion_tokens": 400,
+    "total_tokens": 2400
+}
+"""
+    result = parse_litellm_logs(log_content)
+    # Should only parse the valid second payload
+    assert result["input_tokens"] == 2000
+    assert result["output_tokens"] == 400
+    assert result["total_cost"] == pytest.approx(0.02)
+    assert result["call_count"] == 1
