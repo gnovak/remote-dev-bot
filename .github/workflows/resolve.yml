@@ -203,17 +203,6 @@ jobs:
             --max-iterations ${{ needs.parse.outputs.max_iterations }} \
             2>&1 | tee /tmp/resolve_output.log
 
-      - name: Amend commit with model info
-        if: needs.parse.outputs.commit_trailer != ''
-        run: |
-          git config user.email "openhands@all-hands.dev"
-          git config user.name "openhands"
-          TRAILER="${{ needs.parse.outputs.commit_trailer }}"
-          CURRENT_MSG=$(git log -1 --format=%B)
-          git commit --amend -m "${CURRENT_MSG}
-
-          ${TRAILER}"
-
       - name: Create pull request
         env:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
@@ -228,7 +217,33 @@ jobs:
           python -m openhands.resolver.send_pull_request \
             --issue-number "$ISSUE_NUMBER" \
             --pr-type ${{ needs.parse.outputs.pr_type }} \
-            --target-branch "$TARGET_BRANCH"
+            --target-branch "$TARGET_BRANCH" \
+            2>&1 | tee /tmp/spr_output.log
+
+      - name: Amend commit with model info
+        if: needs.parse.outputs.commit_trailer != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          # send_pull_request recreates the commit from a patch rather than
+          # pushing the local commit, so we must amend after it runs.
+          # Extract the PR URL from its output, fetch that branch, amend, force push.
+          PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log | head -1)
+          if [ -z "$PR_URL" ]; then
+            echo "Could not find PR URL in send_pull_request output, skipping amend"
+            exit 0
+          fi
+          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+          BRANCH=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefName --jq '.headRefName')
+          git fetch origin "$BRANCH"
+          git checkout "$BRANCH"
+          git config user.email "openhands@all-hands.dev"
+          git config user.name "openhands"
+          CURRENT_MSG=$(git log -1 --format=%B)
+          git commit --amend -m "${CURRENT_MSG}
+
+          ${{ needs.parse.outputs.commit_trailer }}"
+          git push --force origin "$BRANCH"
 
       - name: Upload output artifact
         if: always()

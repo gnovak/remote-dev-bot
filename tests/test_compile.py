@@ -283,8 +283,8 @@ EXPECTED_RESOLVE_STEPS = [
     "Install OpenHands",
     "Inject security guardrails",
     "Resolve issue",
-    "Amend commit with model info",
     "Create pull request",
+    "Amend commit with model info",
     "Upload output artifact",
     "Calculate and post cost",
 ]
