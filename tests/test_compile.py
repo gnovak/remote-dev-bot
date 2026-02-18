@@ -146,6 +146,28 @@ def test_design_has_inlined_context_files(compiled_dir):
     assert 'CONTEXT_FILES' not in content
 
 
+def test_design_prompt_prefix_has_valid_python_syntax(compiled_dir):
+    """Compiled design workflow's prompt_prefix should be valid Python syntax.
+
+    Regression test for: prompt_prefix with newlines was causing
+    'SyntaxError: unterminated string literal' because re.sub was
+    interpreting \\n as a newline character in the replacement string.
+    """
+    import re
+    content = _read_text(compiled_dir / "agent-design.yml")
+
+    # Find the prompt_prefix assignment line
+    match = re.search(r'prompt_prefix = "([^"]*(?:\\.[^"]*)*)"', content)
+    assert match is not None, "Could not find prompt_prefix assignment"
+
+    # The string should be on a single line (no literal newlines inside)
+    prompt_line = match.group(0)
+    assert '\n' not in prompt_line, (
+        "prompt_prefix contains a literal newline, which would cause a Python syntax error. "
+        "The \\n escape sequence should be preserved as literal backslash-n."
+    )
+
+
 # --- Cost transparency ---
 
 
