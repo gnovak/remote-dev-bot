@@ -232,7 +232,7 @@ jobs:
           # OpenHands 1.3.0 doesn't populate metrics, so we fall back to parsing
           # LiteLLM's standard logging payload from the resolve step output.
           read -r COST INPUT_TOKENS OUTPUT_TOKENS SOURCE < <(python3 << 'PYEOF'
-          import json, os, re
+          import json, os
 
           def parse_litellm_logs(log_content):
               """Parse LiteLLM standard logging payloads from log output."""
@@ -241,39 +241,26 @@ jobs:
               total_cost = 0.0
               call_count = 0
 
-              lines = log_content.split("\n")
-              json_buffer = []
-              in_json = False
-              brace_count = 0
-
-              for line in lines:
-                  stripped = line.strip()
-                  if not in_json and stripped.startswith("{"):
-                      in_json = True
-                      json_buffer = [line]
-                      brace_count = line.count("{") - line.count("}")
-                  elif in_json:
-                      json_buffer.append(line)
-                      brace_count += line.count("{") - line.count("}")
-                      if brace_count <= 0:
-                          json_str = "\n".join(json_buffer)
-                          try:
-                              data = json.loads(json_str)
-                              if isinstance(data, dict) and "response_cost" in data and "prompt_tokens" in data:
-                                  total_input += data.get("prompt_tokens", 0) or 0
-                                  total_output += data.get("completion_tokens", 0) or 0
-                                  cost = data.get("response_cost", 0) or 0
-                                  if isinstance(cost, (int, float)):
-                                      total_cost += cost
-                                  call_count += 1
-                          except (json.JSONDecodeError, ValueError):
-                              pass
-                          in_json = False
-                          json_buffer = []
-                          brace_count = 0
-                      elif stripped.startswith("{") and brace_count > 0:
-                          json_buffer = [line]
-                          brace_count = line.count("{") - line.count("}")
+              decoder = json.JSONDecoder()
+              pos = 0
+              while pos < len(log_content):
+                  idx = log_content.find("{", pos)
+                  if idx == -1:
+                      break
+                  try:
+                      data, end_pos = decoder.raw_decode(log_content, idx)
+                      pos = end_pos
+                      if not (isinstance(data, dict) and "response_cost" in data):
+                          continue
+                      cost = data.get("response_cost", 0) or 0
+                      if isinstance(cost, (int, float)):
+                          total_cost += cost
+                      usage = (data.get("metadata") or {}).get("usage_object") or {}
+                      total_input += usage.get("prompt_tokens") or data.get("prompt_tokens") or 0
+                      total_output += usage.get("completion_tokens") or data.get("completion_tokens") or 0
+                      call_count += 1
+                  except (json.JSONDecodeError, ValueError):
+                      pos = idx + 1
 
               return {
                   "input_tokens": total_input,

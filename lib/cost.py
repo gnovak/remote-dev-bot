@@ -136,76 +136,37 @@ def parse_litellm_logs(log_content: str) -> dict:
     total_cost = 0.0
     call_count = 0
 
-    # LiteLLM prints JSON objects with StandardLoggingPayload structure
-    # We look for JSON objects containing the expected fields
-    # The JSON is printed with indent=4, so we need to find complete objects
-
-    # Find all JSON-like blocks (starting with { and ending with })
-    # Use a simple approach: find lines that look like JSON start/end
-    lines = log_content.split("\n")
-    json_buffer = []
-    in_json = False
-    brace_count = 0
-
-    for line in lines:
-        stripped = line.strip()
-
-        # Detect start of JSON object (line starts with { at any indentation)
-        if not in_json and stripped.startswith("{"):
-            in_json = True
-            json_buffer = [line]
-            brace_count = line.count("{") - line.count("}")
-        elif in_json:
-            json_buffer.append(line)
-            brace_count += line.count("{") - line.count("}")
-
-            # Check if we've closed all braces
-            if brace_count <= 0:
-                json_str = "\n".join(json_buffer)
-                try:
-                    data = json.loads(json_str)
-                    # Check if this looks like a StandardLoggingPayload
-                    if (
-                        isinstance(data, dict)
-                        and "response_cost" in data
-                        and "prompt_tokens" in data
-                    ):
-                        total_input += data.get("prompt_tokens", 0) or 0
-                        total_output += data.get("completion_tokens", 0) or 0
-                        cost = data.get("response_cost", 0) or 0
-                        if isinstance(cost, (int, float)):
-                            total_cost += cost
-                        call_count += 1
-                except (json.JSONDecodeError, ValueError):
-                    pass
-                in_json = False
-                json_buffer = []
-                brace_count = 0
-
-            # If we encounter a new JSON start while in_json and brace_count
-            # is still positive, the previous JSON was malformed. Reset and
-            # start fresh with this line.
-            elif stripped.startswith("{") and brace_count > 0:
-                # Try to parse what we have so far (likely will fail)
-                json_str = "\n".join(json_buffer[:-1])  # exclude current line
-                try:
-                    data = json.loads(json_str)
-                    if (
-                        isinstance(data, dict)
-                        and "response_cost" in data
-                        and "prompt_tokens" in data
-                    ):
-                        total_input += data.get("prompt_tokens", 0) or 0
-                        total_output += data.get("completion_tokens", 0) or 0
-                        cost = data.get("response_cost", 0) or 0
-                        if isinstance(cost, (int, float)):
-                            total_cost += cost
-                        call_count += 1
-                except (json.JSONDecodeError, ValueError):
-                    pass
-                # Start fresh with current line
-                json_buffer = [line]
-                brace_count = line.count("{") - line.count("}")
+    # Use raw_decode to reliably find complete JSON objects without brace
+    # counting. Brace counting breaks when the payload contains code or file
+    # content with unbalanced { } inside string values (very common in
+    # OpenHands conversation history).
+    decoder = json.JSONDecoder()
+    pos = 0
+    while pos < len(log_content):
+        idx = log_content.find("{", pos)
+        if idx == -1:
+            break
+        try:
+            data, end_pos = decoder.raw_decode(log_content, idx)
+            pos = end_pos
+            # LiteLLM StandardLoggingPayload has response_cost at the top
+            # level. Tokens are in metadata.usage_object (as of LiteLLM
+            # >=1.74), with a fallback to top-level fields for older formats.
+            if not (isinstance(data, dict) and "response_cost" in data):
+                continue
+            cost = data.get("response_cost", 0) or 0
+            if isinstance(cost, (int, float)):
+                total_cost += cost
+            usage = (data.get("metadata") or {}).get("usage_object") or {}
+            prompt = usage.get("prompt_tokens") or data.get("prompt_tokens") or 0
+            completion = (
+                usage.get("completion_tokens") or data.get("completion_tokens") or 0
+            )
+            total_input += prompt
+            total_output += completion
+            call_count += 1
+        except (json.JSONDecodeError, ValueError):
+            pos = idx + 1
 
     return {
         "input_tokens": total_input,
