@@ -16,7 +16,13 @@ There are already excellent vendor-specific implementations of this pattern (Git
 
 Or use `/agent-design` to get AI design analysis posted as a comment (no code changes).
 
-**See it in action:** [Issue #33](https://github.com/gnovak/remote-dev-bot/issues/33) asked for model name documentation → [PR #52](https://github.com/gnovak/remote-dev-bot/pull/52) was created and merged autonomously.
+**See it in action:**
+
+- **Simple resolve:** [Issue #33](https://github.com/gnovak/remote-dev-bot/issues/33) asked for model name documentation → [PR #52](https://github.com/gnovak/remote-dev-bot/pull/52) was created and merged autonomously.
+
+- **Design then resolve:** [Issue #124](https://github.com/gnovak/remote-dev-bot/issues/124) asked whether commands should be case-insensitive (for mobile autocorrect) → `/agent-design` posted [analysis with a recommendation](https://github.com/gnovak/remote-dev-bot/issues/124#issuecomment-3912240858) → human agreed → `/agent-resolve` created [PR #131](https://github.com/gnovak/remote-dev-bot/pull/131), merged.
+
+- **Resolve with feedback:** [Issue #95](https://github.com/gnovak/remote-dev-bot/issues/95) asked about preventing agent loops → `/agent-resolve` created [PR #109](https://github.com/gnovak/remote-dev-bot/pull/109) → reviewer [pointed out a regex bypass vulnerability](https://github.com/gnovak/remote-dev-bot/pull/109#issuecomment-3909533145) → `/agent-resolve` on the PR fixed it → merged.
 
 ## Commands
 
