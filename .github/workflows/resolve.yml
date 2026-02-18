@@ -246,7 +246,7 @@ jobs:
             echo "| Output tokens | ${OUTPUT_TOKENS} |"
             echo "| Total tokens | ${TOTAL_TOKENS} |"
             if [ "$COST" != "0" ] && [ -n "$COST" ]; then
-              printf "| **Estimated cost** | **\$%.4f** |\n" "$COST"
+              printf "| **Estimated cost** | **\$%.2f** |\n" "$COST"
             else
               echo "| Estimated cost | _(not available)_ |"
             fi
@@ -532,7 +532,7 @@ jobs:
             echo "| Output tokens | ${OUTPUT_TOKENS} |"
             echo "| Total tokens | ${TOTAL_TOKENS} |"
             if [ -n "$COST" ] && [ "$COST" != "None" ]; then
-              printf "| **Estimated cost** | **\$%.4f** |\n" "$COST"
+              printf "| **Estimated cost** | **\$%.2f** |\n" "$COST"
             else
               echo "| Estimated cost | _(not available)_ |"
             fi
