@@ -334,13 +334,13 @@ def test_resolve_config_case_insensitive(config_dir):
     # Test uppercase mode
     result = resolve_config(base_path, "nonexistent.yaml", "RESOLVE")
     assert result["mode"] == "resolve"
-    assert result["alias"] == "claude-medium"
+    assert result["alias"] == "claude-small"
 
     # Test mixed case mode and model
     result = resolve_config(base_path, "nonexistent.yaml", "Resolve-Claude-Small")
     assert result["mode"] == "resolve"
     assert result["alias"] == "claude-small"
-    assert result["model"] == "anthropic/claude-haiku-4-5"
+    assert result["model"] == "anthropic/claude-sonnet-4-5"
 
     # Test all uppercase
     result = resolve_config(base_path, "nonexistent.yaml", "DESIGN-CLAUDE-SMALL")
