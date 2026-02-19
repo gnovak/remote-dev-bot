@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="20 16 216 216" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a2744"/>
+      <stop offset="100%" stop-color="#0d1117"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background: rounded square, dark navy -->
+  <rect width="256" height="256" rx="52" fill="url(#bg)"/>
+
+  <!-- Antenna stem -->
+  <line x1="128" y1="72" x2="128" y2="48" stroke="#58a6ff" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- Antenna tip (glowing dot) -->
+  <circle cx="128" cy="41" r="8" fill="#58a6ff" filter="url(#glow)"/>
+
+  <!-- Signal arcs (the "remote" element) -->
+  <path d="M 114 52 A 17 17 0 0 1 142 52"
+        fill="none" stroke="#58a6ff" stroke-width="3.5" stroke-linecap="round" opacity="0.65"/>
+  <path d="M 104 61 A 30 30 0 0 1 152 61"
+        fill="none" stroke="#58a6ff" stroke-width="2.5" stroke-linecap="round" opacity="0.35"/>
+
+  <!-- Robot head: dark fill with blue border -->
+  <rect x="54" y="72" width="148" height="116" rx="22" fill="#2d333b"/>
+  <rect x="54" y="72" width="148" height="116" rx="22"
+        fill="none" stroke="#58a6ff" stroke-width="4.5"/>
+
+  <!-- Side ports (connector nubs) -->
+  <rect x="41" y="108" width="13" height="8" rx="4" fill="#58a6ff" opacity="0.55"/>
+  <rect x="202" y="108" width="13" height="8" rx="4" fill="#58a6ff" opacity="0.55"/>
+
+  <!-- Eyes: glowing blue rectangles -->
+  <rect x="80" y="104" width="36" height="24" rx="7" fill="#58a6ff" filter="url(#glow)"/>
+  <rect x="140" y="104" width="36" height="24" rx="7" fill="#58a6ff" filter="url(#glow)"/>
+
+  <!-- Mouth: terminal cursor bar -->
+  <rect x="94" y="149" width="68" height="11" rx="5.5" fill="#58a6ff" opacity="0.72"/>
+</svg>
