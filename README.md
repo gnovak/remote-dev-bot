@@ -83,19 +83,6 @@ Prefix the model string with the provider name in `remote-dev-bot.yaml` (e.g., `
 
 **For coding-heavy tasks:** Models with "codex" in the name (e.g., `openai/gpt-5.1-codex-mini`) are specifically tuned for code generation and may perform better on implementation tasks.
 
-### Customizing Models
-
-To add or modify model aliases, edit `remote-dev-bot.yaml`:
-
-```yaml
-models:
-  my-custom-alias:
-    id: anthropic/claude-sonnet-4-5
-    description: "My custom model configuration"
-```
-
-You can also create a `remote-dev-bot.yaml` in your target repo to override the defaults. See `runbook.md` Phase 5 for details.
-
 ### Commit Trailers
 
 By default, each OpenHands commit includes a trailer identifying the model used:
@@ -127,6 +114,56 @@ See `runbook.md` for complete setup instructions. The runbook is designed so you
 **Quick version:** You need a GitHub repo, API keys for your preferred LLM provider(s), and about 10 minutes. No PAT or special authentication is required — the bot works with GitHub's built-in token and posts as `github-actions[bot]`.
 
 **Advanced auth options:** If you want bot PRs to auto-trigger CI, or a custom bot identity (e.g., `your-app[bot]`), see the advanced auth section in the runbook. Options include a GitHub App (recommended) or a PAT.
+
+## Customization
+
+### Add Repo Context for the Agent
+
+Create `.openhands/microagents/repo.md` in your target repo with anything the agent should know about your codebase: coding conventions, architecture overview, how to run tests, directories to avoid, etc. The agent reads this file before starting work.
+
+An AI assistant can write this for you — just ask it to read your codebase and generate a `repo.md` describing the architecture and conventions.
+
+### Model Aliases
+
+Add or modify model aliases in your repo's `remote-dev-bot.yaml` (create it in the repo root if it doesn't exist):
+
+```yaml
+models:
+  my-alias:
+    id: anthropic/claude-sonnet-4-5
+    description: "My custom model"
+```
+
+These settings layer on top of the base config in `remote-dev-bot.yaml` from the remote-dev-bot repo. Your repo's settings take precedence. See [how-it-works.md](how-it-works.md) for config layering details.
+
+### Iteration Limits
+
+The agent runs for up to 50 iterations by default. Lower this for simpler repos (less cost, faster results) or raise it for complex tasks:
+
+```yaml
+openhands:
+  max_iterations: 30
+```
+
+## Troubleshooting
+
+### Getting a second PR instead of a revision
+
+You probably commented on the original issue instead of the PR. Commenting on the issue always creates a new PR; commenting on the PR adds commits to the existing one. Check which page you're on before triggering.
+
+(The two-PR behavior is also intentional when you want to compare different model implementations — trigger from the issue twice with different model aliases.)
+
+### Cost showing $0.00
+
+The workflow couldn't capture token usage data from this run. Check the Actions log for the run — look at the "Calculate and post cost" or "Post cost comment" step to see what was found.
+
+### Agent triggered but no PR appeared
+
+The agent ran but didn't open a PR. The log will say "Issue was not successfully resolved. Skipping PR creation." This usually means the agent hit the iteration limit without finishing. Try a more capable model (`/agent-resolve-claude-large`) or add more detail to the issue description.
+
+### Other issues
+
+See the Troubleshooting section in `runbook.md` for installation-related problems (workflow not triggering, secrets not reaching the workflow, etc.).
 
 ## Development
 

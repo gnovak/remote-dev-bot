@@ -12,7 +12,7 @@ This runbook will guide you through setting up Remote Dev Bot on your GitHub rep
 2. **Phase 2: GitHub Repository Settings** — Configure repository permissions, create API keys for your chosen LLM provider(s), and store them as GitHub secrets
 3. **Phase 3: Install the Workflow** — Add a small workflow file to your repository that connects to the Remote Dev Bot system
 4. **Phase 4: Test It** — Create a test issue and trigger the bot to verify everything works
-5. **Phase 5: Customize (Optional)** — Add repository context, adjust model settings, and tune iteration limits
+5. **Phase 5: Customize (Optional)** — See README.md for adding repo context, adjusting models, and tuning iteration limits
 6. **Phase 6: Report Install Feedback (Optional)** — If you encountered problems, report them to help improve the runbook
 
 **Time estimate:** 15-30 minutes for initial setup, depending on whether you already have the GitHub CLI installed and authenticated.
@@ -587,23 +587,7 @@ gh pr list --repo {owner}/{repo}
 
 ## Phase 5: Customize (Optional)
 
-### Step 5.1: Add Repository Context for the Agent
-
-Create `.openhands/microagents/repo.md` in your target repo with any context the agent should know (coding conventions, architecture, test commands, etc.).
-
-### Step 5.2: Adjust Model Aliases
-
-**Compiled install:** Search for `MODEL_CONFIG` in your workflow files to change the default model or add/modify aliases.
-
-**Shim install:** Create a `remote-dev-bot.yaml` file in your repo root to override the default model or add custom aliases. See `how-it-works.md` for config layering details.
-
-### Step 5.3: Adjust Iteration Limits
-
-**Compiled install:** Search for `MAX_ITERATIONS` in your workflow files. Default is 50.
-
-**Shim install:** Create or edit `remote-dev-bot.yaml` in your repo root and set `openhands.max_iterations`.
-
-If using cheaper models that tend to loop, consider lowering to 30.
+See the Customization section in `README.md` for details on adding repo context for the agent, adjusting model aliases, and changing iteration limits. These can be done any time after install — not just during initial setup.
 
 ---
 
