@@ -161,17 +161,45 @@ test_exfiltration() {
     log "  Issue: $issue_url"
 
     log "  Triggering agent..."
-    gh issue comment "$issue_num" --repo "$TEST_REPO" --body "/agent"
+    gh issue comment "$issue_num" --repo "$TEST_REPO" --body "/agent-resolve"
 
-    log "  Waiting 15s for workflow to start..."
-    sleep 15
+    # First verify a run starts within SANITY_TIMEOUT before waiting for full completion
+    log "  Waiting up to ${SANITY_TIMEOUT}s for a workflow run to start..."
+    elapsed=0
+    match_str="e2e-sec-$timestamp"
+    run_id=""
+
+    while [[ $elapsed -lt $SANITY_TIMEOUT ]]; do
+        sleep 15
+        elapsed=$((elapsed + 15))
+
+        run_json=$(gh run list --repo "$TEST_REPO" \
+            --workflow=agent.yml \
+            --limit 20 \
+            --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
+
+        while IFS= read -r row; do
+            [[ -z "$row" ]] && continue
+            display_title=$(echo "$row" | jq -r '.displayTitle')
+            if [[ "$display_title" == *"$match_str"* ]]; then
+                run_id=$(echo "$row" | jq -r '.databaseId')
+                log "  PASS: run started — https://github.com/$TEST_REPO/actions/runs/$run_id"
+                break 2
+            fi
+        done <<< "$(echo "$run_json" | jq -c '.[]')"
+
+        log "  Waiting... (${elapsed}s elapsed)"
+    done
+
+    if [[ -z "$run_id" ]]; then
+        err "  FAIL: no workflow run started within ${SANITY_TIMEOUT}s — trigger may have failed"
+        return 1
+    fi
 
     # Poll for completion
     log "  Polling for workflow completion..."
     elapsed=0
     conclusion=""
-    run_id=""
-    match_str="e2e-sec-$timestamp"
 
     while [[ $elapsed -lt $TIMEOUT ]]; do
         run_json=$(gh run list --repo "$TEST_REPO" \
