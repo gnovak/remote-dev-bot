@@ -218,6 +218,7 @@ jobs:
             --issue-number "$ISSUE_NUMBER" \
             --pr-type ${{ needs.parse.outputs.pr_type }} \
             --target-branch "$TARGET_BRANCH" \
+            --send-on-failure \
             2>&1 | tee /tmp/spr_output.log
 
       - name: Amend commit with model info
