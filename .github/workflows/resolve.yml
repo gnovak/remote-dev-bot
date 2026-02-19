@@ -354,7 +354,11 @@ jobs:
             echo "| Output tokens | ${OUTPUT_TOKENS} |"
             echo "| Total tokens | ${TOTAL_TOKENS} |"
             if [ -n "$COST" ] && [ "$COST" != "0" ] && [ "$COST" != "0.0" ] && [ "$COST" != "None" ]; then
-              printf "| **Estimated cost** | **\$%.4f** |\n" "$COST"
+              # Round UP to nearest penny. $0.00 is reserved for "no data available", not "tiny cost".
+              # Ceiling (not standard) rounding ensures sub-penny costs show as $0.01.
+              # Two decimal places only: pennies are the right unit — don't show fractional cents.
+              ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"$COST\") * 100) / 100:.2f}')")
+              printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
             else
               echo "| Estimated cost | _(not available)_ |"
             fi
@@ -649,7 +653,11 @@ jobs:
             echo "| Output tokens | ${OUTPUT_TOKENS} |"
             echo "| Total tokens | ${TOTAL_TOKENS} |"
             if [ -n "$COST" ] && [ "$COST" != "None" ]; then
-              printf "| **Estimated cost** | **\$%.2f** |\n" "$COST"
+              # Round UP to nearest penny. $0.00 is reserved for "no data available", not "tiny cost".
+              # Ceiling (not standard) rounding ensures sub-penny costs show as $0.01.
+              # Two decimal places only: pennies are the right unit — don't show fractional cents.
+              ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"$COST\") * 100) / 100:.2f}')")
+              printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
             else
               echo "| Estimated cost | _(not available)_ |"
             fi
