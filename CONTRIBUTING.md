@@ -14,7 +14,7 @@ This file documents the development and testing infrastructure. If you're a user
 | Account | Purpose | Credentials stored as |
 |---------|---------|----------------------|
 | `gnovak` | Repo owner. Used for normal development and testing. | `RDB_PAT_TOKEN` (on both repos), or GitHub App (`RDB_APP_ID` variable + `RDB_APP_PRIVATE_KEY` secret) |
-| `remote-dev-bot-tester` | Simulates an unauthorized external user. NOT a collaborator on any repo. | `TESTER_PAT_TOKEN` (on remote-dev-bot) |
+| `remote-dev-bot-tester` | Simulates an unauthorized external user. NOT a collaborator on any repo. | `RDB_TESTER_PAT_TOKEN` (on remote-dev-bot) |
 
 ### remote-dev-bot-tester details
 - Classic PAT with `public_repo` scope, no expiration
@@ -49,7 +49,7 @@ Secrets stored on `gnovak/remote-dev-bot`:
 | `GEMINI_API_KEY` | Google AI API key (for Gemini models) |
 | `RDB_PAT_TOKEN` | Fine-grained PAT (gnovak). Scoped to all repos, with Contents/Issues/PRs/Workflows read-write. |
 | `RDB_APP_PRIVATE_KEY` | (Optional) GitHub App private key, for bot identity on comments/PRs. |
-| `TESTER_PAT_TOKEN` | Classic PAT (remote-dev-bot-tester). `public_repo` scope only. For security e2e tests. |
+| `RDB_TESTER_PAT_TOKEN` | Classic PAT (remote-dev-bot-tester). `public_repo` scope only. For security e2e tests. |
 
 Variables stored on `gnovak/remote-dev-bot`:
 
@@ -85,7 +85,7 @@ See [AGENTS.md](AGENTS.md) for the full dev cycle documentation, including how t
 ### Security e2e tests (`tests/e2e-security.sh`)
 - Secret exfiltration: verify agent refuses to expose secrets
 - User gating: verify non-collaborator comments don't trigger runs
-- Requires repos to be public and uses `TESTER_PAT_TOKEN`
+- Requires repos to be public and uses `RDB_TESTER_PAT_TOKEN`
 
 ### Loop prevention (not e2e tested — intentionally)
 The design agent has two layers of defense against recursive loops (where its response starts with `/agent` and re-triggers itself): a prompt instruction telling the LLM not to do it, and a regex check that blocks the response if it does. We deliberately do NOT e2e test this, because the test itself would be dangerous — if the regex has a bug, the test creates the very loop it's trying to prevent, consuming LLM budget. The regex is well covered by unit tests (`tests/test_yaml.py::TestLoopPreventionRegex`). The shim's `startsWith(comment.body, '/agent-')` trigger requires `/` as the literal first character (leading whitespace defeats it), which provides an additional layer of safety.
