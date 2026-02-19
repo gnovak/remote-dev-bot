@@ -341,6 +341,11 @@ jobs:
 
           TOTAL_TOKENS=$((INPUT_TOKENS + OUTPUT_TOKENS))
 
+          # Round UP to nearest penny — $0.00 means no cost data was available.
+          # Ceiling (not standard) rounding: sub-penny costs show as $0.01.
+          # Two decimal places only: pennies are the natural unit for LLM cost tracking.
+          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
+
           # Format cost comment
           {
             echo "### 💰 Cost Summary"
@@ -353,11 +358,7 @@ jobs:
             echo "| Input tokens | ${INPUT_TOKENS} |"
             echo "| Output tokens | ${OUTPUT_TOKENS} |"
             echo "| Total tokens | ${TOTAL_TOKENS} |"
-            if [ -n "$COST" ] && [ "$COST" != "0" ] && [ "$COST" != "0.0" ] && [ "$COST" != "None" ]; then
-              printf "| **Estimated cost** | **\$%.4f** |\n" "$COST"
-            else
-              echo "| Estimated cost | _(not available)_ |"
-            fi
+            printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
             echo ""
             echo "_Cost is estimated based on token usage and may vary from actual billing._"
           } > /tmp/cost_comment.md
@@ -625,16 +626,21 @@ jobs:
           ALIAS="${{ needs.parse.outputs.alias }}"
           MODE="${{ needs.parse.outputs.mode }}"
 
-          # Read usage data from LLM step
-          if [ ! -f /tmp/llm_usage.json ]; then
-            echo "No usage data found, skipping cost comment"
-            exit 0
-          fi
-
-          INPUT_TOKENS=$(python3 -c "import json; d=json.load(open('/tmp/llm_usage.json')); print(d.get('input_tokens', 0))")
-          OUTPUT_TOKENS=$(python3 -c "import json; d=json.load(open('/tmp/llm_usage.json')); print(d.get('output_tokens', 0))")
-          COST=$(python3 -c "import json; d=json.load(open('/tmp/llm_usage.json')); c=d.get('cost'); print(c if c else '')")
+          # Read usage data — default to 0 if file missing (shows $0.00, signals no data)
+          read INPUT_TOKENS OUTPUT_TOKENS COST < <(python3 -c "
+          import json, os
+          if os.path.exists('/tmp/llm_usage.json'):
+              d = json.load(open('/tmp/llm_usage.json'))
+              print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0)
+          else:
+              print(0, 0, 0)
+          ")
           TOTAL_TOKENS=$((INPUT_TOKENS + OUTPUT_TOKENS))
+
+          # Round UP to nearest penny — $0.00 means no cost data was available.
+          # Ceiling (not standard) rounding: sub-penny costs show as $0.01.
+          # Two decimal places only: pennies are the natural unit for LLM cost tracking.
+          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
 
           # Format cost comment
           {
@@ -648,11 +654,7 @@ jobs:
             echo "| Input tokens | ${INPUT_TOKENS} |"
             echo "| Output tokens | ${OUTPUT_TOKENS} |"
             echo "| Total tokens | ${TOTAL_TOKENS} |"
-            if [ -n "$COST" ] && [ "$COST" != "None" ]; then
-              printf "| **Estimated cost** | **\$%.2f** |\n" "$COST"
-            else
-              echo "| Estimated cost | _(not available)_ |"
-            fi
+            printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
             echo ""
             echo "_Cost is estimated based on token usage and may vary from actual billing._"
           } > /tmp/cost_comment.md
