@@ -687,6 +687,43 @@ if report.has_problems():
 
 ---
 
+## Security
+
+### Who Can Trigger the Agent
+
+The workflow only runs when someone with **OWNER**, **COLLABORATOR**, or **MEMBER** role on the repository posts a `/agent-` comment. Anonymous users, first-time contributors, and external users cannot trigger agent runs — even on public repos.
+
+This is controlled by GitHub's `author_association` field, which the workflow checks before starting any agent work. You can adjust who is allowed by editing the `SECURITY_GATE` marker in your workflow file.
+
+### What the Agent Can Do
+
+The agent has significant access to your repository:
+
+- Reads all files — code, configuration, documentation, secrets referenced in the codebase
+- Creates branches and pushes commits
+- Opens draft pull requests and posts comments
+
+The agent's file access is scoped to the repository. It cannot access other repositories or organization-level secrets beyond those explicitly passed as workflow secrets.
+
+### Prompt Injection Risk
+
+The agent reads issue and PR comment text as instructions. Malicious issue text could attempt to manipulate the agent — for example, asking it to commit secrets, exfiltrate data, or do something unrelated to the issue. This is called prompt injection.
+
+Built-in mitigations:
+
+- **Collaborator gating**: Only people you've explicitly granted repo access to can trigger agent runs. An external attacker who can write an issue cannot trigger the agent unless they're already a collaborator.
+- **Security microagent**: The workflow includes hardened system prompt instructions (visible at the `SECURITY_GATE` marker) that tell the agent to refuse requests to exfiltrate secrets, modify CI pipelines, or take other unauthorized actions.
+- **OpenHands sandboxing**: The agent runs inside a container with limited access to the GitHub Actions runner environment.
+
+### Recommendations
+
+- **Review all agent PRs before merging.** Agent-created branches are draft PRs by default — treat them as you would code from any external contributor.
+- **Use branch protection rules.** Require PR reviews on `main` so no agent-created branch can be merged without a human sign-off.
+- **Don't put secrets in issue bodies.** The agent reads issues; sensitive data in issue text can appear in agent logs or commit messages.
+- **Audit the `SECURITY_GATE` policy** in your workflow file if you want to further restrict who can trigger the agent (e.g., OWNER-only on sensitive repos).
+
+---
+
 ## Troubleshooting
 
 ### Cross-repo reusable workflow access (shim install only)
