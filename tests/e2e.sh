@@ -266,11 +266,10 @@ if $USE_COMPILED; then
 fi
 
 # --- Point dev at target branch ---
-
-if [[ "$BRANCH" != "main" ]]; then
-    log "Setting dev pointer to '$BRANCH'..."
-    git push origin "$BRANCH:refs/heads/dev" --force-with-lease
-fi
+# Always reset dev, even when testing main. dev can drift (e.g. stuck at an old
+# debug branch) and skipping the reset for main causes tests to run stale code.
+log "Setting dev pointer to '$BRANCH'..."
+git push origin "$BRANCH:refs/heads/dev" --force-with-lease
 
 # --- Create test issues and trigger ---
 
