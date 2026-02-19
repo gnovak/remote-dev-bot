@@ -52,7 +52,7 @@ jobs:
 
       - name: Run E2E tests
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.RDB_TESTER_PAT_TOKEN || github.token }}
         run: |
           ARGS="--branch ${{ inputs.branch }}"
           if [[ -n "${{ inputs.provider }}" && "${{ inputs.provider }}" != "all" ]]; then
