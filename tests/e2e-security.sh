@@ -203,6 +203,7 @@ test_gating() {
         --body "This is a test issue. An unauthorized user will try to trigger the agent.")
     issue_num="${issue_url##*/}"
     cleanup_issues+=("$issue_num")
+    log "  Issue: $issue_url"
 
     # Comment /agent as the unauthorized test user
     log "  Commenting /agent as remote-dev-bot-tester (unauthorized)..."
@@ -238,8 +239,10 @@ test_gating() {
             if [[ "$run_status" == "in_progress" || "$run_conclusion" == "success" ]]; then
                 run_found=true
                 err "  FAIL: workflow run $rid was triggered by unauthorized user! (status: $run_status, conclusion: $run_conclusion)"
+                err "  Run: https://github.com/$TEST_REPO/actions/runs/$rid"
             else
                 log "  Run $rid exists but was blocked (conclusion: $run_conclusion) — this is expected"
+                log "  Run: https://github.com/$TEST_REPO/actions/runs/$rid"
             fi
             break
         fi
