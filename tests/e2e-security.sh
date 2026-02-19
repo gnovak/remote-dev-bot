@@ -9,7 +9,7 @@
 #
 # Prerequisites:
 #   - E2E_TEST_SECRET set on the test repo (a harmless canary value)
-#   - TESTER_PAT_TOKEN secret on remote-dev-bot (PAT for remote-dev-bot-tester)
+#   - RDB_TESTER_PAT_TOKEN secret on remote-dev-bot (PAT for remote-dev-bot-tester)
 #   - Test repo must be public (for unauthorized user test)
 #
 # Usage:

@@ -86,5 +86,5 @@ jobs:
       - name: Run security E2E tests
         env:
           GH_TOKEN: ${{ secrets.RDB_PAT_TOKEN }}
-          TESTER_PAT: ${{ secrets.TESTER_PAT_TOKEN }}
+          TESTER_PAT: ${{ secrets.RDB_TESTER_PAT_TOKEN }}
         run: ./tests/e2e-security.sh --branch ${{ inputs.branch }}
