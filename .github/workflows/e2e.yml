@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: "Branch to test"
+        description: "Branch to test (dev pointer in remote-dev-bot-test will be reset to this branch)"
         required: false
         default: "main"
       provider:
