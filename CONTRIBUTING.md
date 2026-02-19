@@ -28,8 +28,9 @@ This file documents the development and testing infrastructure. If you're a user
 - When used, the bot posts as `remote-dev-bot[bot]` — a clearly distinct identity from the repo owner
 - App ID: `2895037`
 - Installed on all `gnovak` repos (blanket install). Only repos with `RDB_APP_PRIVATE_KEY` secret actually use it. Currently configured on: `gnovak/remote-dev-bot`, `gnovak/remote-dev-bot-test`, `gnovak/bridge-analysis`
-- Permissions: Contents, Issues, Pull Requests, Workflows (all Read & write)
-  - **Workflows** is included because this app is used to dev rdb itself, which means the agent may need to modify `.github/workflows/` files. Regular rdb users should *not* grant their app Workflows permission — the runbook intentionally omits it.
+- Permissions (all Read & write): Contents, Issues, Pull Requests, Workflows, Actions, Checks
+  - **Workflows** is included because this app devs rdb itself, so the agent may need to modify `.github/workflows/` files. Regular rdb users should *not* grant this — the runbook intentionally omits it.
+  - **Actions + Checks** are included so the agent can inspect CI logs and check run results when debugging ("PR XYZ is failing, dig into the logs"). The OpenHands sandbox has `gh` CLI and GitHub API access, so these work. Regular rdb users don't need these unless they specifically want the agent to debug CI.
 - Webhooks: inactive (tokens are generated on-demand via `actions/create-github-app-token`)
 - Private key stored as `RDB_APP_PRIVATE_KEY` secret; App ID stored as `RDB_APP_ID` variable
 
