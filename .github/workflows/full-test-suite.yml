@@ -39,18 +39,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        if: ${{ vars.RDB_APP_ID != '' }}
+        with:
+          app-id: ${{ vars.RDB_APP_ID }}
+          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
-          token: ${{ secrets.RDB_PAT_TOKEN || github.token }}
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Install PyYAML
         run: pip install PyYAML
 
       - name: Run E2E tests (shim, all models)
         env:
-          GH_TOKEN: ${{ secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: ./tests/e2e.sh --branch ${{ inputs.branch }} --all-models
 
   e2e-compiled:
@@ -58,18 +66,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        if: ${{ vars.RDB_APP_ID != '' }}
+        with:
+          app-id: ${{ vars.RDB_APP_ID }}
+          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
-          token: ${{ secrets.RDB_PAT_TOKEN || github.token }}
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Install PyYAML
         run: pip install PyYAML
 
       - name: Run E2E tests (compiled, all models)
         env:
-          GH_TOKEN: ${{ secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: ./tests/e2e.sh --branch ${{ inputs.branch }} --compiled --all-models
 
   e2e-security:
@@ -77,14 +93,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        if: ${{ vars.RDB_APP_ID != '' }}
+        with:
+          app-id: ${{ vars.RDB_APP_ID }}
+          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
-          token: ${{ secrets.RDB_PAT_TOKEN || github.token }}
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Run security E2E tests
         env:
-          GH_TOKEN: ${{ secrets.RDB_PAT_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           TESTER_PAT: ${{ secrets.RDB_TESTER_PAT_TOKEN }}
         run: ./tests/e2e-security.sh --branch ${{ inputs.branch }}
