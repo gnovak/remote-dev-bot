@@ -361,7 +361,10 @@ A GitHub App gives the bot a clear, distinct identity and triggers CI on bot PRs
 7. Click "Create GitHub App"
 8. Note the **App ID** shown on the app's settings page
 9. Scroll down and click **Generate a private key** (downloads a `.pem` file)
-10. Click **Install App** in the left sidebar, then install it on your target repo
+   - **Store the key securely:** Copy the full contents of the `.pem` file into your password manager (name it "remote-dev-bot private key" or similar), then delete the downloaded file. You won't be able to download it again — if lost, you'll need to generate a new one.
+10. Click **Install App** in the left sidebar
+    - **Private app note:** If the app is not published to the GitHub Marketplace, it won't appear in your repo's Settings → Integrations list. You must install it from the app settings page. If you see an "Install" button in the left sidebar of your app settings, use that.
+    - Choose **"Only select repositories"** and pick your target repo — or **"All repositories"** if you plan to use the bot on multiple repos. Installing on all repositories is safe: the bot only acts on repos where the `RDB_APP_PRIVATE_KEY` secret is configured.
 
 Store the credentials:
 
