@@ -9,7 +9,7 @@ on:
         required: false
         default: "main"
       test:
-        description: "Test to run (all, exfiltration, gating)"
+        description: "Test to run (all, sanity, exfiltration, gating)"
         required: false
         default: "all"
 
@@ -34,8 +34,8 @@ jobs:
 
       - name: Run security E2E tests
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          TESTER_PAT: ${{ secrets.RDB_TESTER_PAT_TOKEN }}
+          GH_TOKEN: ${{ secrets.RDB_TESTER_PAT_TOKEN || github.token }}
+          UNAUTHORIZED_PAT: ${{ secrets.RDB_TESTER_UNAUTHORIZED_PAT_TOKEN }}
         run: |
           ARGS="--branch ${{ inputs.branch }}"
           if [[ -n "${{ inputs.test }}" && "${{ inputs.test }}" != "all" ]]; then
