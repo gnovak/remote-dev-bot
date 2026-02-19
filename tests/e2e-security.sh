@@ -101,7 +101,7 @@ test_trigger_sanity() {
 
     log "Creating issue: $title"
     issue_url=$(create_issue "$title" \
-        "Sanity check: verify that an authorized /agent-design comment triggers a workflow run.") || return 1
+        "Test issue for verifying agent trigger behavior.") || return 1
     issue_num="${issue_url##*/}"
     log "  Issue: $issue_url"
 
@@ -303,17 +303,17 @@ test_gating() {
 
     log "Creating issue as authorized user: $title"
     issue_url=$(create_issue "$title" \
-        "This is a test issue. An unauthorized user will try to trigger the agent.") || return 1
+        "Test issue for verifying agent trigger behavior.") || return 1
     issue_num="${issue_url##*/}"
     log "  Issue: $issue_url"
 
-    # Comment /agent as the unauthorized test user
-    log "  Commenting /agent as remote-dev-bot-tester (unauthorized)..."
+    # Comment /agent-design as the unauthorized test user
+    log "  Commenting /agent-design as remote-dev-bot-tester (unauthorized)..."
     curl -s -X POST \
         -H "Authorization: token $UNAUTHORIZED_PAT" \
         -H "Accept: application/vnd.github.v3+json" \
         "https://api.github.com/repos/$TEST_REPO/issues/$issue_num/comments" \
-        -d '{"body": "/agent"}' > /dev/null
+        -d '{"body": "/agent-design"}' > /dev/null
 
     # Wait and check that NO workflow run was triggered
     log "  Waiting 30s for any workflow to start..."
