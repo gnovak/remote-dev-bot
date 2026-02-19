@@ -161,6 +161,20 @@ The workflow couldn't capture token usage data from this run. Check the Actions 
 
 The agent ran but didn't open a PR. The log will say "Issue was not successfully resolved. Skipping PR creation." This usually means the agent hit the iteration limit without finishing. Try a more capable model (`/agent-resolve-claude-large`) or add more detail to the issue description.
 
+**Diagnosing failures with an interactive agent:** The fastest way to understand what went wrong is to ask an AI coding assistant to read the logs for you:
+
+```
+Have a look at issue 50 — I triggered the agent but it didn't make a PR. Look through the Actions logs and tell me what went wrong.
+```
+
+Or find the specific run ID in the GitHub Actions tab and ask directly:
+
+```
+Have a look at Actions run 12345678 in this repo. What went wrong?
+```
+
+The assistant can fetch the logs via `gh run view`, identify the failure point, and suggest a fix.
+
 ### Other issues
 
 See the Troubleshooting section in `runbook.md` for installation-related problems (workflow not triggering, secrets not reaching the workflow, etc.).
