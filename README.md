@@ -167,7 +167,7 @@ The agent ran but didn't open a PR. The log will say "Issue was not successfully
 Have a look at issue 50 — I triggered the agent but it didn't make a PR. Look through the Actions logs and tell me what went wrong.
 ```
 
-Or find the specific run ID in the GitHub Actions tab and ask directly:
+Or point at a specific run ID from the Actions tab:
 
 ```
 Have a look at Actions run 12345678 in this repo. What went wrong?
