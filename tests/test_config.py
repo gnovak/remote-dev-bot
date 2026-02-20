@@ -1,12 +1,14 @@
 """Tests for lib/config.py — config parsing, command parsing, and model resolution."""
 
+import json
 import os
 import tempfile
+from unittest.mock import patch
 
 import pytest
 import yaml
 
-from lib.config import deep_merge, detect_api_provider, parse_command, resolve_config, resolve_commit_trailer
+from lib.config import deep_merge, detect_api_provider, main, parse_command, resolve_config, resolve_commit_trailer
 
 
 # --- deep_merge ---
@@ -583,3 +585,77 @@ def test_resolve_config_local_overrides_context_files(config_dir):
 
     result = resolve_config(base_path, "nonexistent.yaml", "design", local_path=local_path)
     assert result["context_files"] == ["README.md", "lib/config.py"]
+
+
+# --- main() — CLI entry point and GITHUB_OUTPUT writing ---
+
+
+class TestConfigMain:
+    """Tests for main() — the CLI entry point that writes GITHUB_OUTPUT.
+
+    main() uses hardcoded relative paths (.remote-dev-bot/remote-dev-bot.yaml,
+    remote-dev-bot.yaml, remote-dev-bot.local.yaml).  When pytest runs from
+    the repo root the real remote-dev-bot.yaml is used as the config source,
+    giving realistic output values without needing to stub the config layer.
+    """
+
+    def _call_main(self, command, tmp_path):
+        """Run main() with command; return GITHUB_OUTPUT file contents."""
+        output_file = tmp_path / "github_output"
+        with patch("sys.argv", ["config.py", command]), patch.dict(
+            os.environ, {"GITHUB_OUTPUT": str(output_file)}
+        ):
+            main()
+        return output_file.read_text()
+
+    def test_resolve_writes_all_required_keys(self, tmp_path):
+        """Resolve mode writes every key that downstream steps depend on."""
+        content = self._call_main("resolve", tmp_path)
+        for key in (
+            "mode", "action", "model", "alias",
+            "max_iterations", "oh_version", "pr_type", "on_failure", "commit_trailer",
+        ):
+            assert f"{key}=" in content, f"Missing key in GITHUB_OUTPUT: {key}"
+
+    def test_resolve_mode_and_action_values(self, tmp_path):
+        content = self._call_main("resolve", tmp_path)
+        assert "mode=resolve\n" in content
+        assert "action=pr\n" in content
+
+    def test_resolve_omits_context_files(self, tmp_path):
+        """context_files is design-only and must not appear in resolve output."""
+        content = self._call_main("resolve", tmp_path)
+        assert "context_files=" not in content
+
+    def test_design_includes_context_files_as_json(self, tmp_path):
+        """Design mode writes context_files as a non-empty JSON array."""
+        content = self._call_main("design", tmp_path)
+        assert "context_files=" in content
+        for line in content.splitlines():
+            if line.startswith("context_files="):
+                files = json.loads(line.split("=", 1)[1])
+                assert isinstance(files, list) and len(files) > 0
+                break
+
+    def test_design_mode_and_action_values(self, tmp_path):
+        content = self._call_main("design", tmp_path)
+        assert "mode=design\n" in content
+        assert "action=comment\n" in content
+
+    def test_invalid_command_exits_one(self, tmp_path):
+        with (
+            patch("sys.argv", ["config.py", "frobnicate"]),
+            patch.dict(os.environ, {"GITHUB_OUTPUT": str(tmp_path / "out")}),
+            pytest.raises(SystemExit) as exc,
+        ):
+            main()
+        assert exc.value.code == 1
+
+    def test_no_github_output_env_runs_cleanly(self):
+        """main() completes without error when GITHUB_OUTPUT is not set."""
+        env = {k: v for k, v in os.environ.items() if k != "GITHUB_OUTPUT"}
+        with (
+            patch("sys.argv", ["config.py", "resolve"]),
+            patch.dict(os.environ, env, clear=True),
+        ):
+            main()  # must not raise
