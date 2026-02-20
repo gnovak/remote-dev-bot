@@ -18,7 +18,7 @@ on:
         required: false
         default: false
       test:
-        description: "Specific test name (blank for all)"
+        description: "Specific test name, blank for all. Smoke tests: default-model, claude, gpt, gemini, design. All-models test names: model aliases in remote-dev-bot.yaml"
         required: false
         default: ""
       compiled:
