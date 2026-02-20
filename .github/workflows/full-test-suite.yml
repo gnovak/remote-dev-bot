@@ -11,7 +11,17 @@ on:
 
 # Sequential execution: all jobs use the same test repo, so they
 # cannot run in parallel (shared dev pointer, workflow files, issues).
-# Unit tests run first as a fast-fail gate.
+#
+# Failure strategy:
+#   - unit-tests: fast-fail gate. If this fails, all e2e jobs are skipped.
+#   - e2e-shim, e2e-compiled, e2e-security: continue-on-failure. Each block
+#     runs regardless of whether the previous e2e block passed, so a single
+#     full-suite run gives a comprehensive failure picture across all blocks.
+#     This avoids the painful debug loop of: run → fail at block 1 → fix →
+#     run again → fail at block 2 → fix → run again → ...
+#
+# Implementation: e2e jobs use `if: always() && needs.unit-tests.result == 'success'`
+# to skip on unit-test failure but continue past e2e failures.
 
 jobs:
   unit-tests:
@@ -62,7 +72,8 @@ jobs:
         run: ./tests/e2e.sh --branch ${{ inputs.branch }} --all-models
 
   e2e-compiled:
-    needs: e2e-shim
+    needs: [unit-tests, e2e-shim]
+    if: always() && needs.unit-tests.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -89,7 +100,8 @@ jobs:
         run: ./tests/e2e.sh --branch ${{ inputs.branch }} --compiled --all-models
 
   e2e-security:
-    needs: e2e-compiled
+    needs: [unit-tests, e2e-compiled]
+    if: always() && needs.unit-tests.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

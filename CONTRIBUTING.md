@@ -134,6 +134,7 @@ The design agent has two layers of defense against recursive loops (where its re
 ### Full test suite (`.github/workflows/full-test-suite.yml`)
 - One-button "run everything" workflow: unit tests → e2e shim → e2e compiled → e2e security
 - Jobs run **sequentially** — all e2e tests share `remote-dev-bot-test` and cannot run in parallel (shared dev pointer, workflow files, and issues)
+- **Failure strategy**: unit tests are a fast-fail gate (e2e jobs skip if they fail); the three e2e blocks continue past each other's failures so one run gives a complete picture across all blocks. After a full run, use the individual workflow_dispatch workflows to rerun only the failing blocks.
 - Use before releases to validate everything in one go
 
 ### Shared state constraint
