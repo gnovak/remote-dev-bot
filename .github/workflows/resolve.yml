@@ -21,7 +21,7 @@ on:
         required: false
       RDB_APP_PRIVATE_KEY:
         required: false
-      E2E_TEST_SECRET:
+      E2E_TEST_TOKEN:
         required: false
 
 jobs:
@@ -185,7 +185,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           GITHUB_USERNAME: ${{ github.repository_owner }}
           GIT_USERNAME: ${{ github.repository_owner }}
-          SANDBOX_ENV_E2E_TEST_SECRET: ${{ secrets.E2E_TEST_SECRET }}
+          SANDBOX_ENV_E2E_TEST_TOKEN: ${{ secrets.E2E_TEST_TOKEN }}
           # Enable LiteLLM standard logging payload for cost tracking.
           # OpenHands 1.3.0 doesn't populate token metrics, so we parse
           # LiteLLM's output as a workaround. Remove once OpenHands fixes this.
