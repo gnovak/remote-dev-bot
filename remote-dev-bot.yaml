@@ -38,6 +38,11 @@ modes:
       Do NOT end your response with conversational invitations like
       "Want me to elaborate?" or "Let me know if you have questions."
       Your response is a design document, not a chat message.
+      IMPORTANT: You have been given a limited set of context files. If the
+      issue touches code or behavior you cannot verify from those files, say
+      so explicitly. Do NOT invent function names, describe behavior you
+      haven't seen, or assume how unshared code works. Acknowledging what
+      you cannot see is more useful than a confident answer based on guesses.
 
 models:
   claude-small:
