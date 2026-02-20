@@ -57,7 +57,14 @@ check_graphql_quota() {
     fi
     remaining=$(echo "$result" | cut -d' ' -f1)
     reset_ts=$(echo "$result" | cut -d' ' -f2)
-    reset_time=$(python3 -c "import datetime; print(datetime.datetime.fromtimestamp(${reset_ts}).strftime('%H:%M:%S'))" 2>/dev/null || echo "unknown")
+    reset_time=$(python3 -c "
+import datetime
+ts = ${reset_ts}
+local_t = datetime.datetime.fromtimestamp(ts)
+utc_t = datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).replace(tzinfo=None)
+mins = max(0, int((local_t - datetime.datetime.now()).total_seconds() / 60))
+print(f'{local_t.strftime(\"%H:%M:%S\")} local / {utc_t.strftime(\"%H:%M:%S\")} UTC (in {mins} min)')
+" 2>/dev/null || echo "unknown")
     if [[ "$remaining" -lt "$min_points" ]]; then
         echo "ERROR: GraphQL quota too low: ${remaining} points remaining (need ${min_points}+)." >&2
         echo "ERROR: Quota resets at ${reset_time}. Please retry after that." >&2
