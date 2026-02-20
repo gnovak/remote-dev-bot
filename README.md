@@ -145,6 +145,22 @@ openhands:
   max_iterations: 30
 ```
 
+### When the Agent Can't Fully Resolve an Issue
+
+Sometimes the agent judges that it couldn't completely fix the issue (it reports `success=False` in its evaluation). The `on_failure` setting controls what happens next:
+
+| Value | Behaviour |
+|-------|-----------|
+| `comment` (default) | Posts a comment with the agent's evaluation and a link to the run logs. No PR is created. |
+| `draft` | Posts the same comment **and** opens a draft PR with whatever changes the agent made. Draft PRs cannot be merged until explicitly converted to "ready for review". |
+
+```yaml
+openhands:
+  on_failure: draft   # create a draft PR with partial changes
+```
+
+Use `draft` if you want to review and complete partial work yourself. The default `comment` is safer — it surfaces what happened without creating a PR that might be accidentally merged.
+
 ## Troubleshooting
 
 ### Getting a second PR instead of a revision
@@ -159,7 +175,11 @@ The workflow couldn't capture token usage data from this run. Check the Actions 
 
 ### Agent triggered but no PR appeared
 
-The agent ran but didn't open a PR. The log will say "Issue was not successfully resolved. Skipping PR creation." This usually means the agent hit the iteration limit without finishing. Try a more capable model (`/agent-resolve-claude-large`) or add more detail to the issue description.
+The agent ran, posted a comment with its evaluation, but didn't open a PR. This means the agent judged that it couldn't fully resolve the issue — it hit the iteration limit, got confused, or determined its changes were incomplete.
+
+Try a more capable model (`/agent-resolve-claude-large`) or add more detail to the issue description. The agent's evaluation comment will say what it attempted and why it stopped.
+
+To receive a draft PR with whatever partial changes the agent made, set `openhands.on_failure: draft` in your `remote-dev-bot.yaml` (see [When the Agent Can't Fully Resolve an Issue](#when-the-agent-cant-fully-resolve-an-issue)).
 
 **Diagnosing failures with an interactive agent:** The fastest way to understand what went wrong is to ask an AI coding assistant to read the logs for you:
 

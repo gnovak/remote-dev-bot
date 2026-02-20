@@ -187,6 +187,11 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
     max_iter = oh.get("max_iterations", 50)
     oh_version = oh.get("version", "0.39.0")
     pr_type = oh.get("pr_type", "ready")
+    on_failure = oh.get("on_failure", "comment")
+    if on_failure not in ("comment", "draft"):
+        raise ValueError(
+            f"openhands.on_failure must be 'comment' or 'draft', got: {on_failure!r}"
+        )
 
     # Mode settings
     action = mode_config.get("action", "pr")
@@ -199,6 +204,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
         "max_iterations": max_iter,
         "oh_version": oh_version,
         "pr_type": pr_type,
+        "on_failure": on_failure,
         "has_override": bool(override_config),
     }
 
@@ -243,6 +249,7 @@ def main():
             f.write(f"max_iterations={result['max_iterations']}\n")
             f.write(f"oh_version={result['oh_version']}\n")
             f.write(f"pr_type={result['pr_type']}\n")
+            f.write(f"on_failure={result['on_failure']}\n")
             if "context_files" in result:
                 f.write(f"context_files={json.dumps(result['context_files'])}\n")
             f.write(f"commit_trailer={result['commit_trailer']}\n")

@@ -37,6 +37,7 @@ jobs:
       max_iterations: ${{ steps.parse.outputs.max_iterations }}
       oh_version: ${{ steps.parse.outputs.oh_version }}
       pr_type: ${{ steps.parse.outputs.pr_type }}
+      on_failure: ${{ steps.parse.outputs.on_failure }}
       context_files: ${{ steps.parse.outputs.context_files }}
       commit_trailer: ${{ steps.parse.outputs.commit_trailer }}
 
@@ -211,17 +212,75 @@ jobs:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
           LLM_MODEL: ${{ needs.parse.outputs.model }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           GITHUB_USERNAME: ${{ github.repository_owner }}
           GIT_USERNAME: ${{ github.repository_owner }}
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           TARGET_BRANCH=${{ github.event.pull_request.base.ref || 'main' }}
+          ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          python -m openhands.resolver.send_pull_request \
-            --issue-number "$ISSUE_NUMBER" \
-            --pr-type ${{ needs.parse.outputs.pr_type }} \
-            --target-branch "$TARGET_BRANCH" \
-            2>&1 | tee /tmp/spr_output.log
+          # Check whether the agent considered itself successful
+          SUCCESS=$(python3 -c "
+          import json, os, sys
+          path = 'output/output.jsonl'
+          if os.path.exists(path):
+              data = json.loads(open(path).read())
+              print('true' if data.get('success') else 'false')
+          else:
+              print('unknown')
+          " 2>/dev/null || echo "unknown")
+
+          if [[ "$SUCCESS" == "false" ]]; then
+            # Extract the agent's self-evaluation from the output
+            EXPLANATION=$(python3 -c "
+          import json, os
+          path = 'output/output.jsonl'
+          if os.path.exists(path):
+              data = json.loads(open(path).read())
+              print(data.get('result_explanation', '') or '')
+          " 2>/dev/null || echo "")
+
+            # Post a comment with the agent's evaluation
+            {
+              echo "### ⚠️ Agent could not fully resolve this issue"
+              echo ""
+              if [[ -n "$EXPLANATION" ]]; then
+                echo "**Agent's evaluation:**"
+                echo ""
+                echo "$EXPLANATION"
+                echo ""
+              fi
+              echo "See the [workflow run logs]($RUN_URL) for full details."
+              if [[ "$ON_FAILURE" == "comment" ]]; then
+                echo ""
+                echo "---"
+                echo "_To receive a draft PR with partial changes when this happens, set \`openhands.on_failure: draft\` in your \`remote-dev-bot.yaml\`._"
+              fi
+            } > /tmp/failure_comment.md
+
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/failure_comment.md
+
+            # If configured, also create a draft PR with whatever the agent did
+            if [[ "$ON_FAILURE" == "draft" ]]; then
+              python -m openhands.resolver.send_pull_request \
+                --issue-number "$ISSUE_NUMBER" \
+                --pr-type draft \
+                --target-branch "$TARGET_BRANCH" \
+                --send-on-failure \
+                2>&1 | tee /tmp/spr_output.log
+            fi
+          else
+            # Normal success path
+            python -m openhands.resolver.send_pull_request \
+              --issue-number "$ISSUE_NUMBER" \
+              --pr-type ${{ needs.parse.outputs.pr_type }} \
+              --target-branch "$TARGET_BRANCH" \
+              2>&1 | tee /tmp/spr_output.log
+          fi
 
       - name: Amend commit with model info
         if: needs.parse.outputs.commit_trailer != ''

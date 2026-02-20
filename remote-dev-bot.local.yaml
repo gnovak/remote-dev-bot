@@ -9,6 +9,11 @@
 # Users CAN create their own remote-dev-bot.local.yaml; it will be
 # applied as a third layer on top of their remote-dev-bot.yaml.
 
+openhands:
+  # Show draft PRs for partial resolutions when devving rdb itself —
+  # partial changes are worth reviewing during active development.
+  on_failure: draft
+
 modes:
   design:
     # Extend context_files to include rdb implementation files.
