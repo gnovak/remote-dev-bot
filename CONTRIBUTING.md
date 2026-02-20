@@ -11,6 +11,11 @@ This file documents the development and testing infrastructure. If you're a user
 
 ## Test Accounts
 
+Three separate GitHub identities are used so each role is cleanly separated:
+- **`gnovak`** owns the repos and does normal development
+- **`remote-dev-bot`** acts as a friendly collaborator, so e2e tests can trigger agent runs without polluting `gnovak`'s contribution stats and without special-casing the security gate
+- **`remote-dev-bot-tester`** simulates an external stranger, so security tests can verify the collaborator gate actually blocks unauthorized users
+
 | Account | Purpose | Credentials stored as |
 |---------|---------|----------------------|
 | `gnovak` | Repo owner. Used for normal development and testing. | `RDB_PAT_TOKEN` (on both repos), or GitHub App (`RDB_APP_ID` variable + `RDB_APP_PRIVATE_KEY` secret) |
@@ -18,8 +23,10 @@ This file documents the development and testing infrastructure. If you're a user
 | `remote-dev-bot-tester` | Simulates an unauthorized external user. NOT a collaborator on any repo. | `RDB_TESTER_UNAUTHORIZED_PAT_TOKEN` (on remote-dev-bot) |
 
 ### remote-dev-bot (bot account) details
-- Classic PAT with `public_repo` scope (or fine-grained with Issues/PRs R/W on rdb-test), no expiration
-- Used by e2e tests to post comments that trigger agent runs — must be a collaborator on `remote-dev-bot-test` so the security gate allows it
+- Classic PAT with `public_repo` + `workflow` scopes, no expiration
+- **`public_repo`** — create issues, post comments, open PRs in public repos (standard e2e test flow)
+- **`workflow`** — read/write `.github/workflows/` files; required by compiled e2e tests, which temporarily swap the shim for the compiled workflow and must restore it afterwards. Without this scope, the swap fails with HTTP 404.
+- Must be a collaborator on `remote-dev-bot-test` so the security gate allows its trigger comments
 - Keeps test activity out of `gnovak`'s GitHub contribution stats
 
 ### remote-dev-bot-tester details
