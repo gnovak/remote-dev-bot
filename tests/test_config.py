@@ -316,8 +316,50 @@ def test_resolve_config_openhands_defaults():
         assert result["max_iterations"] == 50
         assert result["oh_version"] == "0.39.0"
         assert result["pr_type"] == "ready"
+        assert result["on_failure"] == "comment"
     finally:
         os.unlink(path)
+
+
+def test_resolve_config_on_failure_default(config_dir):
+    """on_failure defaults to 'comment'."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["on_failure"] == "comment"
+
+
+def test_resolve_config_on_failure_draft(config_dir):
+    """on_failure: draft is parsed and returned."""
+    tmp_path, base_path = config_dir
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["openhands"]["on_failure"] = "draft"
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["on_failure"] == "draft"
+
+
+def test_resolve_config_on_failure_invalid(config_dir):
+    """on_failure with an unrecognised value raises ValueError."""
+    tmp_path, base_path = config_dir
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["openhands"]["on_failure"] = "silently_explode"
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+    with pytest.raises(ValueError, match="on_failure"):
+        resolve_config(base_path, "nonexistent.yaml", "resolve")
+
+
+def test_resolve_config_on_failure_via_override(config_dir):
+    """on_failure can be overridden at the override layer."""
+    tmp_path, base_path = config_dir
+    override_path = str(tmp_path / "override.yaml")
+    with open(override_path, "w") as f:
+        yaml.dump({"openhands": {"on_failure": "draft"}}, f)
+    result = resolve_config(base_path, override_path, "resolve")
+    assert result["on_failure"] == "draft"
 
 
 def test_resolve_config_malformed_yaml(tmp_path):
