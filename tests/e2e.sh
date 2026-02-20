@@ -43,6 +43,31 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# --- GraphQL quota guard ---
+# Fail fast if the bot account's hourly quota is too low to complete a run.
+# A single all-models e2e run costs ~450-500 GraphQL points (polling + API calls).
+
+check_graphql_quota() {
+    local min_points=500
+    local result remaining reset_ts reset_time
+    result=$(gh api rate_limit --jq '.resources.graphql | "\(.remaining) \(.reset)"' 2>/dev/null || true)
+    if [[ -z "$result" ]]; then
+        log "Warning: could not check GraphQL rate limit — proceeding anyway"
+        return
+    fi
+    remaining=$(echo "$result" | cut -d' ' -f1)
+    reset_ts=$(echo "$result" | cut -d' ' -f2)
+    reset_time=$(python3 -c "import datetime; print(datetime.datetime.fromtimestamp(${reset_ts}).strftime('%H:%M:%S'))" 2>/dev/null || echo "unknown")
+    if [[ "$remaining" -lt "$min_points" ]]; then
+        err "GraphQL quota too low: ${remaining} points remaining (need ${min_points}+)."
+        err "Quota resets at ${reset_time}. Please retry after that."
+        exit 1
+    fi
+    log "GraphQL quota: ${remaining} points remaining (resets ${reset_time})."
+}
+
+check_graphql_quota
+
 # --- Test case definitions ---
 # Parallel arrays — index i corresponds to the same test across all arrays.
 # test_type: "resolve" expects a PR, "design" expects a comment
