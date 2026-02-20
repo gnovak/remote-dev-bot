@@ -314,9 +314,10 @@ def test_resolve_config_openhands_defaults():
     try:
         result = resolve_config(path, "nonexistent.yaml", "resolve")
         assert result["max_iterations"] == 50
-        assert result["oh_version"] == "0.39.0"
+        assert result["oh_version"] == "1.3.0"
         assert result["pr_type"] == "ready"
         assert result["on_failure"] == "comment"
+        assert result["target_branch"] == "main"
     finally:
         os.unlink(path)
 
@@ -360,6 +361,23 @@ def test_resolve_config_on_failure_via_override(config_dir):
         yaml.dump({"openhands": {"on_failure": "draft"}}, f)
     result = resolve_config(base_path, override_path, "resolve")
     assert result["on_failure"] == "draft"
+
+
+def test_resolve_config_target_branch_default(config_dir):
+    """target_branch defaults to 'main'."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["target_branch"] == "main"
+
+
+def test_resolve_config_target_branch_override(config_dir):
+    """target_branch can be overridden."""
+    tmp_path, base_path = config_dir
+    override_path = str(tmp_path / "override.yaml")
+    with open(override_path, "w") as f:
+        yaml.dump({"openhands": {"target_branch": "master"}}, f)
+    result = resolve_config(base_path, override_path, "resolve")
+    assert result["target_branch"] == "master"
 
 
 def test_resolve_config_malformed_yaml(tmp_path):

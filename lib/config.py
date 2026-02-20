@@ -185,9 +185,11 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
     # Read OpenHands settings
     oh = config.get("openhands", {})
     max_iter = oh.get("max_iterations", 50)
-    oh_version = oh.get("version", "0.39.0")
+    # NOTE: keep this default in sync with scripts/compile.py inline_config_parsing()
+    oh_version = oh.get("version", "1.3.0")
     pr_type = oh.get("pr_type", "ready")
     on_failure = oh.get("on_failure", "comment")
+    target_branch = oh.get("target_branch", "main")
     if on_failure not in ("comment", "draft"):
         raise ValueError(
             f"openhands.on_failure must be 'comment' or 'draft', got: {on_failure!r}"
@@ -205,6 +207,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
         "oh_version": oh_version,
         "pr_type": pr_type,
         "on_failure": on_failure,
+        "target_branch": target_branch,
         "has_override": bool(override_config),
     }
 
@@ -250,6 +253,7 @@ def main():
             f.write(f"oh_version={result['oh_version']}\n")
             f.write(f"pr_type={result['pr_type']}\n")
             f.write(f"on_failure={result['on_failure']}\n")
+            f.write(f"target_branch={result['target_branch']}\n")
             if "context_files" in result:
                 f.write(f"context_files={json.dumps(result['context_files'])}\n")
             f.write(f"commit_trailer={result['commit_trailer']}\n")
