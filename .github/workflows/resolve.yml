@@ -546,8 +546,16 @@ jobs:
                       prompt_prefix = mode_cfg["prompt_prefix"]
                       break
 
+          # Generate repository file listing (tracked files only)
+          import subprocess
+          result = subprocess.run(
+              ["git", "ls-files"],
+              capture_output=True, text=True
+          )
+          file_listing = result.stdout.strip()
+          repo_context = f"## Repository File Listing\n\n```\n{file_listing}\n```"
+
           # Read repo context files (missing files are skipped gracefully)
-          repo_context = ""
           context_files = json.loads(os.environ.get("CONTEXT_FILES", "[]") or "[]")
           for filepath in context_files:
               if os.path.exists(filepath):
