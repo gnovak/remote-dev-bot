@@ -32,3 +32,6 @@ modes:
       - lib/compile.py
       - lib/feedback.py
       - scripts/compile.py
+      # rdb workflows (core of the system)
+      - .github/workflows/resolve.yml
+      - .github/workflows/agent.yml
