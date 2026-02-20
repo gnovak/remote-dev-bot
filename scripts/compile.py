@@ -289,10 +289,10 @@ def compile_resolve(shim, workflow, config_yaml, output_path):
     # Inject security guardrails
     steps.append(find_step(resolve_steps, "Inject security guardrails").copy())
 
-    # Resolve issue (remove E2E_TEST_TOKEN, update token)
+    # Resolve issue (strip internal canary var, update token)
     resolve_step = find_step(resolve_steps, "Resolve issue").copy()
     resolve_step["env"] = {k: v for k, v in resolve_step["env"].items()
-                           if k != "E2E_TEST_TOKEN"}
+                           if k != "SANDBOX_ENV_E2E_TEST_TOKEN"}
     resolve_step["env"]["GITHUB_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(resolve_step)
 
