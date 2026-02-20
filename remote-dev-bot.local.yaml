@@ -1,0 +1,29 @@
+# Self-dev config for remote-dev-bot developing itself.
+#
+# This file is the third config layer (base → override → local) and is
+# only loaded when it exists in the target repo's root. It lives in the
+# rdb repo so it applies when rdb is used to dev itself, but is NOT
+# distributed to users via sparse-checkout (non-cone mode only fetches
+# remote-dev-bot.yaml and lib/).
+#
+# Users CAN create their own remote-dev-bot.local.yaml; it will be
+# applied as a third layer on top of their remote-dev-bot.yaml.
+
+modes:
+  design:
+    # Extend context_files to include rdb implementation files.
+    # Lists replace (not concatenate), so include everything wanted.
+    context_files:
+      # Standard project docs (same as base remote-dev-bot.yaml)
+      - README.md
+      - CONTRIBUTING.md
+      - AGENTS.md
+      - CLAUDE.md
+      - .gemini/GEMINI.md
+      - .openhands/microagents/repo.md
+      - how-it-works.md
+      # rdb implementation files (only meaningful when devving rdb itself)
+      - lib/config.py
+      - lib/compile.py
+      - lib/feedback.py
+      - scripts/compile.py

@@ -74,6 +74,35 @@ Secrets stored on `gnovak/remote-dev-bot-test`:
 | `GEMINI_API_KEY` | Same key as above (shared) |
 | `RDB_PAT_TOKEN` | Same PAT as above (shared) |
 
+## Config Layering
+
+rdb uses a three-layer config merge (each layer is optional, deeper layers win):
+
+| Layer | Path | Source |
+|-------|------|--------|
+| Base | `.remote-dev-bot/remote-dev-bot.yaml` | rdb repo, via sparse-checkout |
+| Override | `remote-dev-bot.yaml` | Target repo (user's settings) |
+| Local | `remote-dev-bot.local.yaml` | Target repo (deepest override) |
+
+All merges are deep (leaf-level), so overriding `modes.design.max_iterations`
+does not clobber `modes.design.context_files`.  Lists replace entirely (no
+concatenation).
+
+### Self-dev local config (`remote-dev-bot.local.yaml`)
+
+This file lives in the rdb repo root and applies when rdb is used to develop
+itself.  It adds rdb implementation files (`lib/config.py`, etc.) to the design
+agent's `context_files` so the design agent can see actual code rather than
+guessing.
+
+It is **not** distributed to users: the sparse-checkout uses non-cone mode and
+only fetches `remote-dev-bot.yaml` and `lib/`, so `remote-dev-bot.local.yaml`
+never appears in a user's `.remote-dev-bot/` directory.
+
+Users can create their own `remote-dev-bot.local.yaml` if they want a third
+config layer, but there is no documented use case for this — `remote-dev-bot.yaml`
+already covers all user customisation needs.
+
 ## Dev Cycle
 
 See [AGENTS.md](AGENTS.md) for the full dev cycle documentation, including how the `dev` branch pointer works and how to trigger test runs.
