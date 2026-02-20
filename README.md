@@ -199,18 +199,6 @@ The assistant can fetch the logs via `gh run view`, identify the failure point, 
 
 See the Troubleshooting section in `runbook.md` for installation-related problems (workflow not triggering, secrets not reaching the workflow, etc.).
 
-## Development
-
-GitHub Actions only runs workflows from the default branch (main), so developing remote-dev-bot requires a non-standard workflow.
-
-**Repos:**
-- `remote-dev-bot` — the reusable workflow, config, and docs
-- `remote-dev-bot-test` — a test repo with the shim pointed at the `dev` branch of remote-dev-bot (instead of `main`)
-
-**Dev cycle:** Work on a feature branch, then force-point the `dev` branch at it before testing. The test repo's shim calls `resolve.yml@dev`, so it picks up whatever `dev` points to. `dev` is a pointer, not a working branch — don't commit directly to it.
-
-For the full dev cycle (especially for AI assistants), see `AGENTS.md` and `CONTRIBUTING.md`.
-
 ## LLM Provider Quick Reference
 
 Dashboard, billing, and API key management links for each supported provider.
