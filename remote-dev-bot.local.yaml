@@ -29,7 +29,7 @@ modes:
       - how-it-works.md
       # rdb implementation files (only meaningful when devving rdb itself)
       - lib/config.py
-      - lib/compile.py
+      - scripts/compile.py
       - lib/feedback.py
       - scripts/compile.py
       # rdb workflows (core of the system)

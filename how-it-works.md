@@ -79,7 +79,7 @@ This is where you want the AI agent to help with development.
 
 ## How the Pieces Connect
 
-When someone comments `/agent-claude-large` on an issue:
+When someone comments `/agent-resolve-claude-large` on an issue:
 
 1. **Shim triggers** — The target repo's `agent.yml` fires on the comment
 2. **Calls reusable workflow** — The shim calls `resolve.yml@main` from remote-dev-bot
@@ -91,7 +91,7 @@ When someone comments `/agent-claude-large` on an issue:
 8. **PR created** — A draft (or ready) PR is opened with the changes
 
 ```
-User comments /agent-claude-large
+User comments /agent-resolve-claude-large
          │
          ▼
 ┌─────────────────────┐
