@@ -149,34 +149,30 @@ All e2e tests (functional, compiled, security) use `remote-dev-bot-test` as thei
 
 Releases distribute two compiled workflows (`agent-resolve.yml` and `agent-design.yml`) that users download into their repos.
 
+E2E tests cost real money (they invoke LLM APIs), so the full test suite is not automated. Run it manually before each release.
+
 ### Steps
 
-1. **Ensure main is clean**: all PRs merged, CI green.
+1. **Ensure main is clean**: all PRs merged, unit CI green.
 
-2. **Run E2E tests against the shim-based workflow** (tests the reusable workflow on main):
+2. **Run the full test suite** via GitHub Actions → Full Test Suite → Run workflow (branch: main).
+   - This runs unit tests → e2e shim (all models) → e2e compiled (all models) → e2e security, sequentially.
+   - Do not trigger other e2e workflows while this is running — they share the test repo and will interfere.
+   - If it fails, debug using targeted e2e triggers (one at a time), fix on a branch, merge to main, and re-run.
+
+3. **Compile the release artifacts**:
    ```bash
-   ./tests/e2e.sh --provider claude
+   python scripts/compile.py
    ```
+   This writes `dist/agent-resolve.yml` and `dist/agent-design.yml`. Commit the updated dist files if they changed.
 
-3. **Run E2E tests against the compiled workflows** (tests the standalone install):
-   ```bash
-   ./tests/e2e.sh --compiled --provider claude
-   ```
-
-   Both must pass before proceeding.
-
-4. **Compile the release artifacts**:
-   ```bash
-   python3 scripts/compile.py dist/
-   ```
-
-5. **Tag the release**:
+4. **Tag the release**:
    ```bash
    git tag -a vX.Y.Z -m "Release vX.Y.Z: summary of changes"
    git push origin vX.Y.Z
    ```
 
-6. **Create the GitHub release** with both compiled workflows:
+5. **Create the GitHub release** with both compiled workflows:
    ```bash
    gh release create vX.Y.Z dist/agent-resolve.yml dist/agent-design.yml \
      --title "vX.Y.Z" \
