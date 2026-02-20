@@ -473,3 +473,71 @@ def test_resolve_config_commit_trailer_disable_via_override():
     finally:
         os.unlink(base_path)
         os.unlink(override_path)
+
+
+# --- three-layer config (local_path) ---
+
+
+def test_resolve_config_local_wins_over_override(config_dir):
+    """local_path layer wins over override_path."""
+    tmp_path, base_path = config_dir
+    override_path = str(tmp_path / "override.yaml")
+    local_path = str(tmp_path / "local.yaml")
+
+    with open(override_path, "w") as f:
+        yaml.dump({"openhands": {"max_iterations": 10}}, f)
+    with open(local_path, "w") as f:
+        yaml.dump({"openhands": {"max_iterations": 99}}, f)
+
+    result = resolve_config(base_path, override_path, "resolve", local_path=local_path)
+    assert result["max_iterations"] == 99
+
+
+def test_resolve_config_local_preserves_base_and_override(config_dir):
+    """local_path only replaces what it specifies; base and override values survive."""
+    tmp_path, base_path = config_dir
+    local_path = str(tmp_path / "local.yaml")
+
+    with open(local_path, "w") as f:
+        yaml.dump({"openhands": {"max_iterations": 5}}, f)
+
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", local_path=local_path)
+    assert result["max_iterations"] == 5
+    assert result["oh_version"] == "1.3.0"   # preserved from base
+    assert result["pr_type"] == "ready"       # preserved from base
+
+
+def test_resolve_config_local_missing_is_noop(config_dir):
+    """Absent local_path file is silently ignored."""
+    tmp_path, base_path = config_dir
+    result_without = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    result_with = resolve_config(
+        base_path, "nonexistent.yaml", "resolve", local_path="definitely_not_there.yaml"
+    )
+    assert result_without["max_iterations"] == result_with["max_iterations"]
+    assert result_without["model"] == result_with["model"]
+
+
+def test_resolve_config_local_none_is_noop(config_dir):
+    """local_path=None (default) behaves identically to no local file."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", local_path=None)
+    assert result["mode"] == "resolve"
+
+
+def test_resolve_config_local_overrides_context_files(config_dir):
+    """local_path can replace design mode context_files (list replacement)."""
+    tmp_path, base_path = config_dir
+    # Add context_files to base
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["modes"]["design"]["context_files"] = ["README.md", "AGENTS.md"]
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+
+    local_path = str(tmp_path / "local.yaml")
+    with open(local_path, "w") as f:
+        yaml.dump({"modes": {"design": {"context_files": ["README.md", "lib/config.py"]}}}, f)
+
+    result = resolve_config(base_path, "nonexistent.yaml", "design", local_path=local_path)
+    assert result["context_files"] == ["README.md", "lib/config.py"]

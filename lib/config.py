@@ -109,8 +109,13 @@ def resolve_commit_trailer(template, alias, model_id, oh_version):
     )
 
 
-def resolve_config(base_path, override_path, command_string):
+def resolve_config(base_path, override_path, command_string, local_path=None):
     """Load configs, merge, resolve mode + alias, return outputs dict.
+
+    Applies up to three config layers (each is optional):
+      base_path     — remote-dev-bot defaults (from sparse-checkout of rdb repo)
+      override_path — target repo's remote-dev-bot.yaml
+      local_path    — target repo's remote-dev-bot.local.yaml (deepest override)
 
     command_string is the raw text after '/agent-' (e.g. 'resolve-claude-large').
 
@@ -129,8 +134,34 @@ def resolve_config(base_path, override_path, command_string):
         with open(override_path) as f:
             override_config = yaml.safe_load(f) or {}
 
-    # Merge: target repo overrides remote-dev-bot defaults
-    config = deep_merge(base_config, override_config)
+    # Read local extension from target repo (if it exists)
+    local_config = {}
+    if local_path and os.path.exists(local_path):
+        with open(local_path) as f:
+            local_config = yaml.safe_load(f) or {}
+
+    # Merge: base → override → local (each layer wins over the previous)
+    config = deep_merge(deep_merge(base_config, override_config), local_config)
+
+    # Log the merge so users can see what config is actually in effect
+    print("=== Config Merge ===")
+    print("Base (remote-dev-bot defaults):")
+    print(yaml.dump(base_config, default_flow_style=False, sort_keys=False).rstrip() if base_config else "  (none)")
+    print()
+    if override_config:
+        print("Override (target repo remote-dev-bot.yaml):")
+        print(yaml.dump(override_config, default_flow_style=False, sort_keys=False).rstrip())
+    else:
+        print("Override (target repo remote-dev-bot.yaml): (none)")
+    print()
+    if local_config:
+        print("Local extension (remote-dev-bot.local.yaml):")
+        print(yaml.dump(local_config, default_flow_style=False, sort_keys=False).rstrip())
+        print()
+    print("Merged:")
+    print(yaml.dump(config, default_flow_style=False, sort_keys=False).rstrip())
+    print("===================")
+    print()
 
     # Parse command into mode + model alias
     modes = config.get("modes", {})
@@ -193,9 +224,10 @@ def main():
 
     base_path = ".remote-dev-bot/remote-dev-bot.yaml"
     override_path = "remote-dev-bot.yaml"
+    local_path = "remote-dev-bot.local.yaml"
 
     try:
-        result = resolve_config(base_path, override_path, command_string)
+        result = resolve_config(base_path, override_path, command_string, local_path=local_path)
     except (KeyError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)

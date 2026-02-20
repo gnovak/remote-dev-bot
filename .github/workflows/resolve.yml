@@ -60,7 +60,10 @@ jobs:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           path: .remote-dev-bot
-          sparse-checkout: lib
+          sparse-checkout: |
+            /remote-dev-bot.yaml
+            /lib/
+          sparse-checkout-cone-mode: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -393,7 +396,10 @@ jobs:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           path: .remote-dev-bot
-          sparse-checkout: lib
+          sparse-checkout: |
+            /remote-dev-bot.yaml
+            /lib/
+          sparse-checkout-cone-mode: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
