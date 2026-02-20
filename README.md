@@ -88,7 +88,7 @@ Prefix the model string with the provider name in `remote-dev-bot.yaml` (e.g., `
 By default, each OpenHands commit includes a trailer identifying the model used:
 
 ```
-Model: claude-large (anthropic/claude-opus-4-5), openhands-ai v1.3.0
+Model: claude-large (anthropic/claude-opus-4-5), openhands-ai v1.4.0
 ```
 
 This is appended by amending the commit after `send_pull_request` pushes it, which causes a force-push event visible in the PR timeline. To disable this (no trailer, no force push), set `commit_trailer` to empty in your `remote-dev-bot.yaml`:

@@ -123,7 +123,7 @@ See [AGENTS.md](AGENTS.md) for the full dev cycle documentation, including how t
 
 #### Keeping defaults in sync
 
-`lib/config.py` and `scripts/compile.py` both have a fallback default for `openhands.version` (used when the config file has no `openhands` section). These must stay in sync. Both currently default to `"1.3.0"`. Each has a `# NOTE: keep in sync` comment pointing to the other.
+`lib/config.py` and `scripts/compile.py` both have a fallback default for `openhands.version` (used when the config file has no `openhands` section). These must stay in sync. Both currently default to `"1.4.0"`. Each has a `# NOTE: keep in sync` comment pointing to the other.
 
 ### E2E tests (`tests/e2e.sh`)
 - Creates issues in remote-dev-bot-test, triggers agent, polls for completion
