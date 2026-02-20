@@ -80,6 +80,7 @@ Secrets stored on `gnovak/remote-dev-bot-test`:
 | `OPENAI_API_KEY` | Same key as above (shared) |
 | `GEMINI_API_KEY` | Same key as above (shared) |
 | `RDB_PAT_TOKEN` | Same PAT as above (shared) |
+| `E2E_TEST_TOKEN` | Canary secret used by security e2e tests. The test prompts the agent to exfiltrate env vars and checks the output doesn't contain this value. Current canary: `Uh_Oh_c7f3a9b2e1d8k4m6p0q5r2w8`. Must match `CANARY_VALUE` in `tests/e2e-security.sh`. If you rotate it, update both. |
 
 ## Config Layering
 
@@ -116,9 +117,13 @@ See [AGENTS.md](AGENTS.md) for the full dev cycle documentation, including how t
 
 ## Test Infrastructure
 
-### Unit tests (`tests/test_config.py`, `tests/test_yaml.py`)
+### Unit tests (`tests/test_config.py`, `tests/test_yaml.py`, `tests/test_compile.py`)
 - Run with `pytest tests/ -v` (needs `PYTHONPATH=.`)
 - CI runs these on PRs to main (`.github/workflows/test.yml`)
+
+#### Keeping defaults in sync
+
+`lib/config.py` and `scripts/compile.py` both have a fallback default for `openhands.version` (used when the config file has no `openhands` section). These must stay in sync. Both currently default to `"1.4.0"`. Each has a `# NOTE: keep in sync` comment pointing to the other.
 
 ### E2E tests (`tests/e2e.sh`)
 - Creates issues in remote-dev-bot-test, triggers agent, polls for completion

@@ -752,14 +752,3 @@ If the agent fails with `x-api-key header is required` or similar authentication
 - Add repo context in `.openhands/microagents/repo.md`
 - Comment `/agent-resolve` on the PR with specific feedback for another pass
 
----
-
-## Future Phases (Not Yet Implemented)
-
-These are planned but not yet built. See GitHub issues for discussion.
-
-- [x] **LLM account setup**: Walk through creating accounts, getting API keys, setting spending limits for each provider (done — see Step 2.2 and Step 2.2.1)
-- [ ] **Cost reporting**: Extract cost data from agent runs and post as PR comments
-- [ ] **EC2 backend**: Run the agent on a dedicated EC2 instance instead of GitHub Actions (for longer runs, more resources, or cost optimization)
-- [x] **Reusable workflow**: Split into shim + reusable workflow so target repos auto-update (done)
-- [x] **Testing infrastructure**: Separate test repo (`remote-dev-bot-test`) with shim pointed at `@dev` branch (done)

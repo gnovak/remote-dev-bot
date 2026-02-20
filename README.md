@@ -88,7 +88,7 @@ Prefix the model string with the provider name in `remote-dev-bot.yaml` (e.g., `
 By default, each OpenHands commit includes a trailer identifying the model used:
 
 ```
-Model: claude-large (anthropic/claude-opus-4-5), openhands-ai v0.39.0
+Model: claude-large (anthropic/claude-opus-4-5), openhands-ai v1.4.0
 ```
 
 This is appended by amending the commit after `send_pull_request` pushes it, which causes a force-push event visible in the PR timeline. To disable this (no trailer, no force push), set `commit_trailer` to empty in your `remote-dev-bot.yaml`:
@@ -198,25 +198,6 @@ The assistant can fetch the logs via `gh run view`, identify the failure point, 
 ### Other issues
 
 See the Troubleshooting section in `runbook.md` for installation-related problems (workflow not triggering, secrets not reaching the workflow, etc.).
-
-## Development
-
-GitHub Actions only runs workflows from the default branch (main), so developing remote-dev-bot requires a non-standard workflow.
-
-**Repos:**
-- `remote-dev-bot` — the reusable workflow, config, and docs
-- `remote-dev-bot-test` — a test repo with the shim pointed at the `dev` branch of remote-dev-bot (instead of `main`)
-
-**Dev cycle:**
-1. In `remote-dev-bot`: reset `dev` to `main`, then make changes on `dev`
-2. In `remote-dev-bot-test`: create an issue and comment `/agent-resolve-claude-small` to trigger the agent
-3. The shim in the test repo calls `resolve.yml@dev`, so it picks up your changes
-4. If it works, clean up the git history on `dev` (squash, rebase, reword) and merge to `main`
-5. If not, make more commits on `dev` and trigger the agent again
-
-This keeps test issues out of the main repo and lets you iterate on workflow changes before they hit `main`.
-
-For detailed dev cycle instructions (especially for AI assistants), see `AGENTS.md`.
 
 ## LLM Provider Quick Reference
 

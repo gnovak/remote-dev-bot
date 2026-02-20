@@ -16,7 +16,6 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 - `lib/config.py` — config parsing logic (used by resolve.yml and unit tests)
 - `scripts/compile.py` — compiles two self-contained workflows (`dist/agent-resolve.yml`, `dist/agent-design.yml`)
 - `tests/` — pytest unit tests and E2E test script
-- `.github/workflows/agent.yml` — shim workflow (also serves as the template for target repos to copy)
 - `.openhands/microagents/repo.md` — (in target repos) context for the agent
 
 ### How It Works
