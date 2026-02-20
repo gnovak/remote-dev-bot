@@ -132,6 +132,22 @@ def resolve_config(base_path, override_path, command_string):
     # Merge: target repo overrides remote-dev-bot defaults
     config = deep_merge(base_config, override_config)
 
+    # Log the merge so users can see what config is actually in effect
+    print("=== Config Merge ===")
+    print("Base (remote-dev-bot defaults):")
+    print(yaml.dump(base_config, default_flow_style=False, sort_keys=False).rstrip() if base_config else "  (none)")
+    print()
+    if override_config:
+        print("Override (target repo remote-dev-bot.yaml):")
+        print(yaml.dump(override_config, default_flow_style=False, sort_keys=False).rstrip())
+    else:
+        print("Override (target repo remote-dev-bot.yaml): (none)")
+    print()
+    print("Merged:")
+    print(yaml.dump(config, default_flow_style=False, sort_keys=False).rstrip())
+    print("===================")
+    print()
+
     # Parse command into mode + model alias
     modes = config.get("modes", {})
     known_modes = set(modes.keys())
