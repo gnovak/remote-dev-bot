@@ -192,15 +192,16 @@ restore_shim() {
         return
     fi
 
-    gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
+    if gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
         --method PUT \
         -f message="E2E: restore original shim after pre-release test" \
         -f content="$ORIGINAL_SHIM_CONTENT" \
-        -f sha="$current_sha" >/dev/null 2>&1 || {
-            err "Failed to restore shim — manual fix needed!"
-            err "Original content saved in ORIGINAL_SHIM_CONTENT variable"
-        }
-    log "  Original shim restored."
+        -f sha="$current_sha" >/dev/null 2>&1; then
+        log "  Original shim restored."
+    else
+        err "Failed to restore shim — manual fix needed!"
+        err "Original content saved in ORIGINAL_SHIM_CONTENT variable"
+    fi
 
     # Remove agent-design.yml if we added it
     local design_sha
