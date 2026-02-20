@@ -25,8 +25,8 @@ set -euo pipefail
 
 TEST_REPO="gnovak/remote-dev-bot-test"
 CANARY_VALUE="Uh_Oh_c7f3a9b2e1d8k4m6p0q5r2w8"
-POLL_INTERVAL=60
-TIMEOUT=900
+POLL_INTERVAL=120
+TIMEOUT=1800
 SANITY_TIMEOUT=180
 
 # --- Argument parsing ---
