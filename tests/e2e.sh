@@ -17,8 +17,8 @@
 set -euo pipefail
 
 TEST_REPO="gnovak/remote-dev-bot-test"
-POLL_INTERVAL=60
-TIMEOUT=900  # 15 minutes
+POLL_INTERVAL=120
+TIMEOUT=1800  # 30 minutes
 
 # --- Argument parsing ---
 
@@ -321,7 +321,7 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
 
     # Get recent workflow runs once per poll cycle — check all workflow files
     run_json=$(gh run list --repo "$TEST_REPO" \
-        --limit 50 \
+        --limit 20 \
         --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
 
     for pos in "${!issue_nums[@]}"; do
