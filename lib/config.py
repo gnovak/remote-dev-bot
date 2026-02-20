@@ -186,7 +186,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
     oh = config.get("openhands", {})
     max_iter = oh.get("max_iterations", 50)
     # NOTE: keep this default in sync with scripts/compile.py inline_config_parsing()
-    oh_version = oh.get("version", "1.3.0")
+    oh_version = oh.get("version", "1.4.0")
     pr_type = oh.get("pr_type", "ready")
     on_failure = oh.get("on_failure", "comment")
     target_branch = oh.get("target_branch", "main")
