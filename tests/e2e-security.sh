@@ -53,18 +53,18 @@ check_graphql_quota() {
     local result remaining reset_ts reset_time
     result=$(gh api rate_limit --jq '.resources.graphql | "\(.remaining) \(.reset)"' 2>/dev/null || true)
     if [[ -z "$result" ]]; then
-        log "Warning: could not check GraphQL rate limit — proceeding anyway"
+        echo "==> Warning: could not check GraphQL rate limit — proceeding anyway"
         return
     fi
     remaining=$(echo "$result" | cut -d' ' -f1)
     reset_ts=$(echo "$result" | cut -d' ' -f2)
     reset_time=$(python3 -c "import datetime; print(datetime.datetime.fromtimestamp(${reset_ts}).strftime('%H:%M:%S'))" 2>/dev/null || echo "unknown")
     if [[ "$remaining" -lt "$min_points" ]]; then
-        err "GraphQL quota too low: ${remaining} points remaining (need ${min_points}+)."
-        err "Quota resets at ${reset_time}. Please retry after that."
+        echo "ERROR: GraphQL quota too low: ${remaining} points remaining (need ${min_points}+)." >&2
+        echo "ERROR: Quota resets at ${reset_time}. Please retry after that." >&2
         exit 1
     fi
-    log "GraphQL quota: ${remaining} points remaining (resets ${reset_time})."
+    echo "==> GraphQL quota: ${remaining} points remaining (resets ${reset_time})."
 }
 
 check_graphql_quota
