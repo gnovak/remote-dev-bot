@@ -82,7 +82,7 @@ def inline_config_parsing(config_yaml, mode):
     oh = config_yaml.get("openhands", {})
     max_iterations = oh.get("max_iterations", 50)
     # NOTE: keep this default in sync with lib/config.py resolve_config()
-    oh_version = oh.get("version", "1.3.0")
+    oh_version = oh.get("version", "1.4.0")
     pr_type = oh.get("pr_type", "ready")
     on_failure = oh.get("on_failure", "comment")
     target_branch = oh.get("target_branch", "main")

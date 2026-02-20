@@ -72,7 +72,7 @@ models:
 # OpenHands settings
 openhands:
   # Pin to a specific version to avoid regressions (check for updates periodically)
-  version: "1.3.0"
+  version: "1.4.0"
   # Max agent iterations per run (controls cost ceiling)
   max_iterations: 50
   # PR type: "draft" or "ready"

@@ -161,7 +161,7 @@ def config_dir(tmp_path):
             },
         },
         "openhands": {
-            "version": "1.3.0",
+            "version": "1.4.0",
             "max_iterations": 50,
             "pr_type": "ready",
         },
@@ -241,7 +241,7 @@ def test_resolve_config_override_wins(config_dir):
     assert result["model"] == "openai/gpt-5.1-codex-mini"
     assert result["max_iterations"] == 10
     # Version should come from base (not overridden)
-    assert result["oh_version"] == "1.3.0"
+    assert result["oh_version"] == "1.4.0"
     assert result["has_override"] is True
 
 
@@ -316,7 +316,7 @@ def test_resolve_config_openhands_defaults():
     try:
         result = resolve_config(path, "nonexistent.yaml", "resolve")
         assert result["max_iterations"] == 50
-        assert result["oh_version"] == "1.3.0"
+        assert result["oh_version"] == "1.4.0"
         assert result["pr_type"] == "ready"
         assert result["on_failure"] == "comment"
         assert result["target_branch"] == "main"
@@ -565,7 +565,7 @@ def test_resolve_config_local_preserves_base_and_override(config_dir):
 
     result = resolve_config(base_path, "nonexistent.yaml", "resolve", local_path=local_path)
     assert result["max_iterations"] == 5
-    assert result["oh_version"] == "1.3.0"   # preserved from base
+    assert result["oh_version"] == "1.4.0"   # preserved from base
     assert result["pr_type"] == "ready"       # preserved from base
 
 
