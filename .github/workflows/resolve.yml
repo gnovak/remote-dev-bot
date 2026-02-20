@@ -228,7 +228,7 @@ jobs:
           GIT_USERNAME: ${{ github.repository_owner }}
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-          TARGET_BRANCH=${{ github.event.pull_request.base.ref || 'main' }}
+          TARGET_BRANCH=${{ github.event.pull_request.base.ref || needs.parse.outputs.target_branch || 'main' }}
           ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 

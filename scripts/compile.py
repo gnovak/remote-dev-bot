@@ -81,8 +81,11 @@ def inline_config_parsing(config_yaml, mode):
     models = config_yaml.get("models", {})
     oh = config_yaml.get("openhands", {})
     max_iterations = oh.get("max_iterations", 50)
+    # NOTE: keep this default in sync with lib/config.py resolve_config()
     oh_version = oh.get("version", "1.3.0")
     pr_type = oh.get("pr_type", "ready")
+    on_failure = oh.get("on_failure", "comment")
+    target_branch = oh.get("target_branch", "main")
 
     # Commit trailer template (resolve mode only)
     commit_trailer_template = config_yaml.get("commit_trailer", "")
@@ -116,6 +119,14 @@ OH_VERSION = "{oh_version}"
 
 # --- PR_STYLE: "draft" or "ready" ---
 PR_TYPE = "{pr_type}"
+
+# --- ON_FAILURE: what to do when the agent can't fully resolve the issue ---
+# "comment" — post a comment explaining the situation, no PR
+# "draft"   — post the same comment AND open a draft PR with partial changes
+ON_FAILURE = "{on_failure}"
+
+# --- TARGET_BRANCH: branch the agent opens PRs against ---
+TARGET_BRANCH = "{target_branch}"
 
 # --- COMMIT_TRAILER: appended to commit messages (resolve mode only) ---
 # Supported variables: {{model_alias}}, {{model_id}}, {{oh_version}}
@@ -154,6 +165,8 @@ if output_file:
         f.write(f"max_iterations={{MAX_ITERATIONS}}\\n")
         f.write(f"oh_version={{OH_VERSION}}\\n")
         f.write(f"pr_type={{PR_TYPE}}\\n")
+        f.write(f"on_failure={{ON_FAILURE}}\\n")
+        f.write(f"target_branch={{TARGET_BRANCH}}\\n")
         f.write(f"commit_trailer={{commit_trailer}}\\n")
 
 # Log for visibility
