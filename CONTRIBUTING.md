@@ -7,7 +7,7 @@ This file documents the development and testing infrastructure. If you're a user
 | Repo | Purpose |
 |------|---------|
 | `gnovak/remote-dev-bot` | The reusable workflow, config, tests, and docs (this repo) |
-| `gnovak/remote-dev-bot-test` | Throwaway test repo. Shim points at `resolve.yml@dev`. Git history and issues don't matter — leave a mess. |
+| `gnovak/remote-dev-bot-test` | Throwaway test repo. Shim points at `resolve.yml@e2e-test`. Git history and issues don't matter — leave a mess. |
 
 ## Test Accounts
 
@@ -111,9 +111,19 @@ Users can create their own `remote-dev-bot.local.yaml` if they want a third
 config layer, but there is no documented use case for this — `remote-dev-bot.yaml`
 already covers all user customisation needs.
 
+## Branch Model
+
+| Branch | Purpose | Who points here |
+|--------|---------|-----------------|
+| `main` | Stable, released, tagged | External users' shims |
+| `dev` | Long-lived integration branch, accumulates work ahead of `main` | Owner's own repo shims |
+| `e2e-test` | Ephemeral test pointer, reset by e2e scripts before each test run | `remote-dev-bot-test` shim |
+
+**PRs go to `dev`, not `main`**, unless the change is a hotfix to something already released. When `dev` is ready to release: run the full test suite (with `e2e-test` pointing at `dev`), then merge `dev` → `main` and tag.
+
 ## Dev Cycle
 
-See [AGENTS.md](AGENTS.md) for the full dev cycle documentation, including how the `dev` branch pointer works and how to trigger test runs.
+See [AGENTS.md](AGENTS.md) for the full dev cycle documentation, including how the `e2e-test` branch pointer works and how to trigger test runs.
 
 ## Test Infrastructure
 
@@ -145,13 +155,13 @@ The design agent has two layers of defense against recursive loops (where its re
 
 ### Full test suite (`.github/workflows/full-test-suite.yml`)
 - One-button "run everything" workflow: unit tests → e2e shim → e2e compiled → e2e security
-- Jobs run **sequentially** — all e2e tests share `remote-dev-bot-test` and cannot run in parallel (shared dev pointer, workflow files, and issues)
+- Jobs run **sequentially** — all e2e tests share `remote-dev-bot-test` and cannot run in parallel (shared e2e-test pointer, workflow files, and issues)
 - **Failure strategy**: unit tests are a fast-fail gate (e2e jobs skip if they fail); the three e2e blocks continue past each other's failures so one run gives a complete picture across all blocks. After a full run, use the individual workflow_dispatch workflows to rerun only the failing blocks.
 - Use before releases to validate everything in one go
 
 ### Shared state constraint
 All e2e tests (functional, compiled, security) use `remote-dev-bot-test` as their target repo. They share:
-- The `dev` branch pointer (set to the branch under test)
+- The `e2e-test` branch pointer (set to the branch under test)
 - Workflow files in the test repo (compiled tests swap out the shim)
 - Issues and PRs created during the test run
 

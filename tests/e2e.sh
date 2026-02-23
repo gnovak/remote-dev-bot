@@ -8,7 +8,7 @@
 #   ./tests/e2e.sh [--branch <branch>] [--test <name>] [--provider <name>]
 #                  [--all-models] [--compiled]
 #
-#   --branch      Branch to test (default: main). Sets dev pointer to this branch.
+#   --branch      Branch to test (default: main). Sets e2e-test pointer to this branch.
 #   --test        Run a specific test only (default: all)
 #   --provider    Run only tests for a specific model family (claude/gpt/gemini)
 #   --all-models  Test every model alias, not just one per provider
@@ -298,11 +298,11 @@ if $USE_COMPILED; then
     install_compiled_workflow
 fi
 
-# --- Point dev at target branch ---
-# Always reset dev, even when testing main. dev can drift (e.g. stuck at an old
+# --- Point e2e-test at target branch ---
+# Always reset e2e-test, even when testing main. e2e-test can drift (e.g. stuck at an old
 # debug branch) and skipping the reset for main causes tests to run stale code.
-log "Setting dev pointer to '$BRANCH'..."
-git push origin "$BRANCH:refs/heads/dev" --force-with-lease
+log "Setting e2e-test pointer to '$BRANCH'..."
+git push origin "$BRANCH:refs/heads/e2e-test" --force-with-lease
 
 # --- Create test issues and trigger ---
 

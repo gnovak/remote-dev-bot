@@ -15,7 +15,7 @@
 # Note: secrets must be passed explicitly (not via `secrets: inherit`) because
 # GitHub Actions does not pass inherited secrets across different repo owners.
 #
-# To test against a dev branch of remote-dev-bot, change @main to @dev below.
+# To get unreleased features from the dev branch, change @main to @dev below.
 
 name: Remote Dev Bot
 

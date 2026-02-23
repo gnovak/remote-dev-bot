@@ -13,6 +13,8 @@ openhands:
   # Show draft PRs for partial resolutions when devving rdb itself —
   # partial changes are worth reviewing during active development.
   on_failure: draft
+  # PRs for self-dev work go to dev (the long-lived integration branch), not main.
+  target_branch: dev
 
 modes:
   design:
