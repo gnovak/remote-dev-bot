@@ -35,5 +35,5 @@ modes:
       - lib/feedback.py
       - scripts/compile.py
       # rdb workflows (core of the system)
-      - .github/workflows/resolve.yml
+      - .github/workflows/remote-dev-bot.yml
       - .github/workflows/agent.yml

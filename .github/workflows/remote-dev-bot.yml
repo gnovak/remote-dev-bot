@@ -3,9 +3,10 @@ name: Resolve Issue
 # Reusable workflow — called by thin shims in target repos.
 # See .github/workflows/agent.yml for the shim template.
 #
-# Supports two modes via /agent-<mode>[-<model>] or /agent <mode> [<model>]:
+# Supports three modes via /agent-<mode>[-<model>] or /agent <mode> [<model>]:
 #   /agent-resolve[-<model>] or /agent resolve [<model>]  — run OpenHands to resolve the issue, open a PR
 #   /agent-design[-<model>] or /agent design [<model>]    — post a design analysis comment (no code changes)
+#   /agent-review[-<model>] or /agent review [<model>]    — post a code review comment on a PR (no code changes)
 # Both dash and space separators are supported for mobile-friendly typing.
 
 on:
@@ -55,11 +56,22 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
+      - name: Set config ref from workflow branch
+        run: |
+          # github.workflow_ref = "owner/repo/.github/workflows/remote-dev-bot.yml@refs/heads/dev"
+          # Extract the part after "@" and strip "refs/heads/" or "refs/tags/" prefix.
+          WF="${{ github.workflow_ref }}"
+          BRANCH="${WF##*@}"
+          BRANCH="${BRANCH#refs/heads/}"
+          BRANCH="${BRANCH#refs/tags/}"
+          echo "RDB_CONFIG_REF=${BRANCH:-main}" >> "$GITHUB_ENV"
+
       - name: Checkout remote-dev-bot config
         uses: actions/checkout@v4
         with:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          ref: ${{ env.RDB_CONFIG_REF }}
           path: .remote-dev-bot
           sparse-checkout: |
             /remote-dev-bot.yaml
@@ -460,11 +472,22 @@ jobs:
       - name: Checkout target repository
         uses: actions/checkout@v4
 
+      - name: Set config ref from workflow branch
+        run: |
+          # github.workflow_ref = "owner/repo/.github/workflows/remote-dev-bot.yml@refs/heads/dev"
+          # Extract the part after "@" and strip "refs/heads/" or "refs/tags/" prefix.
+          WF="${{ github.workflow_ref }}"
+          BRANCH="${WF##*@}"
+          BRANCH="${BRANCH#refs/heads/}"
+          BRANCH="${BRANCH#refs/tags/}"
+          echo "RDB_CONFIG_REF=${BRANCH:-main}" >> "$GITHUB_ENV"
+
       - name: Checkout remote-dev-bot config
         uses: actions/checkout@v4
         with:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          ref: ${{ env.RDB_CONFIG_REF }}
           path: .remote-dev-bot
           sparse-checkout: |
             /remote-dev-bot.yaml

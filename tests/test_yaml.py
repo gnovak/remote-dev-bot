@@ -24,7 +24,7 @@ def load_yaml(path):
     "path",
     [
         "remote-dev-bot.yaml",
-        ".github/workflows/resolve.yml",
+        ".github/workflows/remote-dev-bot.yml",
         ".github/workflows/agent.yml",
     ],
 )
@@ -102,11 +102,11 @@ def test_openhands_has_max_iterations(bot_config):
 
 @pytest.fixture
 def resolve_yml():
-    return (REPO_ROOT / ".github/workflows/resolve.yml").read_text()
+    return (REPO_ROOT / ".github/workflows/remote-dev-bot.yml").read_text()
 
 
 def test_resolve_yml_injects_security_guardrails(resolve_yml):
-    """Verify the security microagent step exists in resolve.yml."""
+    """Verify the security microagent step exists in remote-dev-bot.yml."""
     assert "Inject security guardrails" in resolve_yml
     assert "remote-dev-bot-security.md" in resolve_yml
     assert "NEVER output, print, log, echo" in resolve_yml
@@ -149,20 +149,20 @@ def test_design_prompt_has_loop_prevention(bot_config):
 
 
 def test_resolve_yml_has_response_validation(resolve_yml):
-    """Verify resolve.yml blocks responses containing /agent commands."""
+    """Verify remote-dev-bot.yml blocks responses containing /agent commands."""
     # Check for the loop prevention comment
     assert "Loop prevention" in resolve_yml, (
-        "resolve.yml should have loop prevention comment"
+        "remote-dev-bot.yml should have loop prevention comment"
     )
     # Check for the blocking mechanism (not stripping)
     assert "agent_pattern" in resolve_yml, (
-        "resolve.yml should use agent_pattern to detect /agent commands"
+        "remote-dev-bot.yml should use agent_pattern to detect /agent commands"
     )
     assert "llm_blocked" in resolve_yml, (
-        "resolve.yml should write to llm_blocked file when /agent detected"
+        "remote-dev-bot.yml should write to llm_blocked file when /agent detected"
     )
     assert "Agent loop blocked" in resolve_yml, (
-        "resolve.yml should post a warning message when blocking"
+        "remote-dev-bot.yml should post a warning message when blocking"
     )
 
 
@@ -170,7 +170,7 @@ class TestLoopPreventionRegex:
     """Test the regex pattern used to detect /agent commands in responses."""
 
     import re
-    # This is the same pattern used in resolve.yml
+    # This is the same pattern used in remote-dev-bot.yml
     PATTERN = re.compile(r'^/agent', re.MULTILINE)
 
     def contains_agent_command(self, text):
@@ -229,14 +229,14 @@ class TestLoopPreventionRegex:
 class TestCommandExtractionRegex:
     """Test the regex pattern used to extract command from /agent comments.
 
-    This mirrors the regex in resolve.yml that extracts the command string
+    This mirrors the regex in remote-dev-bot.yml that extracts the command string
     from comments like "/agent-resolve-claude-large" or "/agent resolve claude large".
     """
 
     import re
 
     def extract_command(self, comment):
-        """Extract command using the same regex as resolve.yml, normalized to dashes."""
+        """Extract command using the same regex as remote-dev-bot.yml, normalized to dashes."""
         # This mirrors: grep -oP '^/agent[- ]\K[a-z0-9]+(?:[- ][a-z0-9]+){0,2}' | tr ' ' '-'
         match = self.re.search(r'^/agent[- ]([a-z0-9]+(?:[- ][a-z0-9]+){0,2})', comment)
         if match:

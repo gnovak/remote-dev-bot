@@ -9,9 +9,7 @@ Commands follow the pattern: /agent-<verb>[-<model>]
   /agent-resolve-claude-large — resolve mode, specific model
   /agent-design            — design mode, default model
 
-Called by resolve.yml at runtime (checked out from main via sparse-checkout)
-and imported directly by unit tests. See CLAUDE.md "PR constraints" for why
-config parsing changes must be in their own PR, separate from workflow changes.
+Called by remote-dev-bot.yml at runtime and imported directly by unit tests.
 """
 
 import json

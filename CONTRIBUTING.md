@@ -7,7 +7,7 @@ This file documents the development and testing infrastructure. If you're a user
 | Repo | Purpose |
 |------|---------|
 | `gnovak/remote-dev-bot` | The reusable workflow, config, tests, and docs (this repo) |
-| `gnovak/remote-dev-bot-test` | Throwaway test repo. Shim points at `resolve.yml@e2e-test`. Git history and issues don't matter — leave a mess. |
+| `gnovak/remote-dev-bot-test` | Throwaway test repo. Shim points at `remote-dev-bot.yml@e2e-test`. Git history and issues don't matter — leave a mess. |
 
 ## Test Accounts
 
@@ -205,4 +205,4 @@ E2E tests cost real money (they invoke LLM APIs), so the full test suite is not 
 
 - Two compiled workflow files: `agent-resolve.yml` (issue resolution) and `agent-design.yml` (design analysis). Both are self-contained with inlined config, model aliases, and security guardrails.
 - Users who installed via compiled workflows get updates by downloading the new release.
-- Users who installed via the shim get updates automatically (the shim calls `resolve.yml@main`).
+- Users who installed via the shim get updates automatically (the shim calls `remote-dev-bot.yml@main`).

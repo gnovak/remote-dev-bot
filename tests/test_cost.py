@@ -1,4 +1,4 @@
-"""Tests for the parse_litellm_logs function embedded in resolve.yml's cost step.
+"""Tests for the parse_litellm_logs function embedded in remote-dev-bot.yml's cost step.
 
 The function lives inside a bash heredoc in the workflow, so we extract it from
 the YAML at test time rather than importing it — this means the tests always
@@ -17,8 +17,8 @@ WORKSPACE = Path(__file__).parent.parent
 
 @pytest.fixture(scope="module")
 def parse_litellm_logs():
-    """Extract and return parse_litellm_logs from resolve.yml's cost step."""
-    with open(WORKSPACE / ".github/workflows/resolve.yml") as f:
+    """Extract and return parse_litellm_logs from remote-dev-bot.yml's cost step."""
+    with open(WORKSPACE / ".github/workflows/remote-dev-bot.yml") as f:
         workflow = yaml.safe_load(f)
 
     resolve_steps = workflow["jobs"]["resolve"]["steps"]
