@@ -217,9 +217,9 @@ When using remote-dev-bot to develop remote-dev-bot, the two repos are the same.
 
 The recommended dev cycle uses two repos:
 - `remote-dev-bot` — the main repo with the reusable workflow
-- `remote-dev-bot-test` — a test repo whose shim points at `resolve.yml@dev`
+- `remote-dev-bot-test` — a test repo whose shim points at `resolve.yml@e2e-test`
 
-See `AGENTS.md` for the full dev cycle, including how the `dev` branch works as a pointer.
+See `AGENTS.md` for the full dev cycle, including how the `e2e-test` branch works as a test pointer.
 
 ## Quick Reference: What Goes Where
 

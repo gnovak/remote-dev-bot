@@ -25,22 +25,34 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 4. Resolve mode: OpenHands runs, edits code, opens a draft PR. Design mode: LLM analyzes the issue, posts a comment.
 5. Iterative: comment `/agent-resolve` again on the PR with feedback for another pass
 
+### Branch Model
+
+| Branch | Purpose | Who points here |
+|--------|---------|-----------------|
+| `main` | Stable, released, tagged | External users' shims |
+| `dev` | Long-lived integration branch, accumulates work ahead of `main` | Owner's own repo shims |
+| `e2e-test` | Ephemeral pointer, reset by e2e scripts before each test run | `remote-dev-bot-test` shim |
+
+**Normal flow:** feature branches → PR → merge to `dev`. When `dev` is ready to release: run full test suite (with `e2e-test` pointing at `dev`), then merge `dev` → `main` and tag.
+
+**PRs go to `dev`, not `main`**, unless the change is a hotfix to something already released.
+
 ### Dev Cycle (detailed)
 
-This project has an unusual dev cycle because GitHub Actions only runs workflows from the default branch. You can't just push a feature branch and test it — the workflow won't trigger. Instead, we use a two-repo setup with a `dev` pointer branch.
+This project has an unusual dev cycle because GitHub Actions only runs workflows from the default branch. You can't just push a feature branch and test it — the workflow won't trigger. Instead, we use a two-repo setup with an `e2e-test` pointer branch.
 
 **Repos:**
 - `remote-dev-bot` — the reusable workflow, config, and docs (this repo)
-- `remote-dev-bot-test` — a test repo whose shim points at `resolve.yml@dev` (not `@main`)
+- `remote-dev-bot-test` — a test repo whose shim points at `resolve.yml@e2e-test`
 
-**How the `dev` branch works:**
-- `dev` is NOT a long-lived development branch. It's a pointer.
-- Before testing, force-set `dev` to your feature branch: `git branch -f dev my-feature && git push --force-with-lease origin dev`
-- The test repo's shim calls `resolve.yml@dev`, so it picks up whatever `dev` points to.
-- Only one feature can be tested at a time (since there's only one `dev` pointer).
+**How the `e2e-test` branch works:**
+- `e2e-test` is NOT a development branch. It's an ephemeral pointer reset before each e2e run.
+- Before testing, force-set `e2e-test` to your feature branch: `git push --force-with-lease origin my-feature:e2e-test`
+- The test repo's shim calls `resolve.yml@e2e-test`, so it picks up whatever `e2e-test` points to.
+- Only one feature can be tested at a time (since there's only one `e2e-test` pointer).
 
 **Important: config/lib vs workflow code (the "main checkout" constraint):**
-- The shim (`agent.yml`) determines which branch of `resolve.yml` to use (`@main` or `@dev`)
+- The shim (`agent.yml`) determines which branch of `resolve.yml` to use (`@e2e-test` or `@main`)
 - But `resolve.yml` checks out `remote-dev-bot.yaml` and `lib/` in a separate step that always pulls from `main` — GitHub Actions doesn't expose which ref a reusable workflow was called with, so there's no way to say "use the same branch as myself"
 - This means changes to `lib/config.py` or `remote-dev-bot.yaml` on your feature branch won't take effect in E2E tests unless they're already on `main`
 - Workaround for config values: with config layering, you can put a `remote-dev-bot.yaml` in the target repo (remote-dev-bot-test) to override specific values during testing
@@ -53,13 +65,13 @@ This project has an unusual dev cycle because GitHub Actions only runs workflows
 - Unit tests catch config parsing bugs on the branch; E2E tests validate the full workflow after config changes reach main
 
 **Full dev cycle:**
-1. Create a feature branch from `main`: `git checkout -b my-feature main`
+1. Create a feature branch from `dev`: `git checkout -b my-feature dev`
 2. Make changes, commit freely (work log mode)
-3. Point dev at your branch: `git branch -f dev my-feature && git push --force-with-lease origin dev`
+3. Point `e2e-test` at your branch: `git push --force-with-lease origin my-feature:e2e-test`
 4. In `remote-dev-bot-test`: create an issue, comment `/agent-resolve-claude-small`
 5. Monitor: `gh run list --repo gnovak/remote-dev-bot-test --workflow=agent.yml --limit 3`
-6. If it fails: check logs, fix, commit, push dev again, re-trigger
-7. If it works: clean up git history (rebase), open a PR (dev → main), merge
+6. If it fails: check logs, fix, commit, push `e2e-test` again, re-trigger
+7. If it works: clean up git history (rebase), open a PR against `dev`, merge
 
 **Triggering a test:**
 ```bash

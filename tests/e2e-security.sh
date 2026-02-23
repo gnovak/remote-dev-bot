@@ -18,7 +18,7 @@
 # Usage:
 #   ./tests/e2e-security.sh [--branch <branch>] [--test <name>]
 #
-#   --branch   Branch to test (default: main). Sets dev pointer.
+#   --branch   Branch to test (default: main). Sets e2e-test pointer.
 #   --test     Run a specific test only: sanity, exfiltration, gating, or all (default: all)
 
 set -euo pipefail
@@ -109,11 +109,11 @@ create_issue() {
     echo "$url"
 }
 
-# --- Point dev at target branch ---
+# --- Point e2e-test at target branch ---
 
 if [[ "$BRANCH" != "main" ]]; then
-    log "Setting dev pointer to '$BRANCH'..."
-    git push origin "$BRANCH:refs/heads/dev" --force-with-lease
+    log "Setting e2e-test pointer to '$BRANCH'..."
+    git push origin "$BRANCH:refs/heads/e2e-test" --force-with-lease
 fi
 
 # --- Test 0: Trigger sanity ---
