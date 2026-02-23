@@ -37,6 +37,7 @@ jobs:
     # This prevents arbitrary users from triggering runs that consume API credits.
     # To restrict further, remove roles from the list (e.g., '["OWNER"]' for owner-only).
     # Supports both "/agent-resolve" (dash) and "/agent resolve" (space) syntax.
+    # Available modes: resolve (fix issue + open PR), design (analysis comment), review (review a PR)
     if: >
       (github.event.issue || github.event.pull_request) &&
       (startsWith(github.event.comment.body, '/agent-') || startsWith(github.event.comment.body, '/agent ')) &&

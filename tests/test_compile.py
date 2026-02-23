@@ -13,10 +13,10 @@ WORKSPACE = Path(__file__).parent.parent
 
 @pytest.fixture
 def compiled_dir(tmp_path):
-    """Compile both workflows into a temp directory."""
+    """Compile all three workflows into a temp directory."""
     import sys
     sys.path.insert(0, str(WORKSPACE))
-    from scripts.compile import compile_resolve, compile_design, load_yaml
+    from scripts.compile import compile_resolve, compile_design, compile_review, load_yaml
 
     shim = load_yaml(str(WORKSPACE / ".github" / "workflows" / "agent.yml"))
     workflow = load_yaml(str(WORKSPACE / ".github" / "workflows" / "remote-dev-bot.yml"))
@@ -24,6 +24,7 @@ def compiled_dir(tmp_path):
 
     compile_resolve(shim, workflow, config, str(tmp_path / "agent-resolve.yml"))
     compile_design(shim, workflow, config, str(tmp_path / "agent-design.yml"))
+    compile_review(shim, workflow, config, str(tmp_path / "agent-review.yml"))
 
     return tmp_path
 
@@ -267,6 +268,62 @@ def test_both_have_required_markers(compiled_dir):
         assert "RDB_PAT_TOKEN" in content, f"{fname} missing RDB_PAT_TOKEN documentation"
 
 
+# --- Review-specific ---
+
+
+def test_review_produces_valid_yaml(compiled_dir):
+    data = _load_compiled(compiled_dir / "agent-review.yml")
+    assert data is not None
+    assert "name" in data
+    assert "jobs" in data
+
+
+def test_review_trigger(compiled_dir):
+    content = _read_text(compiled_dir / "agent-review.yml")
+    assert "startsWith(github.event.comment.body, '/agent-review')" in content
+
+
+def test_review_has_security_microagent(compiled_dir):
+    content = _read_text(compiled_dir / "agent-review.yml")
+    assert "Security Rules (injected by remote-dev-bot)" in content
+    assert "remote-dev-bot-security.md" in content
+
+
+def test_review_has_review_microagent(compiled_dir):
+    content = _read_text(compiled_dir / "agent-review.yml")
+    assert "Code Review Task (injected by remote-dev-bot)" in content
+    assert "remote-dev-bot-review.md" in content
+    assert "rdb_review.md" in content
+
+
+def test_review_has_openhands_steps(compiled_dir):
+    content = _read_text(compiled_dir / "agent-review.yml")
+    assert "Install OpenHands" in content
+    assert "Review pull request" in content
+    assert "openhands.resolver" in content
+
+
+def test_review_has_no_pr_creation(compiled_dir):
+    """Review mode should not create pull requests."""
+    content = _read_text(compiled_dir / "agent-review.yml")
+    assert "Create pull request" not in content
+    assert "Amend commit with model info" not in content
+    # send_pull_request may appear in microagent instructions ("DO NOT call send_pull_request")
+    # but the workflow step itself should not be present — verified via step count tripwire
+
+
+def test_review_has_post_review_step(compiled_dir):
+    content = _read_text(compiled_dir / "agent-review.yml")
+    assert "Post review comment" in content
+    assert "Code review by" in content
+
+
+def test_review_has_cost_step(compiled_dir):
+    content = _read_text(compiled_dir / "agent-review.yml")
+    assert "Calculate and post cost" in content
+    assert "Cost Summary" in content
+
+
 # --- Step count tripwire ---
 # These tests fail when steps are added to or removed from remote-dev-bot.yml,
 # forcing you to check whether compile.py needs a corresponding update.
@@ -324,6 +381,34 @@ def test_design_step_count(compiled_dir):
     assert actual == EXPECTED_DESIGN_STEPS, (
         f"Compiled design steps changed. If you added/removed a step in remote-dev-bot.yml, "
         f"update compile.py and this list.\n  Expected: {EXPECTED_DESIGN_STEPS}\n  Actual:   {actual}"
+    )
+
+
+EXPECTED_REVIEW_STEPS = [
+    "Generate app token",
+    "Checkout repository",
+    "Set up Python",
+    "Parse config and model alias",
+    "Determine API key",
+    "React to comment",
+    "Assign commenter to issue",
+    "Install OpenHands",
+    "Inject security guardrails",
+    "Review pull request",
+    "Post review comment",
+    "Upload output artifact",
+    "Calculate and post cost",
+]
+
+
+def test_review_step_count(compiled_dir):
+    """Tripwire: fails if steps are added/removed from resolve.yml without updating compile.py."""
+    data = _load_compiled(compiled_dir / "agent-review.yml")
+    job = list(data["jobs"].values())[0]
+    actual = [s.get("name", "(unnamed)") for s in job["steps"]]
+    assert actual == EXPECTED_REVIEW_STEPS, (
+        f"Compiled review steps changed. If you added/removed a step in resolve.yml, "
+        f"update compile.py and this list.\n  Expected: {EXPECTED_REVIEW_STEPS}\n  Actual:   {actual}"
     )
 
 
