@@ -72,7 +72,7 @@ def test_detect_api_provider_unknown():
 
 # --- parse_command ---
 
-KNOWN_MODES = {"resolve", "design"}
+KNOWN_MODES = {"resolve", "design", "review"}
 
 
 def test_parse_command_resolve():
@@ -159,6 +159,10 @@ def config_dir(tmp_path):
                 "default_model": "claude-small",
                 "prompt_prefix": "You are analyzing this issue.",
             },
+            "review": {
+                "action": "review",
+                "default_model": "claude-small",
+            },
         },
         "openhands": {
             "version": "1.4.0",
@@ -203,6 +207,22 @@ def test_resolve_config_design_with_model(config_dir):
     assert result["mode"] == "design"
     assert result["alias"] == "claude-large"
     assert result["model"] == "anthropic/claude-opus-4-5"
+
+
+def test_resolve_config_review_mode(config_dir):
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "review")
+    assert result["mode"] == "review"
+    assert result["action"] == "review"
+    assert result["alias"] == "claude-small"
+    assert result["model"] == "anthropic/claude-sonnet-4-5"
+
+
+def test_resolve_config_review_with_model(config_dir):
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "review-claude-large")
+    assert result["mode"] == "review"
+    assert result["alias"] == "claude-large"
 
 
 def test_resolve_config_unknown_model(config_dir):
@@ -659,6 +679,11 @@ class TestConfigMain:
         content = self._call_main("design", tmp_path)
         assert "mode=design\n" in content
         assert "action=comment\n" in content
+
+    def test_review_mode_and_action_values(self, tmp_path):
+        content = self._call_main("review", tmp_path)
+        assert "mode=review\n" in content
+        assert "action=review\n" in content
 
     def test_invalid_command_exits_one(self, tmp_path):
         with (
