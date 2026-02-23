@@ -329,25 +329,28 @@ gh secret list --repo {owner}/{repo}
 # Should list the secrets you just set (values are hidden)
 ```
 
-### Step 2.4: Advanced Authentication — Optional
+### Step 2.4: Bot Identity & CI Triggering
 
-> **You can skip this step.** The bot works without any additional authentication. By default it uses GitHub's built-in `GITHUB_TOKEN`, which lets it push branches, create PRs, and post comments as `github-actions[bot]`. The only limitation: bot-created PRs won't auto-trigger CI workflows. You can always trigger CI manually, or come back and set this up later.
+**Choose your path:**
+
+- **Just trying it out?** Skip this step entirely. The bot works out of the box using GitHub's built-in `GITHUB_TOKEN` — it pushes branches, creates PRs, and posts comments as `github-actions[bot]`. The only limitation is that bot-created PRs won't auto-trigger your CI workflows (you can trigger CI manually). Come back and set this up once you're sold.
+
+- **Ready to commit?** The typical setup uses a GitHub App (Option A below). It gives the bot a clear identity, auto-triggers CI on bot PRs, and doesn't involve rotating tokens. This is the recommended long-term setup.
+
+**Options A and B are alternatives — pick one, not both.**
+
+| Option | Skip for now | Bot identity | CI triggers | Setup effort |
+|--------|-------------|--------------|-------------|--------------|
+| **None** (default) | ✓ | `github-actions[bot]` | No | None |
+| **GitHub App** (recommended) | | `your-app-name[bot]` | Yes | Create app, set variable + secret |
+| **PAT** | | Posts as the PAT owner | Yes | Create PAT, set secret |
 
 <details>
-<summary><strong>Click to expand advanced auth options</strong> (for bot identity or auto CI triggering)</summary>
-
-#### Why you might want this
-
-By default, the bot posts as `github-actions[bot]` and bot PRs don't trigger CI. If you want either of these, you have two options:
-
-| Option | Bot identity | CI triggers | Setup effort |
-|--------|-------------|-------------|--------------|
-| **GitHub App** (recommended) | `your-app-name[bot]` | Yes | Create app, add variable + secret |
-| **PAT** | Posts as the PAT owner | Yes | Create PAT, add secret |
-
-#### Option A: GitHub App (recommended)
+<summary><strong>Option A: GitHub App (recommended for long-term use)</strong></summary>
 
 A GitHub App gives the bot a clear, distinct identity and triggers CI on bot PRs. Token management is automatic — no expiring PATs to rotate.
+
+**First time setting up the app:**
 
 1. Go to https://github.com/settings/apps/new
 2. **Name:** Choose a name (this becomes the `name[bot]` identity)
@@ -363,10 +366,10 @@ A GitHub App gives the bot a clear, distinct identity and triggers CI on bot PRs
 9. Scroll down and click **Generate a private key** (downloads a `.pem` file)
    - **Store the key securely:** Copy the full contents of the `.pem` file into your password manager (name it "remote-dev-bot private key" or similar), then delete the downloaded file. You won't be able to download it again — if lost, you'll need to generate a new one.
 10. Click **Install App** in the left sidebar
-    - **Private app note:** If the app is not published to the GitHub Marketplace, it won't appear in your repo's Settings → Integrations list. You must install it from the app settings page. If you see an "Install" button in the left sidebar of your app settings, use that.
-    - Choose **"Only select repositories"** and pick your target repo — or **"All repositories"** if you plan to use the bot on multiple repos. Installing on all repositories is safe: the bot only acts on repos where the `RDB_APP_PRIVATE_KEY` secret is configured.
+    - **Private app note:** If the app is not published to the GitHub Marketplace, it won't appear in your repo's Settings → Integrations list. You must install it from the app settings page.
+    - Choose **"Only select repositories"** and pick your target repo — or **"All repositories"** if you plan to use the bot on multiple repos. Installing on all repositories is safe: the bot only acts on repos where `RDB_APP_PRIVATE_KEY` is configured.
 
-Store the credentials:
+Store the credentials on your repo:
 
 ```bash
 # Store App ID as a repository variable (not a secret — it's not sensitive)
@@ -377,9 +380,25 @@ gh variable set RDB_APP_ID --repo {owner}/{repo}
 gh secret set RDB_APP_PRIVATE_KEY --repo {owner}/{repo} < path/to/your-app.pem
 ```
 
-#### Option B: Personal Access Token (PAT)
+**Adding the bot to another repo (app already exists):**
 
-A PAT is simpler to set up but the bot will post as your personal account. This can be confusing if you're also commenting on the same issues.
+You don't need a new key — reuse the same App ID and private key. You just need to:
+1. Go to your app's settings page (https://github.com/settings/apps) and click **Install App**, then add the new repo
+2. Set the same credentials on the new repo:
+
+```bash
+gh variable set RDB_APP_ID --repo {owner}/{new-repo}
+# Enter the same App ID
+
+gh secret set RDB_APP_PRIVATE_KEY --repo {owner}/{new-repo} < path/to/your-app.pem
+```
+
+</details>
+
+<details>
+<summary><strong>Option B: Personal Access Token (PAT)</strong></summary>
+
+A PAT is an alternative to the GitHub App. Choose this if you prefer not to create a GitHub App, but note that the bot will post as your personal account, which can be confusing if you're also commenting on the same issues.
 
 **Alternatives to posting as yourself:**
 - Organizations can create a dedicated GitHub user (e.g., `my-org-bot`) and use that user's PAT
