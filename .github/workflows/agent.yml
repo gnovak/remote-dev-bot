@@ -15,7 +15,7 @@
 # Note: secrets must be passed explicitly (not via `secrets: inherit`) because
 # GitHub Actions does not pass inherited secrets across different repo owners.
 #
-# To get unreleased features from the dev branch, change @main to @dev below.
+# To get unreleased features from the dev branch, change @main to @dev in the uses: line below.
 
 name: Remote Dev Bot
 
@@ -41,7 +41,7 @@ jobs:
       (github.event.issue || github.event.pull_request) &&
       (startsWith(github.event.comment.body, '/agent-') || startsWith(github.event.comment.body, '/agent ')) &&
       contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), github.event.comment.author_association)
-    uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@main
+    uses: gnovak/remote-dev-bot/.github/workflows/remote-dev-bot.yml@main
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Compile two self-contained workflows from the reusable workflow + shim.
+"""Compile self-contained workflows from the reusable workflow + shim.
 
-Reads the reusable workflow (resolve.yml), the shim (agent.yml), and config
-(remote-dev-bot.yaml), then produces two compiled files:
+Reads the reusable workflow (remote-dev-bot.yml), the shim (agent.yml), and config
+(remote-dev-bot.yaml), then produces compiled files:
 
   dist/agent-resolve.yml  — triggers on /agent-resolve[-<model>]
   dist/agent-design.yml   — triggers on /agent-design[-<model>]
@@ -510,7 +510,7 @@ def main():
     """Main entry point."""
     workspace = Path(__file__).parent.parent
     shim_path = workspace / ".github" / "workflows" / "agent.yml"
-    workflow_path = workspace / ".github" / "workflows" / "resolve.yml"
+    workflow_path = workspace / ".github" / "workflows" / "remote-dev-bot.yml"
     config_path = workspace / "remote-dev-bot.yaml"
 
     # Output directory

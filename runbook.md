@@ -570,7 +570,7 @@ gh pr list --repo {owner}/{repo}
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `ModuleNotFoundError: No module named 'yaml'` | PyYAML not installed before config parsing | **Compiled:** Re-download latest from [releases](https://github.com/gnovak/remote-dev-bot/releases). **Shim:** Should auto-fix (uses latest resolve.yml) |
+| `ModuleNotFoundError: No module named 'yaml'` | PyYAML not installed before config parsing | **Compiled:** Re-download latest from [releases](https://github.com/gnovak/remote-dev-bot/releases). **Shim:** Should auto-fix (uses latest remote-dev-bot.yml) |
 | `ImportError: cannot import name 'WorkspaceState'` | Old OpenHands version | **Compiled:** Re-download latest from [releases](https://github.com/gnovak/remote-dev-bot/releases). **Shim:** Should auto-fix |
 | `error: the following arguments are required: --selected-repo` | OpenHands 1.x API change | Update workflow — `--repo` was renamed to `--selected-repo` |
 | `ValueError: Username is required` | Missing env vars | Workflow needs `GITHUB_USERNAME` and `GIT_USERNAME` |
@@ -709,7 +709,7 @@ Built-in mitigations:
 
 ### Cross-repo reusable workflow access (shim install only)
 
-The shim calls `resolve.yml` from `gnovak/remote-dev-bot`. Since that repo is public, this works automatically — no special access settings needed.
+The shim calls `remote-dev-bot.yml` from `gnovak/remote-dev-bot`. Since that repo is public, this works automatically — no special access settings needed.
 
 **If using a private fork:** You must enable Actions access sharing on your fork:
 

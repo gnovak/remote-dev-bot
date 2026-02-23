@@ -12,7 +12,7 @@ Remote Dev Bot uses a **shim + reusable workflow** pattern that involves two rep
 │                    (where you want AI to help develop)                      │
 │                                                                             │
 │   .github/workflows/agent.yml  ←── Shim: triggers on /agent- commands       │
-│                                    and calls resolve.yml from remote-dev-bot│
+│                                    and calls remote-dev-bot.yml from remote-dev-bot│
 │                                                                             │
 │   remote-dev-bot.yaml          ←── (Optional) Override config for this repo │
 │                                                                             │
@@ -29,7 +29,7 @@ Remote Dev Bot uses a **shim + reusable workflow** pattern that involves two rep
 │                         REMOTE-DEV-BOT REPO                                 │
 │              (gnovak/remote-dev-bot or your org's fork)                     │
 │                                                                             │
-│   .github/workflows/resolve.yml  ←── Reusable workflow: all the logic       │
+│   .github/workflows/remote-dev-bot.yml  ←── Reusable workflow: all the logic       │
 │                                      (model parsing, OpenHands, PR creation)│
 │                                                                             │
 │   remote-dev-bot.yaml            ←── Base config: model aliases, settings   │
@@ -50,9 +50,9 @@ This is the "engine" — the shared infrastructure that all target repos use.
 
 | File | Purpose |
 |------|---------|
-| `.github/workflows/resolve.yml` | The reusable workflow. Contains all the logic: parses model aliases, installs OpenHands, resolves issues, creates PRs. Target repos call this. |
+| `.github/workflows/remote-dev-bot.yml` | The reusable workflow. Contains all the logic: parses model aliases, installs OpenHands, resolves issues, creates PRs. Target repos call this. |
 | `remote-dev-bot.yaml` | Base configuration. Defines model aliases (`claude-small`, `claude-large`, etc.) and OpenHands settings (version, max iterations, PR type). |
-| `lib/config.py` | Config parsing logic. Loads base config, merges with target repo overrides, resolves aliases. Used by resolve.yml at runtime. |
+| `lib/config.py` | Config parsing logic. Loads base config, merges with target repo overrides, resolves aliases. Used by remote-dev-bot.yml at runtime. |
 | `.github/workflows/agent.yml` | Shim workflow. Also serves as the template — copy this to target repos. |
 | `runbook.md` | Step-by-step setup instructions for humans or AI assistants. |
 | `AGENTS.md` | Development guidance for AI assistants working on this repo. |
@@ -65,7 +65,7 @@ This is where you want the AI agent to help with development.
 
 | File | Purpose |
 |------|---------|
-| `.github/workflows/agent.yml` | **Required.** The shim workflow. Triggers on `/agent-resolve` and `/agent-design` comments and calls `resolve.yml` from remote-dev-bot. This is the only workflow file you need. |
+| `.github/workflows/agent.yml` | **Required.** The shim workflow. Triggers on `/agent-resolve` and `/agent-design` comments and calls `remote-dev-bot.yml` from remote-dev-bot. This is the only workflow file you need. |
 | `remote-dev-bot.yaml` | **Optional.** Override config. Add model aliases, change settings, or override defaults for this specific repo. Merged on top of the base config. |
 | `.openhands/microagents/repo.md` | **Optional.** Context for the AI agent. Describe your codebase, coding conventions, test commands, architecture — anything the agent should know. |
 
@@ -82,8 +82,8 @@ This is where you want the AI agent to help with development.
 When someone comments `/agent-resolve-claude-large` on an issue:
 
 1. **Shim triggers** — The target repo's `agent.yml` fires on the comment
-2. **Calls reusable workflow** — The shim calls `resolve.yml@main` from remote-dev-bot
-3. **Config checkout** — resolve.yml checks out `lib/config.py` from remote-dev-bot
+2. **Calls reusable workflow** — The shim calls `remote-dev-bot.yml@main` from remote-dev-bot
+3. **Config checkout** — remote-dev-bot.yml checks out `lib/config.py` from remote-dev-bot
 4. **Config merge** — config.py loads base config from remote-dev-bot, merges with any override config in the target repo
 5. **Model resolution** — The alias `claude-large` is resolved to a model ID like `anthropic/claude-opus-4-5`
 6. **Feedback** — A rocket emoji is added to your comment and you're assigned to the issue, so you can see at a glance which issues have active work
@@ -99,11 +99,11 @@ User comments /agent-resolve-claude-large
 │ agent.yml triggers  │
 └─────────────────────┘
          │
-         │ uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@main
+         │ uses: gnovak/remote-dev-bot/.github/workflows/remote-dev-bot.yml@main
          ▼
 ┌─────────────────────┐
 │ remote-dev-bot      │
-│ resolve.yml runs    │
+│ remote-dev-bot.yml runs    │
 │   • checkout config │
 │   • parse alias     │
 │   • run OpenHands   │
@@ -157,7 +157,7 @@ The workflow uses a three-way token fallback: GitHub App token > `RDB_PAT_TOKEN`
 GitHub Actions does not pass `secrets: inherit` across different repo owners. Since your target repo and `gnovak/remote-dev-bot` have different owners, the shim must list secrets explicitly:
 
 ```yaml
-    uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@main
+    uses: gnovak/remote-dev-bot/.github/workflows/remote-dev-bot.yml@main
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -196,7 +196,7 @@ Organizations often want full control over the reusable workflow. To use a fork:
 1. Fork `gnovak/remote-dev-bot` to your org (e.g., `myorg/remote-dev-bot`)
 2. In your target repos' shims, change the `uses:` line:
    ```yaml
-   uses: myorg/remote-dev-bot/.github/workflows/resolve.yml@main
+   uses: myorg/remote-dev-bot/.github/workflows/remote-dev-bot.yml@main
    ```
 3. Set Actions access on your fork (Settings → Actions → General → Access → "Accessible from repositories owned by the user")
 4. If your fork and target repos are in the same org, you can use `secrets: inherit` instead of listing secrets explicitly
@@ -210,14 +210,14 @@ Now updates to your fork flow to your target repos, and you control the release 
 When using remote-dev-bot to develop remote-dev-bot, the two repos are the same. This creates a bootstrapping situation:
 
 - The shim (`agent.yml`) lives in remote-dev-bot
-- The reusable workflow (`resolve.yml`) also lives in remote-dev-bot
-- The shim calls `resolve.yml@main`, so changes on feature branches don't take effect
+- The reusable workflow (`remote-dev-bot.yml`) also lives in remote-dev-bot
+- The shim calls `remote-dev-bot.yml@main`, so changes on feature branches don't take effect
 
 **Solution: Use a separate test repo.**
 
 The recommended dev cycle uses two repos:
 - `remote-dev-bot` — the main repo with the reusable workflow
-- `remote-dev-bot-test` — a test repo whose shim points at `resolve.yml@e2e-test`
+- `remote-dev-bot-test` — a test repo whose shim points at `remote-dev-bot.yml@e2e-test`
 
 See `AGENTS.md` for the full dev cycle, including how the `e2e-test` branch works as a test pointer.
 
@@ -227,7 +227,7 @@ See `AGENTS.md` for the full dev cycle, including how the `e2e-test` branch work
 |--------------|--------------|------------|
 | Add a new model alias | `remote-dev-bot.yaml` | remote-dev-bot (or your fork) |
 | Change the default model for one repo | `remote-dev-bot.yaml` | target repo |
-| Modify how the agent runs | `.github/workflows/resolve.yml` | remote-dev-bot |
+| Modify how the agent runs | `.github/workflows/remote-dev-bot.yml` | remote-dev-bot |
 | Give the agent context about my codebase | `.openhands/microagents/repo.md` | target repo |
 | Set up a new repo to use the bot | `.github/workflows/agent.yml` + secrets | target repo |
 | Change config parsing logic | `lib/config.py` | remote-dev-bot |
@@ -255,6 +255,6 @@ Config: base=remote-dev-bot, override=none
 
 Check the `uses:` line in your shim:
 ```yaml
-uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@main
+uses: gnovak/remote-dev-bot/.github/workflows/remote-dev-bot.yml@main
 ```
 This tells you which remote-dev-bot repo (and branch) you're using.

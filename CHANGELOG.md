@@ -21,7 +21,7 @@
 
 ## v0.2.0 — Shim + reusable workflow (Feb 11, 2026)
 
-- Refactored into a thin shim (`agent.yml`) per target repo that calls a shared reusable workflow (`resolve.yml`).
+- Refactored into a thin shim (`agent.yml`) per target repo that calls a shared reusable workflow (`remote-dev-bot.yml`).
 - Cross-repo support tested with separate test repo.
 - Dev cycle infrastructure in place.
 

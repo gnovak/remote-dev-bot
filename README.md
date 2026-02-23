@@ -61,7 +61,7 @@ Remote Dev Bot currently supports three LLM providers out of the box:
 
 The workflow automatically selects the correct API key based on the model prefix. For example, a model ID starting with `anthropic/` will use `ANTHROPIC_API_KEY`.
 
-**Adding a new provider:** LiteLLM supports many providers beyond these three. To add support for a new provider, you'll need to modify `.github/workflows/resolve.yml`:
+**Adding a new provider:** LiteLLM supports many providers beyond these three. To add support for a new provider, you'll need to modify `.github/workflows/remote-dev-bot.yml`:
 
 1. Add the new secret to the `workflow_call.secrets` section
 2. Add a case in the "Determine API key" step to match the provider prefix
@@ -102,7 +102,7 @@ commit_trailer: ""
 The system has two parts:
 
 - **Shim workflow** (`.github/workflows/agent.yml`) — a thin trigger that lives in each target repo. Fires on `/agent-` commands and calls the reusable workflow. Copy this file to set up the shim install.
-- **Reusable workflow** (`.github/workflows/resolve.yml`) — all the logic: parses commands, dispatches to resolve or design mode, runs the agent. Lives in this repo and is called by shims in target repos.
+- **Reusable workflow** (`.github/workflows/remote-dev-bot.yml`) — all the logic: parses commands, dispatches to resolve or design mode, runs the agent. Lives in this repo and is called by shims in target repos.
 - **OpenHands** — the AI agent framework that does the actual code exploration and editing
 - **`remote-dev-bot.yaml`** — model aliases and OpenHands settings (version, max iterations, PR type)
 - **`runbook.md`** — step-by-step setup instructions, designed to be followed by a human or by an AI assistant (like Claude Code)

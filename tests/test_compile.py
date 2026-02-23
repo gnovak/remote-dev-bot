@@ -19,7 +19,7 @@ def compiled_dir(tmp_path):
     from scripts.compile import compile_resolve, compile_design, load_yaml
 
     shim = load_yaml(str(WORKSPACE / ".github" / "workflows" / "agent.yml"))
-    workflow = load_yaml(str(WORKSPACE / ".github" / "workflows" / "resolve.yml"))
+    workflow = load_yaml(str(WORKSPACE / ".github" / "workflows" / "remote-dev-bot.yml"))
     config = load_yaml(str(WORKSPACE / "remote-dev-bot.yaml"))
 
     compile_resolve(shim, workflow, config, str(tmp_path / "agent-resolve.yml"))
@@ -268,7 +268,7 @@ def test_both_have_required_markers(compiled_dir):
 
 
 # --- Step count tripwire ---
-# These tests fail when steps are added to or removed from resolve.yml,
+# These tests fail when steps are added to or removed from remote-dev-bot.yml,
 # forcing you to check whether compile.py needs a corresponding update.
 
 
@@ -306,23 +306,23 @@ EXPECTED_DESIGN_STEPS = [
 
 
 def test_resolve_step_count(compiled_dir):
-    """Tripwire: fails if steps are added/removed from resolve.yml without updating compile.py."""
+    """Tripwire: fails if steps are added/removed from remote-dev-bot.yml without updating compile.py."""
     data = _load_compiled(compiled_dir / "agent-resolve.yml")
     job = list(data["jobs"].values())[0]
     actual = [s.get("name", "(unnamed)") for s in job["steps"]]
     assert actual == EXPECTED_RESOLVE_STEPS, (
-        f"Compiled resolve steps changed. If you added/removed a step in resolve.yml, "
+        f"Compiled resolve steps changed. If you added/removed a step in remote-dev-bot.yml, "
         f"update compile.py and this list.\n  Expected: {EXPECTED_RESOLVE_STEPS}\n  Actual:   {actual}"
     )
 
 
 def test_design_step_count(compiled_dir):
-    """Tripwire: fails if steps are added/removed from resolve.yml without updating compile.py."""
+    """Tripwire: fails if steps are added/removed from remote-dev-bot.yml without updating compile.py."""
     data = _load_compiled(compiled_dir / "agent-design.yml")
     job = list(data["jobs"].values())[0]
     actual = [s.get("name", "(unnamed)") for s in job["steps"]]
     assert actual == EXPECTED_DESIGN_STEPS, (
-        f"Compiled design steps changed. If you added/removed a step in resolve.yml, "
+        f"Compiled design steps changed. If you added/removed a step in remote-dev-bot.yml, "
         f"update compile.py and this list.\n  Expected: {EXPECTED_DESIGN_STEPS}\n  Actual:   {actual}"
     )
 

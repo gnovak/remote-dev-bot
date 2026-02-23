@@ -3,9 +3,10 @@ name: Resolve Issue
 # Reusable workflow — called by thin shims in target repos.
 # See .github/workflows/agent.yml for the shim template.
 #
-# Supports two modes via /agent-<mode>[-<model>] or /agent <mode> [<model>]:
+# Supports three modes via /agent-<mode>[-<model>] or /agent <mode> [<model>]:
 #   /agent-resolve[-<model>] or /agent resolve [<model>]  — run OpenHands to resolve the issue, open a PR
 #   /agent-design[-<model>] or /agent design [<model>]    — post a design analysis comment (no code changes)
+#   /agent-review[-<model>] or /agent review [<model>]    — post a code review comment on a PR (no code changes)
 # Both dash and space separators are supported for mobile-friendly typing.
 
 on:
@@ -57,7 +58,7 @@ jobs:
 
       - name: Set config ref from workflow branch
         run: |
-          # github.workflow_ref = "owner/repo/.github/workflows/resolve.yml@refs/heads/dev"
+          # github.workflow_ref = "owner/repo/.github/workflows/remote-dev-bot.yml@refs/heads/dev"
           # Extract the part after "@" and strip "refs/heads/" or "refs/tags/" prefix.
           WF="${{ github.workflow_ref }}"
           BRANCH="${WF##*@}"
@@ -473,7 +474,7 @@ jobs:
 
       - name: Set config ref from workflow branch
         run: |
-          # github.workflow_ref = "owner/repo/.github/workflows/resolve.yml@refs/heads/dev"
+          # github.workflow_ref = "owner/repo/.github/workflows/remote-dev-bot.yml@refs/heads/dev"
           # Extract the part after "@" and strip "refs/heads/" or "refs/tags/" prefix.
           WF="${{ github.workflow_ref }}"
           BRANCH="${WF##*@}"
