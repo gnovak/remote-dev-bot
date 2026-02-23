@@ -51,18 +51,9 @@ This project has an unusual dev cycle because GitHub Actions only runs workflows
 - The test repo's shim calls `resolve.yml@e2e-test`, so it picks up whatever `e2e-test` points to.
 - Only one feature can be tested at a time (since there's only one `e2e-test` pointer).
 
-**Important: config/lib vs workflow code (the "main checkout" constraint):**
-- The shim (`agent.yml`) determines which branch of `resolve.yml` to use (`@e2e-test` or `@main`)
-- But `resolve.yml` checks out `remote-dev-bot.yaml` and `lib/` in a separate step that always pulls from `main` — GitHub Actions doesn't expose which ref a reusable workflow was called with, so there's no way to say "use the same branch as myself"
-- This means changes to `lib/config.py` or `remote-dev-bot.yaml` on your feature branch won't take effect in E2E tests unless they're already on `main`
-- Workaround for config values: with config layering, you can put a `remote-dev-bot.yaml` in the target repo (remote-dev-bot-test) to override specific values during testing
-
-**PR constraint — separate config parsing from workflow changes:**
-- `lib/config.py` is checked out from `main` at runtime, but unit tests (pytest) run against the branch version
-- If you change both config parsing logic AND workflow behavior in one PR, E2E tests will use the old (main) config.py with the new workflow — they won't match
-- **Rule: config parsing changes (`lib/config.py`) go in their own PR, merged first.** Then workflow changes that depend on them go in a follow-up PR.
-- This is usually natural: config changes tend to be additive ("add a new field"), and the code that reads the new field comes separately
-- Unit tests catch config parsing bugs on the branch; E2E tests validate the full workflow after config changes reach main
+**Config/lib checkout is self-referential:**
+- `resolve.yml` reads `github.workflow_ref` to detect which branch it was called from, then checks out `remote-dev-bot.yaml` and `lib/` from that same branch
+- This means changes to `lib/config.py` or `remote-dev-bot.yaml` on your feature branch take effect automatically when `e2e-test` points at your branch — no separate PR needed
 
 **Full dev cycle:**
 1. Create a feature branch from `dev`: `git checkout -b my-feature dev`
