@@ -456,42 +456,20 @@ gh workflow list --repo {owner}/{repo}
 
 Instead of the self-contained file, you can use a thin shim that calls the reusable workflow from `gnovak/remote-dev-bot`. This means you automatically get updates when the bot is improved — no need to download new releases.
 
-No PAT is required. The shim works with just your LLM API key(s).
+Download the canonical shim directly from the repo (single source of truth):
 
-```yaml
-name: Remote Dev Bot
-
-on:
-  issue_comment:
-    types: [created]
-  pull_request_review_comment:
-    types: [created]
-
-permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-
-jobs:
-  resolve:
-    if: >
-      (github.event.issue || github.event.pull_request) &&
-      startsWith(github.event.comment.body, '/agent-') &&
-      contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), github.event.comment.author_association)
-    uses: gnovak/remote-dev-bot/.github/workflows/resolve.yml@main
-    secrets:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      RDB_PAT_TOKEN: ${{ secrets.RDB_PAT_TOKEN }}
-      RDB_APP_PRIVATE_KEY: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+```bash
+mkdir -p .github/workflows
+curl -o .github/workflows/agent.yml \
+  https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/.github/workflows/agent.yml
+git add .github/workflows/agent.yml
+git commit -m "Add remote dev bot shim workflow"
+git push
 ```
 
-**Why explicit secrets?** GitHub Actions does not pass `secrets: inherit` across different repo owners. Since your repo and `gnovak/remote-dev-bot` have different owners, secrets must be listed explicitly. You only need to set the API key(s) for the provider(s) you use — the others will be empty and that's fine.
+The file is self-documenting — read the comments at the top for notes on optional secrets and auth.
 
-**Optional auth secrets:** `RDB_PAT_TOKEN` and `RDB_APP_PRIVATE_KEY` are only needed if you want bot-created PRs to auto-trigger CI or a distinct bot identity. See Step 2.4 for details.
-
-**Using your own fork:** For full control, fork `gnovak/remote-dev-bot` and point the `uses:` line at your fork. If the fork is in the same owner/org as your target repos, `secrets: inherit` will work. You'll need to set Actions access to `user` level on the fork (see Troubleshooting).
+**Using your own fork:** For full control, fork `gnovak/remote-dev-bot`, then edit the `uses:` line in the downloaded file to point at your fork. If the fork is in the same owner/org as your target repos, `secrets: inherit` will work. You'll need to set Actions access to `user` level on the fork (see Troubleshooting).
 
 </details>
 
