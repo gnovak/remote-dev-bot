@@ -697,6 +697,54 @@ def test_resolve_config_assign_pr_via_override(config_dir):
     assert result["assign_pr"] is False
 
 
+def test_resolve_config_graceful_wrapup_defaults(config_dir):
+    """graceful_wrapup defaults: enabled=True, threshold=0.8, iteration=max*0.8."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["graceful_wrapup_enabled"] is True
+    assert result["graceful_wrapup_threshold"] == 0.8
+    # With default max_iterations=50, wrapup at iteration 40
+    assert result["graceful_wrapup_iteration"] == 40
+
+
+def test_resolve_config_graceful_wrapup_disabled(config_dir):
+    """graceful_wrapup can be disabled; wrapup_iteration is 0 when disabled."""
+    tmp_path, base_path = config_dir
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["openhands"]["graceful_wrapup"] = {"enabled": False}
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["graceful_wrapup_enabled"] is False
+    assert result["graceful_wrapup_iteration"] == 0
+
+
+def test_resolve_config_graceful_wrapup_custom_threshold(config_dir):
+    """Custom threshold is applied to max_iterations."""
+    tmp_path, base_path = config_dir
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["openhands"]["graceful_wrapup"] = {"enabled": True, "threshold": 0.6}
+    config["openhands"]["max_iterations"] = 50
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["graceful_wrapup_iteration"] == 30
+
+
+def test_resolve_config_graceful_wrapup_invalid_threshold(config_dir):
+    """threshold outside (0, 1] raises ValueError."""
+    tmp_path, base_path = config_dir
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["openhands"]["graceful_wrapup"] = {"enabled": True, "threshold": 1.5}
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+    with pytest.raises(ValueError, match="threshold"):
+        resolve_config(base_path, "nonexistent.yaml", "resolve")
+
+
 def test_resolve_config_malformed_yaml(tmp_path):
     """Malformed YAML should raise an error."""
     bad_yaml = tmp_path / "bad.yaml"
