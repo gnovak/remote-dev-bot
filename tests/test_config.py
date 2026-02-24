@@ -76,24 +76,24 @@ KNOWN_MODES = {"resolve", "design", "review"}
 
 
 def test_parse_command_resolve():
-    assert parse_command("resolve", KNOWN_MODES) == ("resolve", "")
+    assert parse_command("resolve", KNOWN_MODES) == ("resolve", "", None)
 
 
 def test_parse_command_resolve_with_model():
-    assert parse_command("resolve-claude-large", KNOWN_MODES) == ("resolve", "claude-large")
+    assert parse_command("resolve-claude-large", KNOWN_MODES) == ("resolve", "claude-large", None)
 
 
 def test_parse_command_design():
-    assert parse_command("design", KNOWN_MODES) == ("design", "")
+    assert parse_command("design", KNOWN_MODES) == ("design", "", None)
 
 
 def test_parse_command_design_with_model():
-    assert parse_command("design-claude-large", KNOWN_MODES) == ("design", "claude-large")
+    assert parse_command("design-claude-large", KNOWN_MODES) == ("design", "claude-large", None)
 
 
 def test_parse_command_multi_segment_model():
     """Model aliases with hyphens should be preserved."""
-    assert parse_command("resolve-gpt-large", KNOWN_MODES) == ("resolve", "gpt-large")
+    assert parse_command("resolve-gpt-large", KNOWN_MODES) == ("resolve", "gpt-large", None)
 
 
 def test_parse_command_bare_agent_errors():
@@ -115,23 +115,53 @@ def test_parse_command_unknown_mode_with_model():
 
 def test_parse_command_case_insensitive_mode():
     """Commands should be case-insensitive."""
-    assert parse_command("Resolve", KNOWN_MODES) == ("resolve", "")
-    assert parse_command("RESOLVE", KNOWN_MODES) == ("resolve", "")
-    assert parse_command("Design", KNOWN_MODES) == ("design", "")
-    assert parse_command("DESIGN", KNOWN_MODES) == ("design", "")
+    assert parse_command("Resolve", KNOWN_MODES) == ("resolve", "", None)
+    assert parse_command("RESOLVE", KNOWN_MODES) == ("resolve", "", None)
+    assert parse_command("Design", KNOWN_MODES) == ("design", "", None)
+    assert parse_command("DESIGN", KNOWN_MODES) == ("design", "", None)
 
 
 def test_parse_command_case_insensitive_model():
     """Model aliases should be normalized to lowercase."""
-    assert parse_command("resolve-Claude-Large", KNOWN_MODES) == ("resolve", "claude-large")
-    assert parse_command("resolve-CLAUDE-LARGE", KNOWN_MODES) == ("resolve", "claude-large")
-    assert parse_command("design-OpenAI-Small", KNOWN_MODES) == ("design", "openai-small")
+    assert parse_command("resolve-Claude-Large", KNOWN_MODES) == ("resolve", "claude-large", None)
+    assert parse_command("resolve-CLAUDE-LARGE", KNOWN_MODES) == ("resolve", "claude-large", None)
+    assert parse_command("design-OpenAI-Small", KNOWN_MODES) == ("design", "openai-small", None)
 
 
 def test_parse_command_case_insensitive_mixed():
     """Mixed case in both mode and model should work."""
-    assert parse_command("Resolve-Claude-Large", KNOWN_MODES) == ("resolve", "claude-large")
-    assert parse_command("DESIGN-openai-SMALL", KNOWN_MODES) == ("design", "openai-small")
+    assert parse_command("Resolve-Claude-Large", KNOWN_MODES) == ("resolve", "claude-large", None)
+    assert parse_command("DESIGN-openai-SMALL", KNOWN_MODES) == ("design", "openai-small", None)
+
+
+# --- parse_command with --timeout ---
+
+
+def test_parse_command_with_timeout():
+    """--timeout N should be parsed and returned."""
+    assert parse_command("resolve --timeout 120", KNOWN_MODES) == ("resolve", "", 120)
+
+
+def test_parse_command_with_model_and_timeout():
+    """--timeout N should work with model alias."""
+    assert parse_command("resolve-claude-large --timeout 90", KNOWN_MODES) == ("resolve", "claude-large", 90)
+
+
+def test_parse_command_timeout_case_insensitive():
+    """--timeout should be case-insensitive."""
+    assert parse_command("resolve --TIMEOUT 60", KNOWN_MODES) == ("resolve", "", 60)
+    assert parse_command("resolve --Timeout 45", KNOWN_MODES) == ("resolve", "", 45)
+
+
+def test_parse_command_timeout_with_extra_spaces():
+    """--timeout should handle extra spaces."""
+    assert parse_command("resolve  --timeout  120", KNOWN_MODES) == ("resolve", "", 120)
+
+
+def test_parse_command_timeout_before_model():
+    """--timeout can appear anywhere in the command."""
+    # Note: The regex extracts --timeout from anywhere in the string
+    assert parse_command("resolve --timeout 120", KNOWN_MODES) == ("resolve", "", 120)
 
 
 # --- resolve_config ---
@@ -685,6 +715,31 @@ def test_resolve_config_local_overrides_context_files(config_dir):
     assert result["context_files"] == ["README.md", "lib/config.py"]
 
 
+# --- resolve_config with --timeout ---
+
+
+def test_resolve_config_timeout_default(config_dir):
+    """timeout_minutes defaults to None when not specified."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["timeout_minutes"] is None
+
+
+def test_resolve_config_timeout_specified(config_dir):
+    """timeout_minutes is parsed from command string."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve --timeout 120")
+    assert result["timeout_minutes"] == 120
+
+
+def test_resolve_config_timeout_with_model(config_dir):
+    """timeout_minutes works with model alias."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve-claude-large --timeout 90")
+    assert result["timeout_minutes"] == 90
+    assert result["alias"] == "claude-large"
+
+
 # --- main() — CLI entry point and GITHUB_OUTPUT writing ---
 
 
@@ -712,7 +767,7 @@ class TestConfigMain:
         for key in (
             "mode", "action", "model", "alias",
             "max_iterations", "oh_version", "pr_type", "on_failure", "commit_trailer",
-            "assign_issue", "assign_pr",
+            "assign_issue", "assign_pr", "timeout_minutes",
         ):
             assert f"{key}=" in content, f"Missing key in GITHUB_OUTPUT: {key}"
 
@@ -769,3 +824,13 @@ class TestConfigMain:
             patch.dict(os.environ, env, clear=True),
         ):
             main()  # must not raise
+
+    def test_timeout_minutes_empty_when_not_specified(self, tmp_path):
+        """timeout_minutes is empty string when not specified."""
+        content = self._call_main("resolve", tmp_path)
+        assert "timeout_minutes=\n" in content
+
+    def test_timeout_minutes_value_when_specified(self, tmp_path):
+        """timeout_minutes contains the value when specified."""
+        content = self._call_main("resolve --timeout 120", tmp_path)
+        assert "timeout_minutes=120\n" in content
