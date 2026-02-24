@@ -39,6 +39,7 @@ jobs:
       oh_version: ${{ steps.parse.outputs.oh_version }}
       pr_type: ${{ steps.parse.outputs.pr_type }}
       on_failure: ${{ steps.parse.outputs.on_failure }}
+      target_branch: ${{ steps.parse.outputs.target_branch }}
       context_files: ${{ steps.parse.outputs.context_files }}
       commit_trailer: ${{ steps.parse.outputs.commit_trailer }}
 
