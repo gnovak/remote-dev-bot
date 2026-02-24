@@ -371,11 +371,12 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ar
     if "prompt_prefix" in mode_config:
         result["prompt_prefix"] = mode_config["prompt_prefix"]
 
-    # Include context_files: command-line args override mode config
-    if "context_files" in args:
+    # Include context_files: command-line args append to mode config
+    # (replace semantics would force users to re-type all existing files)
+    if "context_files" in mode_config:
+        result["context_files"] = mode_config["context_files"] + args.get("context_files", [])
+    elif "context_files" in args:
         result["context_files"] = args["context_files"]
-    elif "context_files" in mode_config:
-        result["context_files"] = mode_config["context_files"]
 
     # Log command-line args if any were provided
     if args:

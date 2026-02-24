@@ -894,15 +894,15 @@ def test_resolve_config_args_max_iterations(config_dir):
     assert result["max_iterations"] == 75
 
 
-def test_resolve_config_args_context_files(config_dir):
-    """args can override context_files."""
+def test_resolve_config_args_context_files_no_mode_config(config_dir):
+    """args context_files used as-is when mode has no context_files."""
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "design", args={"context_files": ["custom.txt"]})
     assert result["context_files"] == ["custom.txt"]
 
 
-def test_resolve_config_args_context_files_overrides_mode_config(config_dir):
-    """args context_files should override mode's context_files."""
+def test_resolve_config_args_context_files_appends_to_mode_config(config_dir):
+    """args context_files should append to mode's context_files, not replace."""
     tmp_path, base_path = config_dir
     # Add context_files to design mode
     with open(base_path) as f:
@@ -912,7 +912,7 @@ def test_resolve_config_args_context_files_overrides_mode_config(config_dir):
         yaml.dump(config, f)
 
     result = resolve_config(base_path, "nonexistent.yaml", "design", args={"context_files": ["custom.txt"]})
-    assert result["context_files"] == ["custom.txt"]
+    assert result["context_files"] == ["README.md", "AGENTS.md", "custom.txt"]
 
 
 def test_resolve_config_args_empty_dict(config_dir):
@@ -1050,12 +1050,12 @@ class TestConfigMain:
         assert "alias=claude-large\n" in content
         assert "max_iterations=100\n" in content
 
-    def test_comment_body_design_with_context_override(self, tmp_path):
-        """COMMENT_BODY can override context_files for design mode."""
+    def test_comment_body_design_with_context_append(self, tmp_path):
+        """COMMENT_BODY appends context_files to mode's existing list."""
         comment = "/agent design\ncontext = custom.txt"
         content = self._call_main_with_comment(comment, tmp_path)
         assert "mode=design\n" in content
-        assert 'context_files=["custom.txt"]' in content
+        assert "custom.txt" in content
 
     def test_comment_body_invalid_command_exits_one(self, tmp_path):
         """Invalid command in COMMENT_BODY exits with code 1."""
