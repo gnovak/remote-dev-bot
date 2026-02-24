@@ -163,6 +163,13 @@ def config_dir(tmp_path):
                 "action": "review",
                 "default_model": "claude-small",
             },
+            "explore": {
+                "action": "explore",
+                "default_model": "claude-small",
+                "max_iterations": 10,
+                "prompt_prefix": "You are exploring this issue.",
+                "context_files": ["README.md", "AGENTS.md"],
+            },
         },
         "openhands": {
             "version": "1.4.0",
@@ -223,6 +230,29 @@ def test_resolve_config_review_with_model(config_dir):
     result = resolve_config(base_path, "nonexistent.yaml", "review-claude-large")
     assert result["mode"] == "review"
     assert result["alias"] == "claude-large"
+
+
+def test_resolve_config_explore_mode(config_dir):
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "explore")
+    assert result["mode"] == "explore"
+    assert result["action"] == "explore"
+    assert result["alias"] == "claude-small"
+    assert result["model"] == "anthropic/claude-sonnet-4-5"
+    assert "prompt_prefix" in result
+    assert "exploring" in result["prompt_prefix"]
+    assert "context_files" in result
+    assert result["context_files"] == ["README.md", "AGENTS.md"]
+    assert "explore_max_iterations" in result
+    assert result["explore_max_iterations"] == 10
+
+
+def test_resolve_config_explore_with_model(config_dir):
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "explore-claude-large")
+    assert result["mode"] == "explore"
+    assert result["alias"] == "claude-large"
+    assert result["model"] == "anthropic/claude-opus-4-5"
 
 
 def test_resolve_config_unknown_model(config_dir):
@@ -751,6 +781,31 @@ class TestConfigMain:
         content = self._call_main("review", tmp_path)
         assert "mode=review\n" in content
         assert "action=review\n" in content
+
+    def test_explore_mode_and_action_values(self, tmp_path):
+        content = self._call_main("explore", tmp_path)
+        assert "mode=explore\n" in content
+        assert "action=explore\n" in content
+
+    def test_explore_includes_context_files_as_json(self, tmp_path):
+        """Explore mode writes context_files as a non-empty JSON array."""
+        content = self._call_main("explore", tmp_path)
+        assert "context_files=" in content
+        for line in content.splitlines():
+            if line.startswith("context_files="):
+                files = json.loads(line.split("=", 1)[1])
+                assert isinstance(files, list) and len(files) > 0
+                break
+
+    def test_explore_includes_max_iterations(self, tmp_path):
+        """Explore mode writes explore_max_iterations."""
+        content = self._call_main("explore", tmp_path)
+        assert "explore_max_iterations=" in content
+        for line in content.splitlines():
+            if line.startswith("explore_max_iterations="):
+                value = int(line.split("=", 1)[1])
+                assert value > 0
+                break
 
     def test_invalid_command_exits_one(self, tmp_path):
         with (

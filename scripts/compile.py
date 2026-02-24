@@ -2,11 +2,12 @@
 """Compile self-contained workflows from the reusable workflow + shim.
 
 Reads the reusable workflow (remote-dev-bot.yml), the shim (agent.yml), and config
-(remote-dev-bot.yaml), then produces three compiled files:
+(remote-dev-bot.yaml), then produces four compiled files:
 
   dist/agent-resolve.yml  — triggers on /agent-resolve[-<model>]
   dist/agent-design.yml   — triggers on /agent-design[-<model>]
   dist/agent-review.yml   — triggers on /agent-review[-<model>]
+  dist/agent-explore.yml  — triggers on /agent-explore[-<model>]
 
 Each compiled file is self-contained: inlined config, no cross-repo checkout,
 uses github.token by default (RDB_PAT_TOKEN and GitHub App optional).
@@ -633,6 +634,143 @@ def _rewrite_needs_refs(steps):
         steps[i] = rewrite(step)
 
 
+def compile_explore(shim, workflow, config_yaml, output_path):
+    """Compile the explore mode workflow (agent-explore.yml)."""
+    security_roles = extract_security_gate(shim)
+    explore_steps = workflow["jobs"]["explore"]["steps"]
+
+    # Build the prompt_prefix as a Python string for inlining
+    modes_config = config_yaml.get("modes", {})
+    explore_config = modes_config.get("explore", {})
+    prompt_prefix = explore_config.get("prompt_prefix", "")
+    max_iterations = explore_config.get("max_iterations", 10)
+
+    steps = []
+
+    # Generate app token (optional — only runs if RDB_APP_ID is set)
+    steps.append({
+        "name": "Generate app token",
+        "if": "vars.RDB_APP_ID != ''",
+        "uses": "actions/create-github-app-token@v1",
+        "id": "app-token",
+        "with": {
+            "app-id": "${{ vars.RDB_APP_ID }}",
+            "private-key": "${{ secrets.RDB_APP_PRIVATE_KEY }}",
+        },
+    })
+
+    # Checkout
+    steps.append({
+        "name": "Checkout repository",
+        "uses": "actions/checkout@v4",
+        "with": {"token": "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"},
+    })
+
+    # Set up Python
+    steps.append(find_step(explore_steps, "Set up Python").copy())
+
+    # Parse config (inline, explore mode)
+    steps.append({
+        "name": "Parse config and model alias",
+        "id": "parse",
+        "env": {"COMMENT": "${{ github.event.comment.body }}"},
+        "run": inline_config_parsing(config_yaml, "explore"),
+    })
+
+    # Determine API key
+    steps.append(find_step(explore_steps, "Determine API key").copy())
+
+    # React to comment — use from parse job
+    parse_steps = workflow["jobs"]["parse"]["steps"]
+    react_step = find_step(parse_steps, "React to comment").copy()
+    react_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
+    steps.append(react_step)
+
+    # Assign commenter to issue (from parse job)
+    assign_step = find_step(parse_steps, "Assign commenter to issue").copy()
+    assign_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
+    steps.append(assign_step)
+
+    # Install dependencies (PyYAML + litellm)
+    steps.append(find_step(explore_steps, "Install dependencies").copy())
+
+    # Gather issue context
+    gather_step = find_step(explore_steps, "Gather issue context").copy()
+    gather_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
+    steps.append(gather_step)
+
+    # Run explore loop — rewrite to inline prompt_prefix, context_files, and max_iterations
+    explore_step = find_step(explore_steps, "Run explore loop").copy()
+    if prompt_prefix:
+        escaped_prefix = prompt_prefix.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+    else:
+        escaped_prefix = ""
+    explore_run = explore_step.get("run", "")
+    # Replace the config-loading block with a simple variable assignment
+    replacement = f'prompt_prefix = "{escaped_prefix}"\n'
+    replacement_escaped = replacement.replace('\\', '\\\\')
+    explore_run = re.sub(
+        r'# Load prompt_prefix from config.*?break\n',
+        replacement_escaped,
+        explore_run,
+        flags=re.DOTALL,
+    )
+    # Inline the context_files list
+    context_files = explore_config.get("context_files", [])
+    context_files_repr = repr(context_files)
+    explore_run = explore_run.replace(
+        'context_files = json.loads(os.environ.get("CONTEXT_FILES", "[]") or "[]")',
+        f'context_files = {context_files_repr}',
+    )
+    # Inline the max_iterations
+    explore_run = explore_run.replace(
+        'max_iterations = int(os.environ.get("EXPLORE_MAX_ITERATIONS", "10") or "10")',
+        f'max_iterations = {max_iterations}',
+    )
+    explore_step["run"] = explore_run
+    # Remove env vars since values are inlined
+    if "env" in explore_step:
+        if "CONTEXT_FILES" in explore_step["env"]:
+            del explore_step["env"]["CONTEXT_FILES"]
+        if "EXPLORE_MAX_ITERATIONS" in explore_step["env"]:
+            del explore_step["env"]["EXPLORE_MAX_ITERATIONS"]
+    steps.append(explore_step)
+
+    # Post comment
+    post_step = find_step(explore_steps, "Post comment").copy()
+    post_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
+    steps.append(post_step)
+
+    # Post cost comment
+    cost_step = find_step(explore_steps, "Post cost comment").copy()
+    cost_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
+    steps.append(cost_step)
+
+    # Fix needs.parse.outputs -> steps.parse.outputs
+    _rewrite_needs_refs(steps)
+
+    apply_block_scalars(steps)
+
+    job = build_base_job(security_roles, "/agent-explore")
+    job["steps"] = steps
+
+    compiled = {
+        "name": "Remote Dev Bot — Explore (Compiled)",
+        "on": shim["on"],
+        "permissions": shim["permissions"],
+        "jobs": {"explore": job},
+    }
+
+    header = make_header("explore")
+    yaml_str = generate_output_yaml(compiled, security_roles)
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as f:
+        f.write(header + yaml_str)
+
+    return output_path
+
+
 def main():
     """Main entry point."""
     workspace = Path(__file__).parent.parent
@@ -671,6 +809,12 @@ def main():
         os.path.join(output_dir, "agent-review.yml")
     )
     print(f"Compiled review workflow: {review_path}")
+
+    explore_path = compile_explore(
+        shim, workflow, config_yaml,
+        os.path.join(output_dir, "agent-explore.yml")
+    )
+    print(f"Compiled explore workflow: {explore_path}")
 
     return 0
 
