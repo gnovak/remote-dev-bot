@@ -8,6 +8,14 @@ name: Resolve Issue
 #   /agent-design[-<model>] or /agent design [<model>]    — post a design analysis comment (no code changes)
 #   /agent-review[-<model>] or /agent review [<model>]    — post a code review comment on a PR (no code changes)
 # Both dash and space separators are supported for mobile-friendly typing.
+#
+# Arguments can be passed on subsequent lines:
+#   /agent resolve
+#   max iterations = 75
+#   context = file1.txt file2.txt
+#
+# Argument names are normalized (spaces/dashes/underscores are equivalent).
+# Supported arguments: max_iterations, context (alias for context_files).
 
 on:
   workflow_call:
@@ -93,25 +101,17 @@ jobs:
 
       - name: Parse config and command
         id: parse
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMAND_PREFIX: ${{ inputs.command_prefix || 'agent' }}
         run: |
-          COMMENT="${{ github.event.comment.body }}"
-          # Extract command string: "/agent-resolve-claude-large" or "/agent resolve claude large" -> "resolve-claude-large"
-          # Supports both dash and space separators; normalizes to lowercase dashes
-          # Matches up to 3 tokens (mode + optional model alias parts) to avoid capturing extra text
-          # Also captures optional --timeout N argument
-          # Bare "/agent" produces empty string, which config.py will reject
-          PREFIX="${{ inputs.command_prefix || 'agent' }}"
-          # Extract command string (mode + optional model alias)
-          COMMAND=$(echo "$COMMENT" | grep -oP "^/${PREFIX}[- ]\K[a-zA-Z0-9]+(?:[- ][a-zA-Z0-9]+){0,2}" | tr ' ' '-' || echo "")
-          COMMAND=$(echo "$COMMAND" | tr '[:upper:]' '[:lower:]')
-          # Extract --timeout N if present (case-insensitive), pass as a separate flag
-          TIMEOUT=$(echo "$COMMENT" | grep -oiP '(?<=--timeout )\d+' | head -1 || true)
-
-          if [[ -n "$TIMEOUT" ]]; then
-            python3 .remote-dev-bot/lib/config.py "$COMMAND" --timeout-minutes "$TIMEOUT"
-          else
-            python3 .remote-dev-bot/lib/config.py "$COMMAND"
-          fi
+          # Pass full comment body to config.py via COMMENT_BODY env var.
+          # COMMAND_PREFIX tells config.py which slash command prefix to expect.
+          # This enables multi-line argument parsing:
+          #   /agent resolve
+          #   max iterations = 75
+          #   context = file1.txt file2.txt
+          python3 .remote-dev-bot/lib/config.py
 
       - name: React to comment
         continue-on-error: true

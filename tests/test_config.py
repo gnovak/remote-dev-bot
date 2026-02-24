@@ -8,7 +8,17 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from lib.config import deep_merge, detect_api_provider, main, parse_command, resolve_config, resolve_commit_trailer
+from lib.config import (
+    deep_merge,
+    detect_api_provider,
+    main,
+    normalize_arg_name,
+    parse_args,
+    parse_command,
+    parse_invocation,
+    resolve_config,
+    resolve_commit_trailer,
+)
 
 
 # --- deep_merge ---
@@ -140,6 +150,195 @@ def test_parse_command_case_insensitive_mixed():
     """Mixed case in both mode and model should work."""
     assert parse_command("Resolve-Claude-Large", KNOWN_MODES) == ("resolve", "claude-large")
     assert parse_command("DESIGN-openai-SMALL", KNOWN_MODES) == ("design", "openai-small")
+
+
+# --- normalize_arg_name ---
+
+
+def test_normalize_arg_name_spaces():
+    """Spaces should be converted to underscores."""
+    assert normalize_arg_name("max iterations") == "max_iterations"
+    assert normalize_arg_name("context files") == "context_files"
+
+
+def test_normalize_arg_name_dashes():
+    """Dashes should be converted to underscores."""
+    assert normalize_arg_name("max-iterations") == "max_iterations"
+    assert normalize_arg_name("context-files") == "context_files"
+
+
+def test_normalize_arg_name_mixed():
+    """Mixed separators should all become underscores."""
+    assert normalize_arg_name("max-iterations count") == "max_iterations_count"
+
+
+def test_normalize_arg_name_case():
+    """Names should be lowercased."""
+    assert normalize_arg_name("Max_Iterations") == "max_iterations"
+    assert normalize_arg_name("CONTEXT") == "context"
+
+
+def test_normalize_arg_name_whitespace():
+    """Leading/trailing whitespace should be stripped."""
+    assert normalize_arg_name("  max iterations  ") == "max_iterations"
+
+
+# --- parse_args ---
+
+
+def test_parse_args_empty():
+    """Empty list should return empty dict."""
+    assert parse_args([]) == {}
+
+
+def test_parse_args_max_iterations():
+    """max_iterations should be parsed as int."""
+    assert parse_args(["max iterations = 75"]) == {"max_iterations": 75}
+    assert parse_args(["max-iterations = 100"]) == {"max_iterations": 100}
+    assert parse_args(["max_iterations=50"]) == {"max_iterations": 50}
+
+
+def test_parse_args_context_files():
+    """context_files should be parsed as list."""
+    assert parse_args(["context = file1.txt file2.txt"]) == {"context_files": ["file1.txt", "file2.txt"]}
+    assert parse_args(["context files = README.md"]) == {"context_files": ["README.md"]}
+    assert parse_args(["context-files = a.txt b.txt c.txt"]) == {"context_files": ["a.txt", "b.txt", "c.txt"]}
+
+
+def test_parse_args_context_alias():
+    """'context' should be an alias for 'context_files'."""
+    assert parse_args(["context = file.txt"]) == {"context_files": ["file.txt"]}
+
+
+def test_parse_args_multiple():
+    """Multiple args should all be parsed."""
+    result = parse_args([
+        "max iterations = 75",
+        "context = file1.txt file2.txt",
+    ])
+    assert result == {
+        "max_iterations": 75,
+        "context_files": ["file1.txt", "file2.txt"],
+    }
+
+
+def test_parse_args_skip_empty_lines():
+    """Empty lines should be skipped."""
+    result = parse_args([
+        "",
+        "max iterations = 75",
+        "",
+        "context = file.txt",
+        "",
+    ])
+    assert result == {
+        "max_iterations": 75,
+        "context_files": ["file.txt"],
+    }
+
+
+def test_parse_args_skip_comments():
+    """Lines starting with # should be skipped."""
+    result = parse_args([
+        "# This is a comment",
+        "max iterations = 75",
+        "# Another comment",
+    ])
+    assert result == {"max_iterations": 75}
+
+
+def test_parse_args_skip_lines_without_equals():
+    """Lines without = should be skipped."""
+    result = parse_args([
+        "max iterations = 75",
+        "some random text",
+        "context = file.txt",
+    ])
+    assert result == {
+        "max_iterations": 75,
+        "context_files": ["file.txt"],
+    }
+
+
+def test_parse_args_unknown_arg():
+    """Unknown args should raise ValueError."""
+    with pytest.raises(ValueError, match="Unknown argument"):
+        parse_args(["unknown_arg = value"])
+
+
+def test_parse_args_invalid_int():
+    """Non-integer value for int arg should raise ValueError."""
+    with pytest.raises(ValueError, match="must be an integer"):
+        parse_args(["max iterations = not_a_number"])
+
+
+# --- parse_invocation ---
+
+
+def test_parse_invocation_simple():
+    """Simple command without args."""
+    assert parse_invocation("/agent resolve", KNOWN_MODES) == ("resolve", "", {})
+    assert parse_invocation("/agent design", KNOWN_MODES) == ("design", "", {})
+
+
+def test_parse_invocation_with_model():
+    """Command with model alias."""
+    assert parse_invocation("/agent resolve claude-large", KNOWN_MODES) == ("resolve", "claude-large", {})
+    assert parse_invocation("/agent-resolve-claude-large", KNOWN_MODES) == ("resolve", "claude-large", {})
+
+
+def test_parse_invocation_with_args():
+    """Command with args on subsequent lines."""
+    comment = "/agent resolve\nmax iterations = 75"
+    assert parse_invocation(comment, KNOWN_MODES) == ("resolve", "", {"max_iterations": 75})
+
+
+def test_parse_invocation_with_model_and_args():
+    """Command with model and args."""
+    comment = "/agent resolve claude-large\nmax iterations = 100\ncontext = file.txt"
+    mode, alias, args = parse_invocation(comment, KNOWN_MODES)
+    assert mode == "resolve"
+    assert alias == "claude-large"
+    assert args == {"max_iterations": 100, "context_files": ["file.txt"]}
+
+
+def test_parse_invocation_dash_syntax():
+    """Dash syntax should work with args."""
+    comment = "/agent-design-claude-small\ncontext = a.txt b.txt"
+    mode, alias, args = parse_invocation(comment, KNOWN_MODES)
+    assert mode == "design"
+    assert alias == "claude-small"
+    assert args == {"context_files": ["a.txt", "b.txt"]}
+
+
+def test_parse_invocation_space_syntax():
+    """Space syntax should work with args."""
+    comment = "/agent design claude small\nmax iterations = 50"
+    mode, alias, args = parse_invocation(comment, KNOWN_MODES)
+    assert mode == "design"
+    assert alias == "claude-small"
+    assert args == {"max_iterations": 50}
+
+
+def test_parse_invocation_case_insensitive():
+    """Command should be case-insensitive."""
+    comment = "/agent RESOLVE Claude-Large\nmax iterations = 75"
+    mode, alias, args = parse_invocation(comment, KNOWN_MODES)
+    assert mode == "resolve"
+    assert alias == "claude-large"
+    assert args == {"max_iterations": 75}
+
+
+def test_parse_invocation_bare_agent():
+    """Bare /agent should raise ValueError."""
+    with pytest.raises(ValueError, match="Bare /agent is not supported"):
+        parse_invocation("/agent", KNOWN_MODES)
+
+
+def test_parse_invocation_unknown_mode():
+    """Unknown mode should raise ValueError."""
+    with pytest.raises(ValueError, match="Unknown mode"):
+        parse_invocation("/agent frobnicate", KNOWN_MODES)
 
 
 # --- resolve_config ---
@@ -742,6 +941,51 @@ def test_resolve_config_timeout_with_model(config_dir):
     assert result["alias"] == "claude-large"
 
 
+# --- resolve_config with args ---
+
+
+def test_resolve_config_args_max_iterations(config_dir):
+    """args can override max_iterations."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={"max_iterations": 75})
+    assert result["max_iterations"] == 75
+
+
+def test_resolve_config_args_context_files(config_dir):
+    """args can override context_files."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "design", args={"context_files": ["custom.txt"]})
+    assert result["context_files"] == ["custom.txt"]
+
+
+def test_resolve_config_args_context_files_overrides_mode_config(config_dir):
+    """args context_files should override mode's context_files."""
+    tmp_path, base_path = config_dir
+    # Add context_files to design mode
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["modes"]["design"]["context_files"] = ["README.md", "AGENTS.md"]
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+
+    result = resolve_config(base_path, "nonexistent.yaml", "design", args={"context_files": ["custom.txt"]})
+    assert result["context_files"] == ["custom.txt"]
+
+
+def test_resolve_config_args_empty_dict(config_dir):
+    """Empty args dict should not change anything."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={})
+    assert result["max_iterations"] == 50  # default from config
+
+
+def test_resolve_config_args_none(config_dir):
+    """None args should not change anything."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", args=None)
+    assert result["max_iterations"] == 50  # default from config
+
+
 # --- main() — CLI entry point and GITHUB_OUTPUT writing ---
 
 
@@ -850,3 +1094,59 @@ class TestConfigMain:
         """target_branch is written to GITHUB_OUTPUT."""
         content = self._call_main("resolve", tmp_path)
         assert "target_branch=" in content
+
+    def _call_main_with_comment(self, comment_body, tmp_path):
+        """Run main() with COMMENT_BODY env var; return GITHUB_OUTPUT file contents."""
+        output_file = tmp_path / "github_output"
+        with patch("sys.argv", ["config.py"]), patch.dict(
+            os.environ, {"GITHUB_OUTPUT": str(output_file), "COMMENT_BODY": comment_body}
+        ):
+            main()
+        return output_file.read_text()
+
+    def test_comment_body_simple_command(self, tmp_path):
+        """COMMENT_BODY with simple command works."""
+        content = self._call_main_with_comment("/agent resolve", tmp_path)
+        assert "mode=resolve\n" in content
+        assert "action=pr\n" in content
+
+    def test_comment_body_with_model(self, tmp_path):
+        """COMMENT_BODY with model alias works."""
+        content = self._call_main_with_comment("/agent resolve claude-large", tmp_path)
+        assert "mode=resolve\n" in content
+        assert "alias=claude-large\n" in content
+
+    def test_comment_body_with_args(self, tmp_path):
+        """COMMENT_BODY with args on subsequent lines works."""
+        comment = "/agent resolve\nmax iterations = 75"
+        content = self._call_main_with_comment(comment, tmp_path)
+        assert "mode=resolve\n" in content
+        assert "max_iterations=75\n" in content
+
+    def test_comment_body_with_model_and_args(self, tmp_path):
+        """COMMENT_BODY with model and args works."""
+        comment = "/agent resolve claude-large\nmax iterations = 100"
+        content = self._call_main_with_comment(comment, tmp_path)
+        assert "mode=resolve\n" in content
+        assert "alias=claude-large\n" in content
+        assert "max_iterations=100\n" in content
+
+    def test_comment_body_design_with_context_override(self, tmp_path):
+        """COMMENT_BODY can override context_files for design mode."""
+        comment = "/agent design\ncontext = custom.txt"
+        content = self._call_main_with_comment(comment, tmp_path)
+        assert "mode=design\n" in content
+        assert 'context_files=["custom.txt"]' in content
+
+    def test_comment_body_invalid_command_exits_one(self, tmp_path):
+        """Invalid command in COMMENT_BODY exits with code 1."""
+        with (
+            patch("sys.argv", ["config.py"]),
+            patch.dict(os.environ, {
+                "GITHUB_OUTPUT": str(tmp_path / "out"),
+                "COMMENT_BODY": "/agent frobnicate"
+            }),
+            pytest.raises(SystemExit) as exc,
+        ):
+            main()
+        assert exc.value.code == 1
