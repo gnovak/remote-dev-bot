@@ -330,6 +330,33 @@ jobs:
           ${{ needs.parse.outputs.commit_trailer }}"
           git push --force origin "$BRANCH"
 
+      - name: Add model info to PR description
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          # Add model attribution to the PR description for easy identification
+          # when comparing PRs from different models.
+          PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log | head -1)
+          if [ -z "$PR_URL" ]; then
+            echo "Could not find PR URL in send_pull_request output, skipping"
+            exit 0
+          fi
+          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          MODEL="${{ needs.parse.outputs.model }}"
+
+          # Get current PR body
+          CURRENT_BODY=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json body --jq '.body')
+
+          # Prepend model info line
+          MODEL_LINE="🤖 **Model:** \`${ALIAS}\` (${MODEL})"
+          NEW_BODY="${MODEL_LINE}
+
+          ${CURRENT_BODY}"
+
+          # Update PR description
+          gh pr edit "$PR_NUMBER" --repo "${{ github.repository }}" --body "$NEW_BODY"
+
       - name: Upload output artifact
         if: always()
         uses: actions/upload-artifact@v4
