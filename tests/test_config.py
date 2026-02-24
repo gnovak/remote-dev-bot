@@ -340,6 +340,8 @@ def test_resolve_config_openhands_defaults():
         assert result["pr_type"] == "ready"
         assert result["on_failure"] == "comment"
         assert result["target_branch"] == "main"
+        assert result["assign_issue"] is True
+        assert result["assign_pr"] is True
     finally:
         os.unlink(path)
 
@@ -400,6 +402,64 @@ def test_resolve_config_target_branch_override(config_dir):
         yaml.dump({"openhands": {"target_branch": "master"}}, f)
     result = resolve_config(base_path, override_path, "resolve")
     assert result["target_branch"] == "master"
+
+
+def test_resolve_config_assign_issue_default(config_dir):
+    """assign_issue defaults to True."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["assign_issue"] is True
+
+
+def test_resolve_config_assign_issue_false(config_dir):
+    """assign_issue can be set to False."""
+    tmp_path, base_path = config_dir
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["openhands"]["assign_issue"] = False
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["assign_issue"] is False
+
+
+def test_resolve_config_assign_issue_via_override(config_dir):
+    """assign_issue can be overridden at the override layer."""
+    tmp_path, base_path = config_dir
+    override_path = str(tmp_path / "override.yaml")
+    with open(override_path, "w") as f:
+        yaml.dump({"openhands": {"assign_issue": False}}, f)
+    result = resolve_config(base_path, override_path, "resolve")
+    assert result["assign_issue"] is False
+
+
+def test_resolve_config_assign_pr_default(config_dir):
+    """assign_pr defaults to True."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["assign_pr"] is True
+
+
+def test_resolve_config_assign_pr_false(config_dir):
+    """assign_pr can be set to False."""
+    tmp_path, base_path = config_dir
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["openhands"]["assign_pr"] = False
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["assign_pr"] is False
+
+
+def test_resolve_config_assign_pr_via_override(config_dir):
+    """assign_pr can be overridden at the override layer."""
+    tmp_path, base_path = config_dir
+    override_path = str(tmp_path / "override.yaml")
+    with open(override_path, "w") as f:
+        yaml.dump({"openhands": {"assign_pr": False}}, f)
+    result = resolve_config(base_path, override_path, "resolve")
+    assert result["assign_pr"] is False
 
 
 def test_resolve_config_malformed_yaml(tmp_path):
@@ -652,6 +712,7 @@ class TestConfigMain:
         for key in (
             "mode", "action", "model", "alias",
             "max_iterations", "oh_version", "pr_type", "on_failure", "commit_trailer",
+            "assign_issue", "assign_pr",
         ):
             assert f"{key}=" in content, f"Missing key in GITHUB_OUTPUT: {key}"
 
@@ -659,6 +720,12 @@ class TestConfigMain:
         content = self._call_main("resolve", tmp_path)
         assert "mode=resolve\n" in content
         assert "action=pr\n" in content
+
+    def test_resolve_assign_values(self, tmp_path):
+        """Resolve mode writes assign_issue and assign_pr as lowercase booleans."""
+        content = self._call_main("resolve", tmp_path)
+        assert "assign_issue=true\n" in content
+        assert "assign_pr=true\n" in content
 
     def test_resolve_omits_context_files(self, tmp_path):
         """context_files is design-only and must not appear in resolve output."""

@@ -87,6 +87,8 @@ def inline_config_parsing(config_yaml, mode):
     pr_type = oh.get("pr_type", "ready")
     on_failure = oh.get("on_failure", "comment")
     target_branch = oh.get("target_branch", "main")
+    assign_issue = oh.get("assign_issue", True)
+    assign_pr = oh.get("assign_pr", True)
 
     # Commit trailer template (resolve mode only)
     commit_trailer_template = config_yaml.get("commit_trailer", "")
@@ -99,6 +101,10 @@ def inline_config_parsing(config_yaml, mode):
         model_id = model_info["id"]
         models_dict_lines.append(f'    "{alias}": "{model_id}",')
     models_dict = "\n".join(models_dict_lines)
+
+    # Convert booleans to lowercase strings for shell comparison
+    assign_issue_str = str(assign_issue).lower()
+    assign_pr_str = str(assign_pr).lower()
 
     code = f'''python3 << 'PYTHON_EOF'
 import os
@@ -128,6 +134,12 @@ ON_FAILURE = "{on_failure}"
 
 # --- TARGET_BRANCH: branch the agent opens PRs against ---
 TARGET_BRANCH = "{target_branch}"
+
+# --- ASSIGN_ISSUE: assign triggering user to the issue ---
+ASSIGN_ISSUE = "{assign_issue_str}"
+
+# --- ASSIGN_PR: assign triggering user to the resulting PR ---
+ASSIGN_PR = "{assign_pr_str}"
 
 # --- COMMIT_TRAILER: appended to commit messages (resolve mode only) ---
 # Supported variables: {{model_alias}}, {{model_id}}, {{oh_version}}
@@ -168,6 +180,8 @@ if output_file:
         f.write(f"pr_type={{PR_TYPE}}\\n")
         f.write(f"on_failure={{ON_FAILURE}}\\n")
         f.write(f"target_branch={{TARGET_BRANCH}}\\n")
+        f.write(f"assign_issue={{ASSIGN_ISSUE}}\\n")
+        f.write(f"assign_pr={{ASSIGN_PR}}\\n")
         f.write(f"commit_trailer={{commit_trailer}}\\n")
 
 # Log for visibility
@@ -323,6 +337,11 @@ def compile_resolve(shim, workflow, config_yaml, output_path):
     pr_desc_step = find_step(resolve_steps, "Add model info to PR description").copy()
     pr_desc_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(pr_desc_step)
+
+    # Assign triggerer to PR
+    assign_pr_step = find_step(resolve_steps, "Assign triggerer to PR").copy()
+    assign_pr_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
+    steps.append(assign_pr_step)
 
     # Upload artifact
     steps.append(find_step(resolve_steps, "Upload output artifact").copy())

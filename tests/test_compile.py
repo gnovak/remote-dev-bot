@@ -351,6 +351,7 @@ EXPECTED_RESOLVE_STEPS = [
     "Create pull request",
     "Amend commit with model info",
     "Add model info to PR description",
+    "Assign triggerer to PR",
     "Upload output artifact",
     "Calculate and post cost",
 ]
