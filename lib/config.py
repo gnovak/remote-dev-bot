@@ -188,6 +188,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
     pr_type = oh.get("pr_type", "ready")
     on_failure = oh.get("on_failure", "comment")
     target_branch = oh.get("target_branch", "main")
+    assign_issue = oh.get("assign_issue", True)
+    assign_pr = oh.get("assign_pr", True)
     if on_failure not in ("comment", "draft"):
         raise ValueError(
             f"openhands.on_failure must be 'comment' or 'draft', got: {on_failure!r}"
@@ -206,6 +208,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
         "pr_type": pr_type,
         "on_failure": on_failure,
         "target_branch": target_branch,
+        "assign_issue": assign_issue,
+        "assign_pr": assign_pr,
         "has_override": bool(override_config),
     }
 
@@ -252,6 +256,8 @@ def main():
             f.write(f"pr_type={result['pr_type']}\n")
             f.write(f"on_failure={result['on_failure']}\n")
             f.write(f"target_branch={result['target_branch']}\n")
+            f.write(f"assign_issue={str(result['assign_issue']).lower()}\n")
+            f.write(f"assign_pr={str(result['assign_pr']).lower()}\n")
             if "context_files" in result:
                 f.write(f"context_files={json.dumps(result['context_files'])}\n")
             f.write(f"commit_trailer={result['commit_trailer']}\n")

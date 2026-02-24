@@ -87,3 +87,7 @@ openhands:
   #   comment — post a comment with the agent's evaluation, no PR (default)
   #   draft   — post the same comment AND open a draft PR with partial changes
   on_failure: comment
+  # Assign the triggering user to the issue when the agent starts
+  assign_issue: true
+  # Assign the triggering user to the resulting PR
+  assign_pr: true

@@ -53,6 +53,8 @@ jobs:
       target_branch: ${{ steps.parse.outputs.target_branch }}
       context_files: ${{ steps.parse.outputs.context_files }}
       commit_trailer: ${{ steps.parse.outputs.commit_trailer }}
+      assign_issue: ${{ steps.parse.outputs.assign_issue }}
+      assign_pr: ${{ steps.parse.outputs.assign_pr }}
 
     steps:
       - name: Generate app token
@@ -111,6 +113,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Assign commenter to issue
+        if: steps.parse.outputs.assign_issue == 'true'
         continue-on-error: true
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
@@ -359,6 +362,22 @@ jobs:
 
           # Update PR description
           gh pr edit "$PR_NUMBER" --repo "${{ github.repository }}" --body "$NEW_BODY"
+
+      - name: Assign triggerer to PR
+        if: needs.parse.outputs.assign_pr == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          # Extract PR number from send_pull_request output
+          PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log | head -1)
+          if [ -z "$PR_URL" ]; then
+            echo "Could not find PR URL in send_pull_request output, skipping assignment"
+            exit 0
+          fi
+          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+          gh pr edit "$PR_NUMBER" --repo "${{ github.repository }}" \
+            --add-assignee "${{ github.event.comment.user.login }}"
 
       - name: Upload output artifact
         if: always()
