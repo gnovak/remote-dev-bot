@@ -10,7 +10,8 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 - `remote-dev-bot.yaml` — model aliases and OpenHands settings
 - `runbook.md` — setup instructions (designed to be followed by humans or AI assistants)
 - `.github/workflows/remote-dev-bot.yml` — the reusable workflow (all the real logic)
-- `.github/workflows/agent.yml` — thin shim that calls remote-dev-bot.yml
+- `.github/workflows/agent.yml` — thin shim that calls remote-dev-bot.yml (users copy this; points at @main)
+- `.github/workflows/dogfood.yml` — internal shim for rdb self-dev; fires on /dogfood commands, points at @dev
 - `.github/workflows/test.yml` — CI: runs pytest on PRs to main
 - `.github/workflows/e2e.yml` — manual trigger for E2E tests
 - `lib/config.py` — config parsing logic (used by remote-dev-bot.yml and unit tests)

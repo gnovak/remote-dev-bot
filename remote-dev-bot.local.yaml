@@ -37,3 +37,4 @@ modes:
       # rdb workflows (core of the system)
       - .github/workflows/remote-dev-bot.yml
       - .github/workflows/agent.yml
+      - .github/workflows/dogfood.yml

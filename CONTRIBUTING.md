@@ -115,11 +115,23 @@ already covers all user customisation needs.
 
 | Branch | Purpose | Who points here |
 |--------|---------|-----------------|
-| `main` | Stable, released, tagged | External users' shims |
-| `dev` | Long-lived integration branch, accumulates work ahead of `main` | Owner's own repo shims |
+| `main` | Stable, released, tagged | External users' shims (`agent.yml@main`) |
+| `dev` | Long-lived integration branch, accumulates work ahead of `main` | `dogfood.yml@dev` (rdb self-dev) |
 | `e2e-test` | Ephemeral test pointer, reset by e2e scripts before each test run | `remote-dev-bot-test` shim |
 
 **PRs go to `dev`, not `main`**, unless the change is a hotfix to something already released. When `dev` is ready to release: run the full test suite (with `e2e-test` pointing at `dev`), then merge `dev` → `main` and tag.
+
+### Dogfood shim (`dogfood.yml`)
+
+`agent.yml` in this repo points at `@main` — it is the canonical shim users copy, so it must stay stable. To test pre-release features from `dev` against rdb's own issues, use the `/dogfood` command instead of `/agent`:
+
+```
+/dogfood                        — resolve with default model (uses dev branch)
+/dogfood-resolve-claude-large   — resolve with a specific model
+/dogfood-design                 — design analysis
+```
+
+`dogfood.yml` is internal to this repo and is never distributed to users.
 
 ## Dev Cycle
 
