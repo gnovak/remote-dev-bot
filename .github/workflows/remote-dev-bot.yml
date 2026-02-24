@@ -11,6 +11,12 @@ name: Resolve Issue
 
 on:
   workflow_call:
+    inputs:
+      rdb_ref:
+        description: 'Branch or tag of remote-dev-bot to use for config and lib files. Must match the @ref used in the shim''s `uses:` line.'
+        required: false
+        default: 'main'
+        type: string
     secrets:
       ANTHROPIC_API_KEY:
         required: false
@@ -56,22 +62,12 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
-      - name: Set config ref from workflow branch
-        run: |
-          # github.workflow_ref = "owner/repo/.github/workflows/remote-dev-bot.yml@refs/heads/dev"
-          # Extract the part after "@" and strip "refs/heads/" or "refs/tags/" prefix.
-          WF="${{ github.workflow_ref }}"
-          BRANCH="${WF##*@}"
-          BRANCH="${BRANCH#refs/heads/}"
-          BRANCH="${BRANCH#refs/tags/}"
-          echo "RDB_CONFIG_REF=${BRANCH:-main}" >> "$GITHUB_ENV"
-
       - name: Checkout remote-dev-bot config
         uses: actions/checkout@v4
         with:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ env.RDB_CONFIG_REF }}
+          ref: ${{ inputs.rdb_ref }}
           path: .remote-dev-bot
           sparse-checkout: |
             /remote-dev-bot.yaml
@@ -472,22 +468,12 @@ jobs:
       - name: Checkout target repository
         uses: actions/checkout@v4
 
-      - name: Set config ref from workflow branch
-        run: |
-          # github.workflow_ref = "owner/repo/.github/workflows/remote-dev-bot.yml@refs/heads/dev"
-          # Extract the part after "@" and strip "refs/heads/" or "refs/tags/" prefix.
-          WF="${{ github.workflow_ref }}"
-          BRANCH="${WF##*@}"
-          BRANCH="${BRANCH#refs/heads/}"
-          BRANCH="${BRANCH#refs/tags/}"
-          echo "RDB_CONFIG_REF=${BRANCH:-main}" >> "$GITHUB_ENV"
-
       - name: Checkout remote-dev-bot config
         uses: actions/checkout@v4
         with:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ env.RDB_CONFIG_REF }}
+          ref: ${{ inputs.rdb_ref }}
           path: .remote-dev-bot
           sparse-checkout: |
             /remote-dev-bot.yaml
