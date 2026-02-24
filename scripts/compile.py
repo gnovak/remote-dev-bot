@@ -2,10 +2,11 @@
 """Compile self-contained workflows from the reusable workflow + shim.
 
 Reads the reusable workflow (remote-dev-bot.yml), the shim (agent.yml), and config
-(remote-dev-bot.yaml), then produces compiled files:
+(remote-dev-bot.yaml), then produces three compiled files:
 
   dist/agent-resolve.yml  — triggers on /agent-resolve[-<model>]
   dist/agent-design.yml   — triggers on /agent-design[-<model>]
+  dist/agent-review.yml   — triggers on /agent-review[-<model>]
 
 Each compiled file is self-contained: inlined config, no cross-repo checkout,
 uses github.token by default (RDB_PAT_TOKEN and GitHub App optional).
@@ -487,6 +488,108 @@ def compile_design(shim, workflow, config_yaml, output_path):
     return output_path
 
 
+def compile_review(shim, workflow, config_yaml, output_path):
+    """Compile the review mode workflow (agent-review.yml)."""
+    security_roles = extract_security_gate(shim)
+    review_steps = workflow["jobs"]["review"]["steps"]
+
+    steps = []
+
+    # Generate app token (optional — only runs if RDB_APP_ID is set)
+    steps.append({
+        "name": "Generate app token",
+        "if": "vars.RDB_APP_ID != ''",
+        "uses": "actions/create-github-app-token@v1",
+        "id": "app-token",
+        "with": {
+            "app-id": "${{ vars.RDB_APP_ID }}",
+            "private-key": "${{ secrets.RDB_APP_PRIVATE_KEY }}",
+        },
+    })
+
+    # Checkout
+    steps.append({
+        "name": "Checkout repository",
+        "uses": "actions/checkout@v4",
+        "with": {"token": "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"},
+    })
+
+    # Set up Python
+    steps.append(find_step(review_steps, "Set up Python").copy())
+
+    # Parse config (inline, review mode)
+    steps.append({
+        "name": "Parse config and model alias",
+        "id": "parse",
+        "env": {"COMMENT": "${{ github.event.comment.body }}"},
+        "run": inline_config_parsing(config_yaml, "review"),
+    })
+
+    # Determine API key
+    steps.append(find_step(review_steps, "Determine API key").copy())
+
+    # React to comment (from parse job — the shared setup)
+    parse_steps = workflow["jobs"]["parse"]["steps"]
+    react_step = find_step(parse_steps, "React to comment").copy()
+    react_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
+    steps.append(react_step)
+
+    # Assign commenter to issue (from parse job)
+    assign_step = find_step(parse_steps, "Assign commenter to issue").copy()
+    assign_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
+    steps.append(assign_step)
+
+    # Install OpenHands
+    steps.append(find_step(review_steps, "Install OpenHands").copy())
+
+    # Inject security guardrails (includes review microagent)
+    steps.append(find_step(review_steps, "Inject security guardrails").copy())
+
+    # Review pull request (strip internal canary var, update token)
+    review_step = find_step(review_steps, "Review pull request").copy()
+    review_step["env"] = {k: v for k, v in review_step["env"].items()
+                          if k != "SANDBOX_ENV_E2E_TEST_TOKEN"}
+    review_step["env"]["GITHUB_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
+    steps.append(review_step)
+
+    # Post review comment (update token)
+    post_step = find_step(review_steps, "Post review comment").copy()
+    post_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
+    steps.append(post_step)
+
+    # Upload artifact
+    steps.append(find_step(review_steps, "Upload output artifact").copy())
+
+    # Calculate and post cost (update token)
+    cost_step = find_step(review_steps, "Calculate and post cost").copy()
+    cost_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
+    steps.append(cost_step)
+
+    # Fix needs.parse.outputs -> steps.parse.outputs (compiled is single-job)
+    _rewrite_needs_refs(steps)
+
+    apply_block_scalars(steps)
+
+    job = build_base_job(security_roles, "/agent-review")
+    job["steps"] = steps
+
+    compiled = {
+        "name": "Remote Dev Bot — Review (Compiled)",
+        "on": shim["on"],
+        "permissions": shim["permissions"],
+        "jobs": {"review": job},
+    }
+
+    header = make_header("review")
+    yaml_str = generate_output_yaml(compiled, security_roles)
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as f:
+        f.write(header + yaml_str)
+
+    return output_path
+
+
 def _rewrite_needs_refs(steps):
     """Rewrite needs.parse.outputs.X -> steps.parse.outputs.X in step values.
 
@@ -538,6 +641,12 @@ def main():
         os.path.join(output_dir, "agent-design.yml")
     )
     print(f"Compiled design workflow: {design_path}")
+
+    review_path = compile_review(
+        shim, workflow, config_yaml,
+        os.path.join(output_dir, "agent-review.yml")
+    )
+    print(f"Compiled review workflow: {review_path}")
 
     return 0
 

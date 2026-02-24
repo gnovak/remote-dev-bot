@@ -44,6 +44,10 @@ modes:
       haven't seen, or assume how unshared code works. Acknowledging what
       you cannot see is more useful than a confident answer based on guesses.
 
+  review:
+    action: review            # Run OpenHands on the PR, post review as a PR comment (no code changes)
+    default_model: claude-small
+
 models:
   claude-small:
     id: anthropic/claude-sonnet-4-5
