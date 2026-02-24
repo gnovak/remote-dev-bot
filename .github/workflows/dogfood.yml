@@ -1,0 +1,42 @@
+# Dogfood shim — for rdb self-development only. NOT for users.
+#
+# Fires on /dogfood[-<mode>[-<model>]] comments and calls remote-dev-bot.yml@dev,
+# so rdb can test pre-release features against its own issues without changing agent.yml
+# (which users copy and which must always point at @main).
+#
+# Usage:
+#   /dogfood                      — resolve with default model, dev branch
+#   /dogfood-resolve-claude-large — resolve with a specific model
+#   /dogfood-design               — design analysis, dev branch
+#
+# Only repo owners/collaborators/members can trigger this (same gate as agent.yml).
+
+name: Remote Dev Bot (dogfood)
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  resolve:
+    if: >
+      (github.event.issue || github.event.pull_request) &&
+      (startsWith(github.event.comment.body, '/dogfood-') || startsWith(github.event.comment.body, '/dogfood ') || github.event.comment.body == '/dogfood') &&
+      contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), github.event.comment.author_association)
+    uses: gnovak/remote-dev-bot/.github/workflows/remote-dev-bot.yml@dev
+    with:
+      rdb_ref: dev
+      command_prefix: dogfood
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      RDB_PAT_TOKEN: ${{ secrets.RDB_PAT_TOKEN }}
+      RDB_APP_PRIVATE_KEY: ${{ secrets.RDB_APP_PRIVATE_KEY }}
