@@ -319,6 +319,11 @@ def compile_resolve(shim, workflow, config_yaml, output_path):
     amend_step = find_step(resolve_steps, "Amend commit with model info").copy()
     steps.append(amend_step)
 
+    # Add model info to PR description
+    pr_desc_step = find_step(resolve_steps, "Add model info to PR description").copy()
+    pr_desc_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
+    steps.append(pr_desc_step)
+
     # Upload artifact
     steps.append(find_step(resolve_steps, "Upload output artifact").copy())
 

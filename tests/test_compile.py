@@ -127,6 +127,14 @@ def test_resolve_has_commit_trailer_config(compiled_dir):
     assert "commit_trailer" in content
 
 
+def test_resolve_has_pr_description_step(compiled_dir):
+    """Resolve mode should add model info to PR description."""
+    content = _read_text(compiled_dir / "agent-resolve.yml")
+    assert "Add model info to PR description" in content
+    assert "gh pr edit" in content
+    assert "Model:" in content
+
+
 # --- Design-specific ---
 
 
@@ -342,6 +350,7 @@ EXPECTED_RESOLVE_STEPS = [
     "Resolve issue",
     "Create pull request",
     "Amend commit with model info",
+    "Add model info to PR description",
     "Upload output artifact",
     "Calculate and post cost",
 ]
