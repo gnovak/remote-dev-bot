@@ -250,13 +250,23 @@ jobs:
           ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          # Check whether the agent considered itself successful
+          # Check whether the agent considered itself successful.
+          # Override success=false if the agent hit max iterations (error field
+          # contains "Agent reached maximum iteration") because the completion
+          # function (LLM call) can false-positive when the agent did substantial
+          # work but ran out of iterations mid-task.
           SUCCESS=$(python3 -c "
           import json, os, sys
           path = 'output/output.jsonl'
           if os.path.exists(path):
               data = json.loads(open(path).read())
-              print('true' if data.get('success') else 'false')
+              error = data.get('error') or ''
+              if 'Agent reached maximum iteration' in error:
+                  # Agent hit max iterations - treat as failure regardless of
+                  # what the completion function returned
+                  print('false')
+              else:
+                  print('true' if data.get('success') else 'false')
           else:
               print('unknown')
           " 2>/dev/null || echo "unknown")

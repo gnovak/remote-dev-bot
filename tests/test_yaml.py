@@ -112,6 +112,107 @@ def test_resolve_yml_injects_security_guardrails(resolve_yml):
     assert "NEVER output, print, log, echo" in resolve_yml
 
 
+def test_resolve_yml_has_max_iterations_override(resolve_yml):
+    """Verify the workflow overrides success=false when agent hits max iterations.
+
+    This is a workaround for the completion function false-positive issue where
+    the LLM-based completion check can return success=true even when the agent
+    hit max iterations mid-task.
+    """
+    assert "Agent reached maximum iteration" in resolve_yml
+    # Verify the logic checks the error field
+    assert "error = data.get('error')" in resolve_yml or "data.get('error')" in resolve_yml
+
+
+class TestMaxIterationsSuccessOverride:
+    """Test the success detection logic that overrides false-positives from the completion function.
+
+    When the agent hits max iterations, the error field in output.jsonl contains
+    "Agent reached maximum iteration". The workflow should treat this as a failure
+    regardless of what the completion function (LLM call) returned.
+    """
+
+    def determine_success(self, data):
+        """Mirrors the Python logic in remote-dev-bot.yml for determining success."""
+        error = data.get('error') or ''
+        if 'Agent reached maximum iteration' in error:
+            return 'false'
+        else:
+            return 'true' if data.get('success') else 'false'
+
+    def test_normal_success(self):
+        """Normal success case - no error, success=true."""
+        data = {'success': True, 'error': None}
+        assert self.determine_success(data) == 'true'
+
+    def test_normal_failure(self):
+        """Normal failure case - no error, success=false."""
+        data = {'success': False, 'error': None}
+        assert self.determine_success(data) == 'false'
+
+    def test_max_iterations_overrides_success_true(self):
+        """Max iterations should override success=true to false.
+
+        This is the key fix: when the completion function false-positives
+        (returns success=true even though agent hit max iterations), we
+        override it to false.
+        """
+        data = {
+            'success': True,  # Completion function said success
+            'error': 'RuntimeError: Agent reached maximum iteration. Current iteration: 50, max iteration: 50'
+        }
+        assert self.determine_success(data) == 'false'
+
+    def test_max_iterations_with_success_false(self):
+        """Max iterations with success=false should remain false."""
+        data = {
+            'success': False,
+            'error': 'RuntimeError: Agent reached maximum iteration. Current iteration: 50, max iteration: 50'
+        }
+        assert self.determine_success(data) == 'false'
+
+    def test_other_error_with_success_true(self):
+        """Other errors should not override success=true.
+
+        Only max iterations errors should override success. Other errors
+        (like crashes) should respect the completion function's judgment.
+        """
+        data = {
+            'success': True,
+            'error': 'Some other error occurred'
+        }
+        assert self.determine_success(data) == 'true'
+
+    def test_other_error_with_success_false(self):
+        """Other errors with success=false should remain false."""
+        data = {
+            'success': False,
+            'error': 'Some other error occurred'
+        }
+        assert self.determine_success(data) == 'false'
+
+    def test_empty_error_string(self):
+        """Empty error string should not affect success."""
+        data = {'success': True, 'error': ''}
+        assert self.determine_success(data) == 'true'
+
+    def test_none_error(self):
+        """None error should not affect success."""
+        data = {'success': True, 'error': None}
+        assert self.determine_success(data) == 'true'
+
+    def test_budget_exceeded_does_not_override(self):
+        """Budget exceeded error should not override success.
+
+        Only max iterations should trigger the override, not budget limits.
+        """
+        data = {
+            'success': True,
+            'error': 'RuntimeError: Agent reached maximum budget for conversation'
+        }
+        assert self.determine_success(data) == 'true'
+
+
 def test_agent_yml_has_author_association_gate():
     """Verify the shim requires trusted author_association."""
     for path in [
