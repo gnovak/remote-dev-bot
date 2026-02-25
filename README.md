@@ -16,6 +16,8 @@ There are already excellent vendor-specific implementations of this pattern (Git
 
 Or use `/agent-design` to get AI design analysis posted as a comment (no code changes).
 
+Or use `/agent-review` on a pull request to get an AI code review posted as a comment (no code changes).
+
 **See it in action:**
 
 - **Simple resolve:** [Issue #33](https://github.com/gnovak/remote-dev-bot/issues/33) asked for model name documentation → [PR #52](https://github.com/gnovak/remote-dev-bot/pull/52) was created and merged autonomously.
@@ -32,6 +34,8 @@ Or use `/agent-design` to get AI design analysis posted as a comment (no code ch
 | `/agent-resolve-claude-large` | Resolve with a specific model |
 | `/agent-design` | Post design analysis as a comment (no code changes) |
 | `/agent-design-claude-large` | Design analysis with a specific model |
+| `/agent-review` | Post a code review comment on a PR (no code changes) |
+| `/agent-review-claude-large` | Code review with a specific model |
 
 Modes and model aliases are configured in `remote-dev-bot.yaml`.
 
