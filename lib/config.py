@@ -48,6 +48,7 @@ ALLOWED_ARGS = {
     "max_iterations": int,  # openhands.max_iterations
     "context": list,  # mode's context_files (alias)
     "context_files": list,  # mode's context_files
+    "target_branch": str,  # openhands.target_branch
 }
 
 
@@ -368,6 +369,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     # Apply command-line arg overrides
     if "max_iterations" in args:
         max_iter = args["max_iterations"]
+    if "target_branch" in args:
+        target_branch = args["target_branch"]
 
     result = {
         "mode": mode,
