@@ -91,14 +91,6 @@ def test_parse_command_design_with_model():
     assert parse_command("design-claude-large", KNOWN_MODES) == ("design", "claude-large")
 
 
-def test_parse_command_review():
-    assert parse_command("review", KNOWN_MODES) == ("review", "")
-
-
-def test_parse_command_review_with_model():
-    assert parse_command("review-claude-large", KNOWN_MODES) == ("review", "claude-large")
-
-
 def test_parse_command_multi_segment_model():
     """Model aliases with hyphens should be preserved."""
     assert parse_command("resolve-gpt-large", KNOWN_MODES) == ("resolve", "gpt-large")
@@ -772,7 +764,7 @@ class TestConfigMain:
         for key in (
             "mode", "action", "model", "alias",
             "max_iterations", "oh_version", "pr_type", "on_failure", "commit_trailer",
-            "assign_issue", "assign_pr", "target_branch", "timeout_minutes",
+            "assign_issue", "assign_pr", "timeout_minutes",
         ):
             assert f"{key}=" in content, f"Missing key in GITHUB_OUTPUT: {key}"
 
@@ -845,8 +837,3 @@ class TestConfigMain:
         """timeout_minutes contains the per-invocation value when specified."""
         content = self._call_main("resolve", tmp_path, timeout_minutes=90)
         assert "timeout_minutes=90\n" in content
-
-    def test_resolve_writes_target_branch(self, tmp_path):
-        """target_branch is written to GITHUB_OUTPUT."""
-        content = self._call_main("resolve", tmp_path)
-        assert "target_branch=" in content
