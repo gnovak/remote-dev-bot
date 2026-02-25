@@ -6,19 +6,6 @@ Project conventions for AI coding agents working on this repository.
 
 Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to resolve issues and create PRs, controlled via `/agent-resolve` and `/agent-design` comments on GitHub issues.
 
-### Key Files
-- `remote-dev-bot.yaml` — model aliases and OpenHands settings
-- `runbook.md` — setup instructions (designed to be followed by humans or AI assistants)
-- `.github/workflows/remote-dev-bot.yml` — the reusable workflow (all the real logic)
-- `.github/workflows/agent.yml` — thin shim that calls remote-dev-bot.yml (users copy this; points at @main)
-- `.github/workflows/dogfood.yml` — internal shim for rdb self-dev; fires on /dogfood commands, points at @dev
-- `.github/workflows/test.yml` — CI: runs pytest on PRs to main
-- `.github/workflows/e2e.yml` — manual trigger for E2E tests
-- `lib/config.py` — config parsing logic (used by remote-dev-bot.yml and unit tests)
-- `scripts/compile.py` — compiles two self-contained workflows (`dist/agent-resolve.yml`, `dist/agent-design.yml`)
-- `tests/` — pytest unit tests and E2E test script
-- `.openhands/microagents/repo.md` — (in target repos) context for the agent
-
 ### How It Works
 1. User comments `/agent-resolve[-<model>]` or `/agent-design[-<model>]` on a GitHub issue
 2. Target repo's shim workflow calls `remote-dev-bot.yml` from this repo
@@ -26,7 +13,98 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 4. Resolve mode: OpenHands runs, edits code, opens a draft PR. Design mode: LLM analyzes the issue, posts a comment.
 5. Iterative: comment `/agent-resolve` again on the PR with feedback for another pass
 
-### Branch Model
+### Key Files
+
+**Workflows** (`.github/workflows/`):
+- `remote-dev-bot.yml` — the reusable workflow; all real logic; jobs: `parse`, `resolve`, `design`, `review`, `explore`
+- `agent.yml` — thin shim users copy into their repos; calls `remote-dev-bot.yml@main`
+- `dogfood.yml` — internal shim for rdb self-dev; fires on `/dogfood` comments; calls `remote-dev-bot.yml@dev`
+- `test.yml` — CI: runs pytest on PRs to main
+- `e2e.yml` — manual trigger for E2E tests against `remote-dev-bot-test`
+- `e2e-security.yml` — manual trigger for security E2E tests (verifies collaborator gate blocks outsiders)
+- `full-test-suite.yml` — runs unit tests + all E2E tests together
+
+**Python**:
+- `lib/config.py` — config parsing: `parse_invocation`, `parse_args`, `resolve_config`, `ALLOWED_ARGS`; called by the workflow and unit tests
+- `lib/feedback.py` — install feedback collection: `InstallReport`, `InstallProblem`, `report_problems`; used during runbook execution
+- `scripts/compile.py` — compiles `remote-dev-bot.yml` → `dist/agent-resolve.yml`, `dist/agent-design.yml`; finds steps by **name** not index
+
+**Tests** (`tests/`):
+- `test_config.py` — unit tests for all `lib/config.py` functions
+- `test_compile.py` — tests that compiled outputs contain expected steps
+- `test_yaml.py` — structural/validity tests for YAML files (workflow and config)
+- `test_cost.py` — tests for the `parse_litellm_logs` Python function embedded in the workflow's cost step; extracts it from the YAML at test time
+- `test_feedback.py` — unit tests for `lib/feedback.py`
+- `e2e.sh` — full E2E test runner; creates issues in `remote-dev-bot-test`, triggers runs, checks results
+- `e2e-security.sh` — security-specific E2E tests
+
+**Config**:
+- `remote-dev-bot.yaml` — model aliases and OpenHands settings (canonical config; also serves as template for user repos)
+- `remote-dev-bot.local.yaml` — local overrides (gitignored); use for dev without affecting CI
+- `runbook.md` — setup instructions designed to be followed by humans or AI assistants
+
+### Running Tests
+
+```bash
+# All unit tests
+pytest tests/ -q
+
+# Specific test file
+pytest tests/test_config.py -v
+pytest tests/test_compile.py -v    # Run after any workflow or compile.py changes
+
+# With doctests
+pytest --doctest-modules lib/config.py
+```
+
+## Common Tasks — Where to Look
+
+### Adding a new per-invocation argument (e.g., `foo_bar = value` in a comment)
+1. Add to `ALLOWED_ARGS` in `lib/config.py` (name → type)
+2. Add handling in `resolve_config()` where other args are applied (search for `if "target_branch" in args` as an example)
+3. If it produces a workflow output, add it to the `GITHUB_OUTPUT` writes in `main()`
+4. Add tests in `tests/test_config.py`
+5. **Data flow**: comment body → `parse_invocation` → `parse_args` → `ALLOWED_ARGS` validation → `resolve_config` → `main`
+
+### Adding or modifying a workflow step
+1. Edit the step in `.github/workflows/remote-dev-bot.yml`
+2. Update `scripts/compile.py` if the step needs to appear in compiled output (compile.py finds steps by name)
+3. Update expected step lists in `tests/test_compile.py` — the step-count tripwire tests will fail if the compiled output doesn't match
+4. Run `pytest tests/test_compile.py -v` to verify
+
+### Adding a new mode
+1. Add the mode to `remote-dev-bot.yaml` under `modes:` with an `action:` field
+2. Add a job to `.github/workflows/remote-dev-bot.yml`
+3. `resolve_config()` in `lib/config.py` reads the mode's config from the YAML — no code change needed unless the mode has a novel output field
+
+### Changing the cost/metrics step
+The `parse_litellm_logs` Python function lives inside a bash heredoc in the "Calculate and post cost" step of `remote-dev-bot.yml`. `test_cost.py` extracts it directly from the YAML at test time, so tests always exercise the live code. After changing the step, run `pytest tests/test_cost.py -v`.
+
+## Inline Args System
+
+Users can pass per-invocation arguments on lines after the command:
+```
+/agent resolve
+max iterations = 75
+context = extra-file.md
+target branch = design/gemini
+```
+
+**How it flows:**
+- `COMMENT_BODY` env var carries the full comment text into `lib/config.py`
+- `parse_invocation(comment_body, known_modes, command_prefix)` splits the first line (command) from subsequent lines (args)
+- `parse_args(lines)` parses `name = value` lines; `normalize_arg_name` maps spaces/dashes/underscores to underscores
+- `ALLOWED_ARGS` in `lib/config.py` defines accepted names and types; unknown names are rejected with an error
+- `resolve_config(..., args=...)` applies parsed args on top of YAML config
+- `context` is an alias for `context_files`; it **appends** to the mode's existing list (does not replace)
+
+## compile.py: Two-File Output
+
+`scripts/compile.py` inlines config parsing and selected steps from `remote-dev-bot.yml` into two standalone files: `dist/agent-resolve.yml` and `dist/agent-design.yml`. It finds steps by **name** (not index), so reordering steps is safe as long as step names don't change.
+
+**Rule: if you add, remove, or rename a step in remote-dev-bot.yml, update compile.py to match**, then run `pytest tests/test_compile.py -v`. The step-count tripwire tests will catch mismatches.
+
+## Branch Model
 
 | Branch | Purpose | Who points here |
 |--------|---------|-----------------|
@@ -34,9 +112,9 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 | `dev` | Long-lived integration branch, accumulates work ahead of `main` | Owner's own repo shims |
 | `e2e-test` | Ephemeral pointer, reset by e2e scripts before each test run | `remote-dev-bot-test` shim |
 
-**Normal flow:** feature branches → PR → merge to `dev`. When `dev` is ready to release: run full test suite (with `e2e-test` pointing at `dev`), then merge `dev` → `main` and tag.
+**PRs go to `dev`, not `main`**, unless the change is a hotfix or doc/config-only (can't break anything).
 
-**PRs go to `dev`, not `main`**, unless the change is a hotfix to something already released.
+**Bug-fix workflow:** fix on branch off `main` → PR → merge to `main` → rebase `dev` onto new `main`.
 
 ### Dev Cycle (detailed)
 
@@ -50,15 +128,14 @@ This project has an unusual dev cycle because GitHub Actions only runs workflows
 - `e2e-test` is NOT a development branch. It's an ephemeral pointer reset before each e2e run.
 - Before testing, force-set `e2e-test` to your feature branch: `git push --force-with-lease origin my-feature:e2e-test`
 - The test repo's shim calls `remote-dev-bot.yml@e2e-test`, so it picks up whatever `e2e-test` points to.
-- Only one feature can be tested at a time (since there's only one `e2e-test` pointer).
 
 **Config/lib checkout is self-referential:**
 - `remote-dev-bot.yml` reads `github.workflow_ref` to detect which branch it was called from, then checks out `remote-dev-bot.yaml` and `lib/` from that same branch
-- This means changes to `lib/config.py` or `remote-dev-bot.yaml` on your feature branch take effect automatically when `e2e-test` points at your branch — no separate PR needed
+- Changes to `lib/config.py` or `remote-dev-bot.yaml` on your feature branch take effect automatically when `e2e-test` points at your branch
 
 **Full dev cycle:**
 1. Create a feature branch from `dev`: `git checkout -b my-feature dev`
-2. Make changes, commit freely (work log mode)
+2. Make changes, commit freely
 3. Point `e2e-test` at your branch: `git push --force-with-lease origin my-feature:e2e-test`
 4. In `remote-dev-bot-test`: create an issue, comment `/agent-resolve-claude-small`
 5. Monitor: `gh run list --repo gnovak/remote-dev-bot-test --workflow=agent.yml --limit 3`
@@ -81,14 +158,8 @@ gh run view RUN_ID --repo gnovak/remote-dev-bot-test --log | tail -40
 
 ## PR Policy
 
-- **All changes go through a PR. Never commit or push directly to main.** Open a PR and let the user merge it. This keeps GitHub's PR list as a complete, searchable record of every change.
+- **All changes go through a PR. Never commit or push directly to main.** Open a PR and let the user merge it.
 - For small changes, a single-commit PR self-merged immediately is fine — the point is the artifact, not the review ceremony.
-
-## Compiler: two-file output
-
-`scripts/compile.py` produces two compiled workflows: `dist/agent-resolve.yml` and `dist/agent-design.yml`. It finds steps by **name** (not index), so reordering steps in remote-dev-bot.yml is safe as long as step names don't change.
-
-**Rule: if you add, remove, or rename a step in remote-dev-bot.yml, update compile.py to match.** Run `pytest tests/test_compile.py -v` after changes — the step-count tripwire tests (`test_resolve_step_count`, `test_design_step_count`) will fail if the compiled output doesn't match the expected step list, forcing you to update both `compile.py` and the expected step lists in `test_compile.py`.
 
 ## Code Style
 - Follow existing patterns in the codebase
