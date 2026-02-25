@@ -190,6 +190,12 @@ def test_parse_args_max_iterations():
     assert parse_args(["max_iterations=50"]) == {"max_iterations": 50}
 
 
+def test_parse_args_target_branch():
+    """target_branch should be parsed as str."""
+    assert parse_args(["target_branch = design/gemini"]) == {"target_branch": "design/gemini"}
+    assert parse_args(["target branch = my-feature"]) == {"target_branch": "my-feature"}
+
+
 def test_parse_args_context_files():
     """context_files should be parsed as list."""
     assert parse_args(["context = file1.txt file2.txt"]) == {"context_files": ["file1.txt", "file2.txt"]}
@@ -913,6 +919,13 @@ def test_resolve_config_args_context_files_appends_to_mode_config(config_dir):
 
     result = resolve_config(base_path, "nonexistent.yaml", "design", args={"context_files": ["custom.txt"]})
     assert result["context_files"] == ["README.md", "AGENTS.md", "custom.txt"]
+
+
+def test_resolve_config_args_target_branch(config_dir):
+    """args can override target_branch."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={"target_branch": "design/gemini"})
+    assert result["target_branch"] == "design/gemini"
 
 
 def test_resolve_config_args_empty_dict(config_dir):
