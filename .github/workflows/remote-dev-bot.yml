@@ -1457,8 +1457,83 @@ jobs:
               tool_calls = getattr(message, 'tool_calls', None)
 
               if not tool_calls:
-                  # No tool calls - model is done (or gave up)
-              
+                  # No tool calls — model is done or gave up without submitting
+                  print("No tool calls — stopping loop")
+                  break
+
+              # Add assistant message with tool calls to conversation
+              messages.append({
+                  "role": "assistant",
+                  "content": message.content,
+                  "tool_calls": [tc.dict() for tc in tool_calls],
+              })
+
+              # Process each tool call and add results to conversation
+              done = False
+              for tool_call in tool_calls:
+                  tool_name = tool_call.function.name
+                  try:
+                      arguments = json.loads(tool_call.function.arguments)
+                  except json.JSONDecodeError:
+                      arguments = {}
+
+                  print(f"  Tool: {tool_name}({list(arguments.keys())})")
+                  result = execute_tool(tool_name, arguments)
+
+                  # submit_analysis signals end of exploration — capture and break
+                  if tool_name == "submit_analysis":
+                      final_analysis = result
+                      done = True
+
+                  messages.append({
+                      "role": "tool",
+                      "tool_call_id": tool_call.id,
+                      "content": result,
+                  })
+
+              if done:
+                  break
+
+          # Save usage data for the cost comment step
+          with open("/tmp/llm_usage.json", "w") as f:
+              json.dump({
+                  "input_tokens": total_input_tokens,
+                  "output_tokens": total_output_tokens,
+                  "cost": total_cost,
+                  "iterations": (iteration + 1) if max_iterations > 0 else 0,
+              }, f)
+
+          # Write analysis for the post-comment step (prefer submit_analysis, fall back to last response)
+          analysis = final_analysis or last_response or ""
+          if analysis:
+              with open("/tmp/explore_analysis.txt", "w") as f:
+                  f.write(analysis)
+          PYEOF
+
+      - name: Post analysis comment
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          MODEL="${{ needs.parse.outputs.model }}"
+
+          if [ -f /tmp/explore_analysis.txt ]; then
+            {
+              cat /tmp/explore_analysis.txt
+              echo ""
+              echo "---"
+              echo "_Exploration by \`/agent-explore-${ALIAS}\` (${MODEL})_"
+            } > /tmp/analysis_comment.md
+
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/analysis_comment.md
+          else
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body "⚠️ **Exploration did not produce an analysis.** The agent may have exhausted all iterations without calling \`submit_analysis\`. See the [workflow run logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+          fi
 
       - name: Post cost comment
         if: always()
