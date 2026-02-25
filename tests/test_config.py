@@ -1020,6 +1020,55 @@ def test_resolve_config_args_none(config_dir):
     assert result["max_iterations"] == 50  # default from config
 
 
+# --- resolve_config: timeout_minutes ---
+
+
+def test_resolve_config_timeout_hardcoded_default(config_dir):
+    """timeout_minutes falls back to hardcoded default (120) when not in yaml or per-invocation."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["timeout_minutes"] == 120
+
+
+def test_resolve_config_timeout_yaml_default(config_dir):
+    """timeout_minutes from yaml config is used when no per-invocation override."""
+    tmp_path, base_path = config_dir
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["openhands"]["timeout_minutes"] = 90
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["timeout_minutes"] == 90
+
+
+def test_resolve_config_timeout_per_invocation_overrides_yaml(config_dir):
+    """Per-invocation timeout_minutes overrides the yaml default."""
+    tmp_path, base_path = config_dir
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["openhands"]["timeout_minutes"] = 90
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", timeout_minutes=240)
+    assert result["timeout_minutes"] == 240
+
+
+def test_resolve_config_timeout_per_invocation_no_yaml(config_dir):
+    """Per-invocation timeout works even without yaml default."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", timeout_minutes=30)
+    assert result["timeout_minutes"] == 30
+
+
+def test_resolve_config_timeout_with_model(config_dir):
+    """Per-invocation timeout works alongside model alias."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve-claude-large", timeout_minutes=90)
+    assert result["timeout_minutes"] == 90
+    assert result["alias"] == "claude-large"
+
+
 # --- main() — CLI entry point and GITHUB_OUTPUT writing ---
 
 
@@ -1032,10 +1081,13 @@ class TestConfigMain:
     giving realistic output values without needing to stub the config layer.
     """
 
-    def _call_main(self, command, tmp_path):
+    def _call_main(self, command, tmp_path, timeout_minutes=None):
         """Run main() with command; return GITHUB_OUTPUT file contents."""
         output_file = tmp_path / "github_output"
-        with patch("sys.argv", ["config.py", command]), patch.dict(
+        argv = ["config.py", command]
+        if timeout_minutes is not None:
+            argv.extend(["--timeout-minutes", str(timeout_minutes)])
+        with patch("sys.argv", argv), patch.dict(
             os.environ, {"GITHUB_OUTPUT": str(output_file)}
         ):
             main()
@@ -1047,7 +1099,7 @@ class TestConfigMain:
         for key in (
             "mode", "action", "model", "alias",
             "max_iterations", "oh_version", "pr_type", "on_failure", "commit_trailer",
-            "assign_issue", "assign_pr",
+            "assign_issue", "assign_pr", "timeout_minutes",
         ):
             assert f"{key}=" in content, f"Missing key in GITHUB_OUTPUT: {key}"
 
@@ -1185,3 +1237,19 @@ class TestConfigMain:
         ):
             main()
         assert exc.value.code == 1
+
+    def test_timeout_minutes_passed_via_argparse(self, tmp_path):
+        """--timeout-minutes is a separate argparse flag, not embedded in command."""
+        content = self._call_main("resolve-claude-large", tmp_path, timeout_minutes=45)
+        assert "timeout_minutes=45\n" in content
+        assert "alias=claude-large\n" in content
+
+    def test_timeout_minutes_default_when_not_specified(self, tmp_path):
+        """timeout_minutes is the hardcoded default (120) when not specified."""
+        content = self._call_main("resolve", tmp_path)
+        assert "timeout_minutes=120\n" in content
+
+    def test_timeout_minutes_value_when_specified(self, tmp_path):
+        """timeout_minutes contains the per-invocation value when specified."""
+        content = self._call_main("resolve", tmp_path, timeout_minutes=90)
+        assert "timeout_minutes=90\n" in content

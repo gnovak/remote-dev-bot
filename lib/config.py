@@ -4,10 +4,11 @@ Loads base config from remote-dev-bot repo, merges with optional
 per-repo override config, resolves model aliases and modes, and writes
 GitHub Actions outputs.
 
-Commands follow the pattern: /agent-<verb>[-<model>]
+Commands follow the pattern: /agent-<verb>[-<model>] [--timeout N]
   /agent-resolve           — resolve mode, default model
   /agent-resolve-claude-large — resolve mode, specific model
   /agent-design            — design mode, default model
+  /agent-resolve --timeout 120 — resolve mode, override timeout to 120 minutes
 
 Arguments can be passed on subsequent lines:
   /agent resolve
@@ -20,6 +21,7 @@ Values after = can be single values or space-separated lists.
 Called by remote-dev-bot.yml at runtime and imported directly by unit tests.
 """
 
+import argparse
 import json
 import os
 import re
@@ -47,6 +49,7 @@ ALLOWED_ARGS = {
     "context": list,  # mode's context_files (alias)
     "context_files": list,  # mode's context_files
     "target_branch": str,  # openhands.target_branch
+    "timeout_minutes": int,  # openhands.timeout_minutes (per-invocation override)
 }
 
 
@@ -226,7 +229,7 @@ def parse_command(command_string, known_modes):
         )
 
     # Normalize to lowercase for case-insensitive matching
-    command_string = command_string.lower()
+    command_string = command_string.lower().strip()
 
     parts = command_string.split("-", 1)
     verb = parts[0]
@@ -255,7 +258,10 @@ def resolve_commit_trailer(template, alias, model_id, oh_version):
     )
 
 
-def resolve_config(base_path, override_path, command_string, local_path=None, args=None):
+DEFAULT_TIMEOUT_MINUTES = 120
+
+
+def resolve_config(base_path, override_path, command_string, local_path=None, args=None, timeout_minutes=None):
     """Load configs, merge, resolve mode + alias, return outputs dict.
 
     Applies up to three config layers (each is optional):
@@ -265,9 +271,10 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ar
 
     command_string is the raw text after '/agent-' (e.g. 'resolve-claude-large').
     args is an optional dict of command-line argument overrides (e.g. {'max_iterations': 75}).
+    timeout_minutes is the per-invocation override (from --timeout-minutes flag or inline arg).
 
     Returns a dict with keys: mode, model, alias, max_iterations, oh_version,
-    pr_type, has_override, plus any mode-specific settings.
+    pr_type, has_override, timeout_minutes, plus any mode-specific settings.
     """
     if args is None:
         args = {}
@@ -355,6 +362,18 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ar
             f"openhands.graceful_wrapup.threshold must be between 0 and 1, got: {wrapup_threshold}"
         )
 
+    # Resolve timeout: per-invocation > yaml config > hardcoded default
+    # Per-invocation can come from inline arg (timeout = N) or --timeout-minutes flag.
+    # NOTE: GitHub Actions has a hard 6-hour limit. If a run legitimately needs
+    # more than 6 hours, set timeout-minutes in the calling workflow's job definition.
+    yaml_timeout = oh.get("timeout_minutes")
+    effective_timeout = timeout_minutes if timeout_minutes is not None else (args or {}).get("timeout_minutes")
+    resolved_timeout = (
+        effective_timeout if effective_timeout is not None
+        else (yaml_timeout if yaml_timeout is not None
+              else DEFAULT_TIMEOUT_MINUTES)
+    )
+
     # Mode settings
     action = mode_config.get("action", "pr")
 
@@ -383,6 +402,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ar
         "graceful_wrapup_enabled": wrapup_enabled,
         "graceful_wrapup_threshold": wrapup_threshold,
         "graceful_wrapup_iteration": wrapup_iteration,
+        "timeout_minutes": resolved_timeout,
     }
 
     # Include prompt_prefix if the mode defines one
@@ -434,9 +454,10 @@ def main():
     comment_body = os.environ.get("COMMENT_BODY", "")
     command_prefix = os.environ.get("COMMAND_PREFIX", "agent")
 
+    timeout_override = None
     try:
         if comment_body:
-            # New mode: parse full comment body with args
+            # New mode: parse full comment body with inline args (max_iterations, timeout, etc.)
             # First, we need to load config to get known_modes
             base_config = {}
             if os.path.exists(base_path):
@@ -453,13 +474,24 @@ def main():
             config = deep_merge(deep_merge(base_config, override_config), local_config)
             known_modes = set(config.get("modes", {}).keys())
 
-            mode, model_alias, args = parse_invocation(comment_body, known_modes, command_prefix)
+            mode, model_alias, parsed_args = parse_invocation(comment_body, known_modes, command_prefix)
             command_string = f"{mode}-{model_alias}" if model_alias else mode
-            result = resolve_config(base_path, override_path, command_string, local_path=local_path, args=args)
+            result = resolve_config(base_path, override_path, command_string, local_path=local_path, args=parsed_args)
+            timeout_override = (parsed_args or {}).get("timeout_minutes")
         else:
-            # Legacy mode: single command string argument
-            command_string = sys.argv[1] if len(sys.argv) > 1 else ""
-            result = resolve_config(base_path, override_path, command_string, local_path=local_path)
+            # Legacy mode: single command string + optional --timeout-minutes flag
+            parser = argparse.ArgumentParser(description="Remote Dev Bot config resolver")
+            parser.add_argument("command", nargs="?", default="",
+                                help="Command string following '/agent-'")
+            parser.add_argument("--timeout-minutes", type=int, default=None, metavar="N",
+                                help="Override job timeout in minutes for this invocation")
+            cli_args = parser.parse_args()
+            result = resolve_config(
+                base_path, override_path, cli_args.command,
+                local_path=local_path,
+                timeout_minutes=cli_args.timeout_minutes,
+            )
+            timeout_override = cli_args.timeout_minutes
     except (KeyError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
@@ -486,6 +518,7 @@ def main():
             f.write(f"commit_trailer={result['commit_trailer']}\n")
             f.write(f"graceful_wrapup_enabled={str(result['graceful_wrapup_enabled']).lower()}\n")
             f.write(f"graceful_wrapup_iteration={result['graceful_wrapup_iteration']}\n")
+            f.write(f"timeout_minutes={result['timeout_minutes']}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"
@@ -493,6 +526,8 @@ def main():
     print(f"Mode: {result['mode']} (action: {result['action']})")
     print(f"Model alias: {result['alias']}")
     print(f"Model ID: {result['model']}")
+    timeout_source = "per-invocation override" if timeout_override is not None else "default"
+    print(f"Timeout: {result['timeout_minutes']} minutes ({timeout_source})")
 
 
 if __name__ == "__main__":
