@@ -246,6 +246,7 @@ jobs:
           # TODO: consider soft-kill (signal agent to wrap up) — see issue #234
           # Run resolver and capture output for cost parsing.
           # LiteLLM prints JSON payloads to stdout when LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD=1.
+          echo $(date +%s) > /tmp/start_time
           timeout --kill-after=60 "$TIMEOUT_SECONDS" \
             python -m openhands.resolver.resolve_issue \
               --selected-repo "${{ github.repository }}" \
@@ -303,7 +304,10 @@ jobs:
           path = 'output/output.jsonl'
           if os.path.exists(path):
               data = json.loads(open(path).read())
-              print(data.get('result_explanation', '') or '')
+              val = data.get('result_explanation', '') or ''
+              if isinstance(val, list):
+                  val = '\n\n'.join(str(v) for v in val)
+              print(val)
           " 2>/dev/null || echo "")
 
             # Post a comment with the agent's evaluation
@@ -435,7 +439,7 @@ jobs:
           # Parse metrics from output/output.jsonl and/or LiteLLM logs.
           # OpenHands doesn't populate metrics (tracked upstream), so we fall back to parsing
           # LiteLLM's standard logging payload from the resolve step output.
-          read -r COST INPUT_TOKENS OUTPUT_TOKENS SOURCE < <(python3 << 'PYEOF'
+          read -r COST INPUT_TOKENS OUTPUT_TOKENS SOURCE ITERATIONS AGENT_STATE < <(python3 << 'PYEOF'
           import json, os
 
           def parse_litellm_logs(log_content):
@@ -478,8 +482,10 @@ jobs:
           input_tokens = 0
           output_tokens = 0
           source = "none"
+          iterations = 0
 
           path = "output/output.jsonl"
+          agent_state = "unknown"
           if os.path.exists(path):
               with open(path) as f:
                   data = json.loads(f.read().strip())
@@ -490,6 +496,14 @@ jobs:
               output_tokens = atu.get("completion_tokens", 0) or 0
               if cost > 0 or input_tokens > 0 or output_tokens > 0:
                   source = "openhands"
+              error = data.get("error", "") or ""
+              success = data.get("success")
+              if "reached maximum iteration" in str(error):
+                  agent_state = "hit_limit"
+              elif success is True:
+                  agent_state = "completed"
+              elif success is False:
+                  agent_state = "failed"
 
           # If OpenHands metrics are empty, try LiteLLM logs
           if source == "none" or (cost == 0 and input_tokens == 0 and output_tokens == 0):
@@ -502,18 +516,30 @@ jobs:
                       cost = result["total_cost"] or 0
                       input_tokens = result["input_tokens"]
                       output_tokens = result["output_tokens"]
+                      iterations = result["call_count"]
                       source = "litellm"
 
-          print(f"{cost} {input_tokens} {output_tokens} {source}")
+          print(f"{cost} {input_tokens} {output_tokens} {source} {iterations} {agent_state}")
           PYEOF
           )
 
           TOTAL_TOKENS=$((INPUT_TOKENS + OUTPUT_TOKENS))
+          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
+          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
+          MAX_ITER="${{ needs.parse.outputs.max_iterations }}"
 
           # Round UP to nearest penny — $0.00 means no cost data was available.
           # Ceiling (not standard) rounding: sub-penny costs show as $0.01.
           # Two decimal places only: pennies are the natural unit for LLM cost tracking.
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
+
+          # Human-readable agent state
+          case "$AGENT_STATE" in
+            completed)  STATE_LABEL="✓ Completed" ;;
+            hit_limit)  STATE_LABEL="⚠️ Hit iteration limit" ;;
+            failed)     STATE_LABEL="✗ Agent reported failure" ;;
+            *)          STATE_LABEL="Unknown" ;;
+          esac
 
           # Format cost comment
           {
@@ -524,6 +550,11 @@ jobs:
             echo ""
             echo "| Metric | Value |"
             echo "|--------|-------|"
+            echo "| Agent outcome | ${STATE_LABEL} |"
+            if [[ -n "$ITERATIONS" && "$ITERATIONS" != "0" ]]; then
+              echo "| Iterations | ${ITERATIONS} / ${MAX_ITER} |"
+            fi
+            echo "| Elapsed time | ${ELAPSED_FMT} |"
             echo "| Input tokens | ${INPUT_TOKENS} |"
             echo "| Output tokens | ${OUTPUT_TOKENS} |"
             echo "| Total tokens | ${TOTAL_TOKENS} |"
@@ -976,6 +1007,7 @@ jobs:
           echo "Reviewer timeout: ${TIMEOUT_MINUTES} minutes"
 
           # Run reviewer under timeout (same pattern as resolve job).
+          echo $(date +%s) > /tmp/start_time
           timeout --kill-after=60 "$TIMEOUT_SECONDS" \
             python -m openhands.resolver.resolve_issue \
               --selected-repo "${{ github.repository }}" \
@@ -1018,7 +1050,10 @@ jobs:
           path = 'output/output.jsonl'
           if os.path.exists(path):
               data = json.loads(open(path).read())
-              print(data.get('result_explanation', '') or '')
+              val = data.get('result_explanation', '') or ''
+              if isinstance(val, list):
+                  val = '\n\n'.join(str(v) for v in val)
+              print(val)
           " 2>/dev/null || echo "")
           fi
 
@@ -1061,7 +1096,7 @@ jobs:
           # Parse metrics from output/output.jsonl and/or LiteLLM logs.
           # OpenHands doesn't populate metrics (tracked upstream), so we fall back to parsing
           # LiteLLM's standard logging payload from the review step output.
-          read -r COST INPUT_TOKENS OUTPUT_TOKENS SOURCE < <(python3 << 'PYEOF'
+          read -r COST INPUT_TOKENS OUTPUT_TOKENS SOURCE ITERATIONS AGENT_STATE < <(python3 << 'PYEOF'
           import json, os
 
           def parse_litellm_logs(log_content):
@@ -1104,8 +1139,10 @@ jobs:
           input_tokens = 0
           output_tokens = 0
           source = "none"
+          iterations = 0
 
           path = "output/output.jsonl"
+          agent_state = "unknown"
           if os.path.exists(path):
               with open(path) as f:
                   data = json.loads(f.read().strip())
@@ -1116,6 +1153,14 @@ jobs:
               output_tokens = atu.get("completion_tokens", 0) or 0
               if cost > 0 or input_tokens > 0 or output_tokens > 0:
                   source = "openhands"
+              error = data.get("error", "") or ""
+              success = data.get("success")
+              if "reached maximum iteration" in str(error):
+                  agent_state = "hit_limit"
+              elif success is True:
+                  agent_state = "completed"
+              elif success is False:
+                  agent_state = "failed"
 
           # If OpenHands metrics are empty, try LiteLLM logs
           if source == "none" or (cost == 0 and input_tokens == 0 and output_tokens == 0):
@@ -1128,16 +1173,28 @@ jobs:
                       cost = result["total_cost"] or 0
                       input_tokens = result["input_tokens"]
                       output_tokens = result["output_tokens"]
+                      iterations = result["call_count"]
                       source = "litellm"
 
-          print(f"{cost} {input_tokens} {output_tokens} {source}")
+          print(f"{cost} {input_tokens} {output_tokens} {source} {iterations} {agent_state}")
           PYEOF
           )
 
           TOTAL_TOKENS=$((INPUT_TOKENS + OUTPUT_TOKENS))
+          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
+          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
+          MAX_ITER="${{ needs.parse.outputs.max_iterations }}"
 
           # Round UP to nearest penny — $0.00 means no cost data was available.
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
+
+          # Human-readable agent state
+          case "$AGENT_STATE" in
+            completed)  STATE_LABEL="✓ Completed" ;;
+            hit_limit)  STATE_LABEL="⚠️ Hit iteration limit" ;;
+            failed)     STATE_LABEL="✗ Agent reported failure" ;;
+            *)          STATE_LABEL="Unknown" ;;
+          esac
 
           # Format cost comment
           {
@@ -1148,6 +1205,11 @@ jobs:
             echo ""
             echo "| Metric | Value |"
             echo "|--------|-------|"
+            echo "| Agent outcome | ${STATE_LABEL} |"
+            if [[ -n "$ITERATIONS" && "$ITERATIONS" != "0" ]]; then
+              echo "| Iterations | ${ITERATIONS} / ${MAX_ITER} |"
+            fi
+            echo "| Elapsed time | ${ELAPSED_FMT} |"
             echo "| Input tokens | ${INPUT_TOKENS} |"
             echo "| Output tokens | ${OUTPUT_TOKENS} |"
             echo "| Total tokens | ${TOTAL_TOKENS} |"
