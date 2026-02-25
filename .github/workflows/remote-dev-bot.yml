@@ -55,6 +55,7 @@ jobs:
       commit_trailer: ${{ steps.parse.outputs.commit_trailer }}
       assign_issue: ${{ steps.parse.outputs.assign_issue }}
       assign_pr: ${{ steps.parse.outputs.assign_pr }}
+      timeout_minutes: ${{ steps.parse.outputs.timeout_minutes }}
 
     steps:
       - name: Generate app token
@@ -97,12 +98,20 @@ jobs:
           # Extract command string: "/agent-resolve-claude-large" or "/agent resolve claude large" -> "resolve-claude-large"
           # Supports both dash and space separators; normalizes to lowercase dashes
           # Matches up to 3 tokens (mode + optional model alias parts) to avoid capturing extra text
+          # Also captures optional --timeout N argument
           # Bare "/agent" produces empty string, which config.py will reject
           PREFIX="${{ inputs.command_prefix || 'agent' }}"
+          # Extract command string (mode + optional model alias)
           COMMAND=$(echo "$COMMENT" | grep -oP "^/${PREFIX}[- ]\K[a-zA-Z0-9]+(?:[- ][a-zA-Z0-9]+){0,2}" | tr ' ' '-' || echo "")
           COMMAND=$(echo "$COMMAND" | tr '[:upper:]' '[:lower:]')
+          # Extract --timeout N if present (case-insensitive), pass as a separate flag
+          TIMEOUT=$(echo "$COMMENT" | grep -oiP '(?<=--timeout )\d+' | head -1 || true)
 
-          python3 .remote-dev-bot/lib/config.py "$COMMAND"
+          if [[ -n "$TIMEOUT" ]]; then
+            python3 .remote-dev-bot/lib/config.py "$COMMAND" --timeout-minutes "$TIMEOUT"
+          else
+            python3 .remote-dev-bot/lib/config.py "$COMMAND"
+          fi
 
       - name: React to comment
         continue-on-error: true
@@ -127,7 +136,6 @@ jobs:
     needs: parse
     if: needs.parse.outputs.action == 'pr'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
 
     steps:
       - name: Generate app token
@@ -210,6 +218,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           GITHUB_USERNAME: ${{ github.repository_owner }}
           GIT_USERNAME: ${{ github.repository_owner }}
           SANDBOX_ENV_E2E_TEST_TOKEN: ${{ secrets.E2E_TEST_TOKEN }}
@@ -227,14 +236,30 @@ jobs:
           # doesn't exist at all.
           ISSUE_TYPE=${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}
 
+          TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
+          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
+
+          # Run resolver under timeout. On expiry: SIGTERM first (gives OpenHands a
+          # chance to write output), then SIGKILL after 60s if still running.
+          # Subsequent steps (cost report, artifact upload) run regardless via if:always().
+          # TODO: consider soft-kill (signal agent to wrap up) — see issue #234
           # Run resolver and capture output for cost parsing.
           # LiteLLM prints JSON payloads to stdout when LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD=1.
-          python -m openhands.resolver.resolve_issue \
-            --selected-repo "${{ github.repository }}" \
-            --issue-number "$ISSUE_NUMBER" \
-            --issue-type "$ISSUE_TYPE" \
-            --max-iterations ${{ needs.parse.outputs.max_iterations }} \
+          timeout --kill-after=60 "$TIMEOUT_SECONDS" \
+            python -m openhands.resolver.resolve_issue \
+              --selected-repo "${{ github.repository }}" \
+              --issue-number "$ISSUE_NUMBER" \
+              --issue-type "$ISSUE_TYPE" \
+              --max-iterations ${{ needs.parse.outputs.max_iterations }} \
             2>&1 | tee /tmp/resolve_output.log
+          RESOLVE_EXIT_CODE=${PIPESTATUS[0]}
+
+          if [[ $RESOLVE_EXIT_CODE -eq 124 ]]; then
+            echo "::warning::Resolver timed out after ${TIMEOUT_MINUTES} minutes. Cleanup steps will still run."
+          fi
+
+          exit $RESOLVE_EXIT_CODE
 
       - name: Create pull request
         env:
@@ -815,7 +840,6 @@ jobs:
     needs: parse
     if: needs.parse.outputs.action == 'review'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
 
     steps:
       - name: Generate app token
@@ -929,6 +953,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           GITHUB_USERNAME: ${{ github.repository_owner }}
           GIT_USERNAME: ${{ github.repository_owner }}
           SANDBOX_ENV_E2E_TEST_TOKEN: ${{ secrets.E2E_TEST_TOKEN }}
@@ -936,12 +961,25 @@ jobs:
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
 
-          python -m openhands.resolver.resolve_issue \
-            --selected-repo "${{ github.repository }}" \
-            --issue-number "$ISSUE_NUMBER" \
-            --issue-type pr \
-            --max-iterations ${{ needs.parse.outputs.max_iterations }} \
+          TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
+          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          echo "Reviewer timeout: ${TIMEOUT_MINUTES} minutes"
+
+          # Run reviewer under timeout (same pattern as resolve job).
+          timeout --kill-after=60 "$TIMEOUT_SECONDS" \
+            python -m openhands.resolver.resolve_issue \
+              --selected-repo "${{ github.repository }}" \
+              --issue-number "$ISSUE_NUMBER" \
+              --issue-type pr \
+              --max-iterations ${{ needs.parse.outputs.max_iterations }} \
             2>&1 | tee /tmp/review_output.log
+          REVIEW_EXIT_CODE=${PIPESTATUS[0]}
+
+          if [[ $REVIEW_EXIT_CODE -eq 124 ]]; then
+            echo "::warning::Reviewer timed out after ${TIMEOUT_MINUTES} minutes. Cleanup steps will still run."
+          fi
+
+          exit $REVIEW_EXIT_CODE
 
       - name: Post review comment
         env:

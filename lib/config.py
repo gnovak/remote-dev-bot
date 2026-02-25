@@ -4,14 +4,16 @@ Loads base config from remote-dev-bot repo, merges with optional
 per-repo override config, resolves model aliases and modes, and writes
 GitHub Actions outputs.
 
-Commands follow the pattern: /agent-<verb>[-<model>]
+Commands follow the pattern: /agent-<verb>[-<model>] [--timeout N]
   /agent-resolve           — resolve mode, default model
   /agent-resolve-claude-large — resolve mode, specific model
   /agent-design            — design mode, default model
+  /agent-resolve --timeout 120 — resolve mode, override timeout to 120 minutes
 
 Called by remote-dev-bot.yml at runtime and imported directly by unit tests.
 """
 
+import argparse
 import json
 import os
 import sys
@@ -78,7 +80,7 @@ def parse_command(command_string, known_modes):
         )
 
     # Normalize to lowercase for case-insensitive matching
-    command_string = command_string.lower()
+    command_string = command_string.lower().strip()
 
     parts = command_string.split("-", 1)
     verb = parts[0]
@@ -107,7 +109,10 @@ def resolve_commit_trailer(template, alias, model_id, oh_version):
     )
 
 
-def resolve_config(base_path, override_path, command_string, local_path=None):
+DEFAULT_TIMEOUT_MINUTES = 120
+
+
+def resolve_config(base_path, override_path, command_string, local_path=None, timeout_minutes=None):
     """Load configs, merge, resolve mode + alias, return outputs dict.
 
     Applies up to three config layers (each is optional):
@@ -116,9 +121,10 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
       local_path    — target repo's remote-dev-bot.local.yaml (deepest override)
 
     command_string is the raw text after '/agent-' (e.g. 'resolve-claude-large').
+    timeout_minutes is the per-invocation override (from --timeout N in the comment).
 
     Returns a dict with keys: mode, model, alias, max_iterations, oh_version,
-    pr_type, has_override, plus any mode-specific settings.
+    pr_type, has_override, timeout_minutes, plus any mode-specific settings.
     """
     # Read base config
     base_config = {}
@@ -195,6 +201,17 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
             f"openhands.on_failure must be 'comment' or 'draft', got: {on_failure!r}"
         )
 
+    # Resolve timeout: per-invocation > yaml config > hardcoded default
+    # Per-invocation is passed via --timeout-minutes argparse flag (from the comment).
+    # NOTE: GitHub Actions has a hard 6-hour limit. If a run legitimately needs
+    # more than 6 hours, set timeout-minutes in the calling workflow's job definition.
+    yaml_timeout = oh.get("timeout_minutes")
+    resolved_timeout = (
+        timeout_minutes if timeout_minutes is not None
+        else (yaml_timeout if yaml_timeout is not None
+              else DEFAULT_TIMEOUT_MINUTES)
+    )
+
     # Mode settings
     action = mode_config.get("action", "pr")
 
@@ -211,6 +228,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
         "assign_issue": assign_issue,
         "assign_pr": assign_pr,
         "has_override": bool(override_config),
+        "timeout_minutes": resolved_timeout,
     }
 
     # Include prompt_prefix if the mode defines one
@@ -231,14 +249,32 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
 
 
 def main():
-    command_string = sys.argv[1] if len(sys.argv) > 1 else ""
+    parser = argparse.ArgumentParser(description="Remote Dev Bot config resolver")
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="",
+        help="Command string following '/agent-' (e.g. 'resolve-claude-large')",
+    )
+    parser.add_argument(
+        "--timeout-minutes",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override job timeout in minutes for this invocation",
+    )
+    args = parser.parse_args()
 
     base_path = ".remote-dev-bot/remote-dev-bot.yaml"
     override_path = "remote-dev-bot.yaml"
     local_path = "remote-dev-bot.local.yaml"
 
     try:
-        result = resolve_config(base_path, override_path, command_string, local_path=local_path)
+        result = resolve_config(
+            base_path, override_path, args.command,
+            local_path=local_path,
+            timeout_minutes=args.timeout_minutes,
+        )
     except (KeyError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
@@ -261,6 +297,7 @@ def main():
             if "context_files" in result:
                 f.write(f"context_files={json.dumps(result['context_files'])}\n")
             f.write(f"commit_trailer={result['commit_trailer']}\n")
+            f.write(f"timeout_minutes={result['timeout_minutes']}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"
@@ -268,6 +305,8 @@ def main():
     print(f"Mode: {result['mode']} (action: {result['action']})")
     print(f"Model alias: {result['alias']}")
     print(f"Model ID: {result['model']}")
+    timeout_source = "per-invocation override" if args.timeout_minutes is not None else "default"
+    print(f"Timeout: {result['timeout_minutes']} minutes ({timeout_source})")
 
 
 if __name__ == "__main__":

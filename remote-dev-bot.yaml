@@ -91,3 +91,9 @@ openhands:
   assign_issue: true
   # Assign the triggering user to the resulting PR
   assign_pr: true
+  # Watchdog timeout in minutes. The runner kills the OpenHands process after this
+  # many minutes, then cleanup steps (cost report, artifact upload) still run.
+  # Override per-invocation with /agent-resolve --timeout N.
+  # Note: GitHub Actions has a hard 6-hour cap. If you need longer runs, set
+  # timeout-minutes in your calling workflow's job definition.
+  timeout_minutes: 120
