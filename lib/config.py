@@ -8,14 +8,14 @@ Commands follow the pattern: /agent-<verb>[-<model>] [--timeout N]
   /agent-resolve           — resolve mode, default model
   /agent-resolve-claude-large — resolve mode, specific model
   /agent-design            — design mode, default model
-  /agent-resolve --timeout 120 — resolve mode with 120 minute timeout
+  /agent-resolve --timeout 120 — resolve mode, override timeout to 120 minutes
 
 Called by remote-dev-bot.yml at runtime and imported directly by unit tests.
 """
 
+import argparse
 import json
 import os
-import re
 import sys
 
 import yaml
@@ -52,45 +52,32 @@ def detect_api_provider(model_id):
 
 
 def parse_command(command_string, known_modes):
-    """Parse a command string into (mode, model_alias, timeout_minutes).
+    """Parse a command string into (mode, model_alias).
 
     The command string is what follows '/agent-' in the comment.
-    Grammar: <verb>[-<model>] [--timeout N]
+    Grammar: <verb>[-<model>]
 
     Commands are case-insensitive (e.g., /agent-resolve-Claude-Large works).
 
     If the command string is empty, raises ValueError (bare /agent not allowed).
     The first segment must be a known mode; remaining segments form the model alias.
-    Optional --timeout N specifies job timeout in minutes.
 
     >>> parse_command("resolve", {"resolve", "design"})
-    ('resolve', '', None)
+    ('resolve', '')
     >>> parse_command("resolve-claude-large", {"resolve", "design"})
-    ('resolve', 'claude-large', None)
+    ('resolve', 'claude-large')
     >>> parse_command("design", {"resolve", "design"})
-    ('design', '', None)
+    ('design', '')
     >>> parse_command("design-claude-large", {"resolve", "design"})
-    ('design', 'claude-large', None)
+    ('design', 'claude-large')
     >>> parse_command("Resolve-Claude-Large", {"resolve", "design"})
-    ('resolve', 'claude-large', None)
-    >>> parse_command("resolve --timeout 120", {"resolve", "design"})
-    ('resolve', '', 120)
-    >>> parse_command("resolve-claude-large --timeout 90", {"resolve", "design"})
-    ('resolve', 'claude-large', 90)
+    ('resolve', 'claude-large')
     """
     if not command_string:
         raise ValueError(
             "Bare /agent is not supported. "
             f"Use /agent-<mode> where mode is one of: {sorted(known_modes)}"
         )
-
-    # Extract --timeout N if present
-    timeout_minutes = None
-    timeout_match = re.search(r'--timeout\s+(\d+)', command_string, re.IGNORECASE)
-    if timeout_match:
-        timeout_minutes = int(timeout_match.group(1))
-        # Remove the --timeout N from the command string
-        command_string = re.sub(r'\s*--timeout\s+\d+', '', command_string, flags=re.IGNORECASE)
 
     # Normalize to lowercase for case-insensitive matching
     command_string = command_string.lower().strip()
@@ -104,7 +91,7 @@ def parse_command(command_string, known_modes):
         )
 
     model_alias = parts[1] if len(parts) > 1 else ""
-    return verb, model_alias, timeout_minutes
+    return verb, model_alias
 
 
 def resolve_commit_trailer(template, alias, model_id, oh_version):
@@ -122,7 +109,10 @@ def resolve_commit_trailer(template, alias, model_id, oh_version):
     )
 
 
-def resolve_config(base_path, override_path, command_string, local_path=None):
+DEFAULT_TIMEOUT_MINUTES = 120
+
+
+def resolve_config(base_path, override_path, command_string, local_path=None, timeout_minutes=None):
     """Load configs, merge, resolve mode + alias, return outputs dict.
 
     Applies up to three config layers (each is optional):
@@ -131,9 +121,10 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
       local_path    — target repo's remote-dev-bot.local.yaml (deepest override)
 
     command_string is the raw text after '/agent-' (e.g. 'resolve-claude-large').
+    timeout_minutes is the per-invocation override (from --timeout N in the comment).
 
     Returns a dict with keys: mode, model, alias, max_iterations, oh_version,
-    pr_type, has_override, plus any mode-specific settings.
+    pr_type, has_override, timeout_minutes, plus any mode-specific settings.
     """
     # Read base config
     base_config = {}
@@ -176,10 +167,10 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
     print("===================")
     print()
 
-    # Parse command into mode + model alias + optional timeout
+    # Parse command into mode + model alias
     modes = config.get("modes", {})
     known_modes = set(modes.keys())
-    mode, alias, timeout_minutes = parse_command(command_string, known_modes)
+    mode, alias = parse_command(command_string, known_modes)
 
     mode_config = modes[mode]
 
@@ -210,6 +201,17 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
             f"openhands.on_failure must be 'comment' or 'draft', got: {on_failure!r}"
         )
 
+    # Resolve timeout: per-invocation > yaml config > hardcoded default
+    # Per-invocation is passed via --timeout-minutes argparse flag (from the comment).
+    # NOTE: GitHub Actions has a hard 6-hour limit. If a run legitimately needs
+    # more than 6 hours, set timeout-minutes in the calling workflow's job definition.
+    yaml_timeout = oh.get("timeout_minutes")
+    resolved_timeout = (
+        timeout_minutes if timeout_minutes is not None
+        else (yaml_timeout if yaml_timeout is not None
+              else DEFAULT_TIMEOUT_MINUTES)
+    )
+
     # Mode settings
     action = mode_config.get("action", "pr")
 
@@ -226,7 +228,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
         "assign_issue": assign_issue,
         "assign_pr": assign_pr,
         "has_override": bool(override_config),
-        "timeout_minutes": timeout_minutes,
+        "timeout_minutes": resolved_timeout,
     }
 
     # Include prompt_prefix if the mode defines one
@@ -247,14 +249,32 @@ def resolve_config(base_path, override_path, command_string, local_path=None):
 
 
 def main():
-    command_string = sys.argv[1] if len(sys.argv) > 1 else ""
+    parser = argparse.ArgumentParser(description="Remote Dev Bot config resolver")
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="",
+        help="Command string following '/agent-' (e.g. 'resolve-claude-large')",
+    )
+    parser.add_argument(
+        "--timeout-minutes",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override job timeout in minutes for this invocation",
+    )
+    args = parser.parse_args()
 
     base_path = ".remote-dev-bot/remote-dev-bot.yaml"
     override_path = "remote-dev-bot.yaml"
     local_path = "remote-dev-bot.local.yaml"
 
     try:
-        result = resolve_config(base_path, override_path, command_string, local_path=local_path)
+        result = resolve_config(
+            base_path, override_path, args.command,
+            local_path=local_path,
+            timeout_minutes=args.timeout_minutes,
+        )
     except (KeyError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
@@ -277,9 +297,7 @@ def main():
             if "context_files" in result:
                 f.write(f"context_files={json.dumps(result['context_files'])}\n")
             f.write(f"commit_trailer={result['commit_trailer']}\n")
-            # Output timeout_minutes (empty string if not specified)
-            timeout_val = result['timeout_minutes'] if result['timeout_minutes'] is not None else ""
-            f.write(f"timeout_minutes={timeout_val}\n")
+            f.write(f"timeout_minutes={result['timeout_minutes']}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"
@@ -287,8 +305,8 @@ def main():
     print(f"Mode: {result['mode']} (action: {result['action']})")
     print(f"Model alias: {result['alias']}")
     print(f"Model ID: {result['model']}")
-    if result['timeout_minutes']:
-        print(f"Timeout override: {result['timeout_minutes']} minutes")
+    timeout_source = "per-invocation override" if args.timeout_minutes is not None else "default"
+    print(f"Timeout: {result['timeout_minutes']} minutes ({timeout_source})")
 
 
 if __name__ == "__main__":

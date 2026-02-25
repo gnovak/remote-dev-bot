@@ -101,13 +101,17 @@ jobs:
           # Also captures optional --timeout N argument
           # Bare "/agent" produces empty string, which config.py will reject
           PREFIX="${{ inputs.command_prefix || 'agent' }}"
-          # First extract the base command (mode + model)
+          # Extract command string (mode + optional model alias)
           COMMAND=$(echo "$COMMENT" | grep -oP "^/${PREFIX}[- ]\K[a-zA-Z0-9]+(?:[- ][a-zA-Z0-9]+){0,2}" | tr ' ' '-' || echo "")
           COMMAND=$(echo "$COMMAND" | tr '[:upper:]' '[:lower:]')
-          # Extract --timeout N if present (case-insensitive)
-          TIMEOUT_ARG=$(echo "$COMMENT" | grep -oiP '\s--timeout\s+\d+' || echo "")
+          # Extract --timeout N if present (case-insensitive), pass as a separate flag
+          TIMEOUT=$(echo "$COMMENT" | grep -oiP '(?<=--timeout )\d+' | head -1 || true)
 
-          python3 .remote-dev-bot/lib/config.py "$COMMAND$TIMEOUT_ARG"
+          if [[ -n "$TIMEOUT" ]]; then
+            python3 .remote-dev-bot/lib/config.py "$COMMAND" --timeout-minutes "$TIMEOUT"
+          else
+            python3 .remote-dev-bot/lib/config.py "$COMMAND"
+          fi
 
       - name: React to comment
         continue-on-error: true
@@ -132,7 +136,6 @@ jobs:
     needs: parse
     if: needs.parse.outputs.action == 'pr'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
 
     steps:
       - name: Generate app token
@@ -233,37 +236,27 @@ jobs:
           # doesn't exist at all.
           ISSUE_TYPE=${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}
 
-          # Start timeout watchdog if a custom timeout was specified.
-          # The watchdog runs in the background and cancels the run if the timeout is reached.
-          # It's killed automatically when this step ends (success or failure).
           TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
-          WATCHDOG_PID=""
-          if [[ -n "$TIMEOUT_MINUTES" ]]; then
-            TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
-            echo "Starting timeout watchdog: will cancel run after $TIMEOUT_MINUTES minutes"
-            (
-              sleep "$TIMEOUT_SECONDS"
-              echo "::warning::Timeout of $TIMEOUT_MINUTES minutes reached, cancelling run..."
-              gh run cancel "${{ github.run_id }}" --repo "${{ github.repository }}" || true
-            ) &
-            WATCHDOG_PID=$!
-            echo "Watchdog started with PID $WATCHDOG_PID"
-          fi
+          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
 
+          # Run resolver under timeout. On expiry: SIGTERM first (gives OpenHands a
+          # chance to write output), then SIGKILL after 60s if still running.
+          # Subsequent steps (cost report, artifact upload) run regardless via if:always().
+          # TODO: consider soft-kill (signal agent to wrap up) — see issue #234
           # Run resolver and capture output for cost parsing.
           # LiteLLM prints JSON payloads to stdout when LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD=1.
-          python -m openhands.resolver.resolve_issue \
-            --selected-repo "${{ github.repository }}" \
-            --issue-number "$ISSUE_NUMBER" \
-            --issue-type "$ISSUE_TYPE" \
-            --max-iterations ${{ needs.parse.outputs.max_iterations }} \
+          timeout --kill-after=60 "$TIMEOUT_SECONDS" \
+            python -m openhands.resolver.resolve_issue \
+              --selected-repo "${{ github.repository }}" \
+              --issue-number "$ISSUE_NUMBER" \
+              --issue-type "$ISSUE_TYPE" \
+              --max-iterations ${{ needs.parse.outputs.max_iterations }} \
             2>&1 | tee /tmp/resolve_output.log
-          RESOLVE_EXIT_CODE=$?
+          RESOLVE_EXIT_CODE=${PIPESTATUS[0]}
 
-          # Kill the watchdog if it's still running
-          if [[ -n "$WATCHDOG_PID" ]]; then
-            kill "$WATCHDOG_PID" 2>/dev/null || true
-            echo "Watchdog stopped"
+          if [[ $RESOLVE_EXIT_CODE -eq 124 ]]; then
+            echo "::warning::Resolver timed out after ${TIMEOUT_MINUTES} minutes. Cleanup steps will still run."
           fi
 
           exit $RESOLVE_EXIT_CODE
@@ -847,7 +840,6 @@ jobs:
     needs: parse
     if: needs.parse.outputs.action == 'review'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
 
     steps:
       - name: Generate app token
@@ -969,33 +961,22 @@ jobs:
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
 
-          # Start timeout watchdog if a custom timeout was specified.
           TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
-          WATCHDOG_PID=""
-          if [[ -n "$TIMEOUT_MINUTES" ]]; then
-            TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
-            echo "Starting timeout watchdog: will cancel run after $TIMEOUT_MINUTES minutes"
-            (
-              sleep "$TIMEOUT_SECONDS"
-              echo "::warning::Timeout of $TIMEOUT_MINUTES minutes reached, cancelling run..."
-              gh run cancel "${{ github.run_id }}" --repo "${{ github.repository }}" || true
-            ) &
-            WATCHDOG_PID=$!
-            echo "Watchdog started with PID $WATCHDOG_PID"
-          fi
+          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          echo "Reviewer timeout: ${TIMEOUT_MINUTES} minutes"
 
-          python -m openhands.resolver.resolve_issue \
-            --selected-repo "${{ github.repository }}" \
-            --issue-number "$ISSUE_NUMBER" \
-            --issue-type pr \
-            --max-iterations ${{ needs.parse.outputs.max_iterations }} \
+          # Run reviewer under timeout (same pattern as resolve job).
+          timeout --kill-after=60 "$TIMEOUT_SECONDS" \
+            python -m openhands.resolver.resolve_issue \
+              --selected-repo "${{ github.repository }}" \
+              --issue-number "$ISSUE_NUMBER" \
+              --issue-type pr \
+              --max-iterations ${{ needs.parse.outputs.max_iterations }} \
             2>&1 | tee /tmp/review_output.log
-          REVIEW_EXIT_CODE=$?
+          REVIEW_EXIT_CODE=${PIPESTATUS[0]}
 
-          # Kill the watchdog if it's still running
-          if [[ -n "$WATCHDOG_PID" ]]; then
-            kill "$WATCHDOG_PID" 2>/dev/null || true
-            echo "Watchdog stopped"
+          if [[ $REVIEW_EXIT_CODE -eq 124 ]]; then
+            echo "::warning::Reviewer timed out after ${TIMEOUT_MINUTES} minutes. Cleanup steps will still run."
           fi
 
           exit $REVIEW_EXIT_CODE
