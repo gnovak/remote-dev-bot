@@ -117,3 +117,11 @@ openhands:
   assign_issue: true
   # Assign the triggering user to the resulting PR
   assign_pr: true
+  # Graceful wrap-up: inject instructions when approaching max iterations
+  # This helps the agent commit partial work before hitting the limit
+  graceful_wrapup:
+    # Enable/disable graceful wrap-up instructions
+    enabled: true
+    # Threshold as fraction of max_iterations (0.8 = 80%)
+    # At this point, the agent receives instructions to wrap up
+    threshold: 0.8

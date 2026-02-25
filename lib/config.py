@@ -346,6 +346,15 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ar
             f"openhands.on_failure must be 'comment' or 'draft', got: {on_failure!r}"
         )
 
+    # Graceful wrap-up settings
+    graceful_wrapup = oh.get("graceful_wrapup", {})
+    wrapup_enabled = graceful_wrapup.get("enabled", True)
+    wrapup_threshold = graceful_wrapup.get("threshold", 0.8)
+    if not (0 < wrapup_threshold <= 1):
+        raise ValueError(
+            f"openhands.graceful_wrapup.threshold must be between 0 and 1, got: {wrapup_threshold}"
+        )
+
     # Mode settings
     action = mode_config.get("action", "pr")
 
@@ -354,6 +363,9 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ar
         max_iter = args["max_iterations"]
     if "target_branch" in args:
         target_branch = args["target_branch"]
+
+    # Calculate the iteration warning threshold (iteration number at which to warn)
+    wrapup_iteration = int(max_iter * wrapup_threshold) if wrapup_enabled else 0
 
     result = {
         "mode": mode,
@@ -368,6 +380,9 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ar
         "assign_issue": assign_issue,
         "assign_pr": assign_pr,
         "has_override": bool(override_config),
+        "graceful_wrapup_enabled": wrapup_enabled,
+        "graceful_wrapup_threshold": wrapup_threshold,
+        "graceful_wrapup_iteration": wrapup_iteration,
     }
 
     # Include prompt_prefix if the mode defines one
@@ -469,6 +484,8 @@ def main():
             if "explore_max_iterations" in result:
                 f.write(f"explore_max_iterations={result['explore_max_iterations']}\n")
             f.write(f"commit_trailer={result['commit_trailer']}\n")
+            f.write(f"graceful_wrapup_enabled={str(result['graceful_wrapup_enabled']).lower()}\n")
+            f.write(f"graceful_wrapup_iteration={result['graceful_wrapup_iteration']}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"
