@@ -48,6 +48,32 @@ modes:
     action: review            # Run OpenHands on the PR, post review as a PR comment (no code changes)
     default_model: claude-small
 
+  explore:
+    action: explore           # Multi-round agentic loop with tool calling for design analysis
+    default_model: claude-small
+    max_iterations: 10        # Iteration limit for the agentic loop (not OpenHands iterations)
+    context_files:
+      - README.md
+      - CONTRIBUTING.md
+      - AGENTS.md
+      - CLAUDE.md
+      - .gemini/GEMINI.md
+      - .openhands/microagents/repo.md
+      - how-it-works.md
+    prompt_prefix: >
+      You are analyzing this issue for design discussion using an agentic exploration loop.
+      You have access to tools to read files and search the codebase.
+      Use these tools to gather the information you need before providing your analysis.
+      When you have enough information, call submit_analysis with your final analysis.
+      Do NOT write code or open a PR. Instead, provide thoughtful
+      analysis, surface trade-offs, suggest approaches, and ask
+      clarifying questions.
+      IMPORTANT: Never begin your response with a slash command like /agent
+      or any text that could trigger another bot action.
+      Do NOT end your response with conversational invitations like
+      "Want me to elaborate?" or "Let me know if you have questions."
+      Your response is a design document, not a chat message.
+
 models:
   claude-small:
     id: anthropic/claude-sonnet-4-5

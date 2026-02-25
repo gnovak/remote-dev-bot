@@ -385,6 +385,10 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ar
             print(f"  {key}: {value}")
         print()
 
+    # Include explore_max_iterations if the mode defines it (for explore mode)
+    if "max_iterations" in mode_config:
+        result["explore_max_iterations"] = mode_config["max_iterations"]
+
     # Resolve commit_trailer template (for resolve mode)
     commit_trailer_template = config.get("commit_trailer", "")
     result["commit_trailer"] = resolve_commit_trailer(
@@ -459,6 +463,8 @@ def main():
             f.write(f"assign_pr={str(result['assign_pr']).lower()}\n")
             if "context_files" in result:
                 f.write(f"context_files={json.dumps(result['context_files'])}\n")
+            if "explore_max_iterations" in result:
+                f.write(f"explore_max_iterations={result['explore_max_iterations']}\n")
             f.write(f"commit_trailer={result['commit_trailer']}\n")
 
     # Log for visibility
