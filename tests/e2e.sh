@@ -146,6 +146,8 @@ else
         "/agent-design" "all" "design"
 fi
 
+# Note: review mode is tested in Phase 2 (after main tests), piggybacking on a resolve test's PR.
+
 # --- Helpers ---
 
 log() { echo "==> $*"; }
@@ -479,7 +481,142 @@ log "========================================="
 log "  Pass: $pass  Fail: $fail  Timeout: $timeout_count"
 log "========================================="
 
+# --- Phase 2: Review test ---
+# Piggybacks on a PR created by a resolve test. Avoids creating a throwaway
+# issue+PR just to test review mode.
+
+REVIEW_PASS=0
+REVIEW_FAIL=0
+REVIEW_SKIP=0
+
+# Find the first resolve test that produced a PR
+REVIEW_PR_NUM=""
+REVIEW_SOURCE_ISSUE=""
+for pos in "${!issue_nums[@]}"; do
+    idx="${active_indices[$pos]}"
+    test_type="${all_types[$idx]}"
+    issue_num="${issue_nums[$pos]}"
+
+    if [[ "$test_type" == "resolve" && "${test_results[$pos]}" == "success" ]]; then
+        pr_num=$(gh pr list --repo "$TEST_REPO" \
+            --search "head:openhands-fix-issue-$issue_num" \
+            --json number --jq '.[0].number' 2>/dev/null || echo "")
+        if [[ -n "$pr_num" ]]; then
+            REVIEW_PR_NUM="$pr_num"
+            REVIEW_SOURCE_ISSUE="$issue_num"
+            break
+        fi
+    fi
+done
+
+if [[ -z "$REVIEW_PR_NUM" ]]; then
+    log ""
+    log "Phase 2: Review test — SKIPPED (no resolve test produced a PR)"
+    ((REVIEW_SKIP++)) || true
+else
+    log ""
+    log "Phase 2: Review test — posting /agent-review on PR #$REVIEW_PR_NUM (from issue #$REVIEW_SOURCE_ISSUE)"
+    gh pr comment "$REVIEW_PR_NUM" --repo "$TEST_REPO" --body "/agent-review"
+
+    log "  Waiting 15s for review workflow to start..."
+    sleep 15
+
+    # Track which run IDs belong to the main tests (exclude them when matching review run)
+    main_run_ids=()
+    for tracked_id in "${test_run_ids[@]+"${test_run_ids[@]}"}"; do
+        [[ -n "$tracked_id" ]] && main_run_ids+=("$tracked_id")
+    done
+
+    REVIEW_RUN_ID=""
+    REVIEW_RESULT=""
+    REVIEW_TIMEOUT=900  # 15 minutes
+    review_elapsed=0
+
+    # The PR title contains our e2e timestamp (it came from the resolve test's issue title).
+    match_str="e2e-$timestamp"
+
+    while [[ $review_elapsed -lt $REVIEW_TIMEOUT ]]; do
+        run_json=$(gh run list --repo "$TEST_REPO" \
+            --limit 20 \
+            --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
+
+        while IFS= read -r row; do
+            [[ -z "$row" ]] && continue
+            display_title=$(echo "$row" | jq -r '.displayTitle')
+            status=$(echo "$row" | jq -r '.status')
+            conclusion=$(echo "$row" | jq -r '.conclusion')
+            run_id=$(echo "$row" | jq -r '.databaseId')
+
+            [[ "$conclusion" == "skipped" ]] && continue
+
+            if [[ "$display_title" == *"$match_str"* ]]; then
+                # Skip runs already tracked by the main loop
+                already_tracked=false
+                for tracked_id in "${main_run_ids[@]+"${main_run_ids[@]}"}"; do
+                    if [[ "$tracked_id" == "$run_id" ]]; then
+                        already_tracked=true
+                        break
+                    fi
+                done
+                $already_tracked && continue
+
+                REVIEW_RUN_ID="$run_id"
+                if [[ "$status" == "completed" ]]; then
+                    REVIEW_RESULT="$conclusion"
+                    log "  review: $conclusion (run $run_id)"
+                else
+                    log "  review: $status (run $run_id)"
+                fi
+                break
+            fi
+        done <<< "$(echo "$run_json" | jq -c '.[]')"
+
+        [[ -n "$REVIEW_RESULT" ]] && break
+
+        log "  Waiting... (${review_elapsed}s elapsed)"
+        sleep 60
+        review_elapsed=$((review_elapsed + 60))
+    done
+
+    log ""
+    log "========================================="
+    log "  Phase 2: Review Test"
+    log "========================================="
+
+    review_status=""
+    review_log_url=""
+    [[ -n "$REVIEW_RUN_ID" ]] && review_log_url="https://github.com/$TEST_REPO/actions/runs/$REVIEW_RUN_ID"
+
+    if [[ "${REVIEW_RESULT:-timeout}" == "timeout" ]]; then
+        review_status="TIMEOUT"
+        ((REVIEW_FAIL++)) || true
+    elif [[ "$REVIEW_RESULT" == "success" ]]; then
+        # Verify review comment was posted on the PR
+        comment_count=$(gh api "repos/$TEST_REPO/issues/$REVIEW_PR_NUM/comments" \
+            --jq '[.[] | select(.body | contains("Code review by"))] | length' \
+            2>/dev/null || echo "0")
+        if [[ "$comment_count" -gt 0 ]]; then
+            review_status="PASS (review comment posted)"
+            ((REVIEW_PASS++)) || true
+        else
+            review_status="PASS (no review comment found)"
+            ((REVIEW_PASS++)) || true
+        fi
+    else
+        review_status="FAIL ($REVIEW_RESULT)"
+        ((REVIEW_FAIL++)) || true
+    fi
+
+    printf "  %-25s %-25s PR #%-5s  %s\n" "review" "$review_status" "$REVIEW_PR_NUM" "$review_log_url"
+
+    log "========================================="
+    log "  Phase 2: Pass: $REVIEW_PASS  Fail: $REVIEW_FAIL  Skip: $REVIEW_SKIP"
+    log "========================================="
+fi
+
 # Exit with failure if any test didn't pass
-if [[ $fail -gt 0 || $timeout_count -gt 0 ]]; then
+total_fail=$((fail + REVIEW_FAIL))
+total_timeout=$timeout_count
+if [[ $total_fail -gt 0 || $total_timeout -gt 0 ]]; then
     exit 1
 fi
