@@ -47,6 +47,18 @@ modes:
   review:
     action: review            # Run OpenHands on the PR, post review as a PR comment (no code changes)
     default_model: claude-small
+    prompt_prefix: >
+      You are reviewing this pull request. Provide a substantive critique:
+      what is strong, what is weak or unclear, what you would change and why.
+      Be specific — quote or reference actual content rather than speaking
+      in generalities. Do NOT simply summarize the changes (the diff is already
+      visible in the PR). Do NOT describe changes as addressing prior review
+      feedback unless you can see an explicit prior review comment in the PR
+      thread. IMPORTANT: Never begin your response with a slash command like
+      /agent or any text that could trigger another bot action. Do NOT end
+      with conversational invitations like "Want me to elaborate?" or "Let me
+      know if you have questions." Your response is a review document, not a
+      chat message.
 
   explore:
     action: explore           # Multi-round agentic loop with tool calling for design analysis
