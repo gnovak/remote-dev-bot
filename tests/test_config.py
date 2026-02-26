@@ -302,6 +302,16 @@ def test_parse_args_whitespace_only_value():
     assert result == {"context_files": ["file.txt"]}
 
 
+
+
+def test_parse_args_skip_empty_name_or_value():
+    """Lines with '=' but empty name or empty value are silently skipped."""
+    # Empty name: "= value" — normalize_arg_name("") → "" → skip
+    assert parse_args(["= some_value"]) == {}
+    # Empty value: "name =" — value.strip() == "" → skip
+    assert parse_args(["max_iterations ="]) == {}
+    # Both empty
+    assert parse_args(["="]) == {}
 # --- parse_invocation ---
 
 
@@ -1223,3 +1233,40 @@ class TestConfigMain:
         content = output_file.read_text()
         assert "mode=resolve\n" in content
         assert "action=pr\n" in content
+
+    def test_comment_body_with_existing_base_config(self, tmp_path):
+        """COMMENT_BODY mode reads base config when it exists (covers main() lines 461-462)."""
+        # Write a minimal base config that main() will find at the hardcoded base_path
+        base_dir = tmp_path / ".remote-dev-bot"
+        base_dir.mkdir()
+        base_config = {
+            "default_model": "m1",
+            "models": {"m1": {"id": "anthropic/test-model"}},
+            "modes": {"resolve": {"action": "pr"}},
+            "openhands": {"version": "9.9.9", "max_iterations": 7, "pr_type": "ready"},
+        }
+        (base_dir / "remote-dev-bot.yaml").write_text(yaml.dump(base_config))
+
+        output_file = tmp_path / "github_output"
+        # Run main() with cwd set to tmp_path so the relative paths resolve correctly
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            with patch("sys.argv", ["config.py"]), patch.dict(
+                os.environ,
+                {"GITHUB_OUTPUT": str(output_file), "COMMENT_BODY": "/agent resolve"},
+                clear=False,
+            ):
+                # Remove COMMENT_BODY from real env if it exists to avoid interference
+                env = {k: v for k, v in os.environ.items() if k != "COMMENT_BODY"}
+                env["GITHUB_OUTPUT"] = str(output_file)
+                env["COMMENT_BODY"] = "/agent resolve"
+                with patch.dict(os.environ, env, clear=True):
+                    main()
+        finally:
+            os.chdir(old_cwd)
+
+        content = output_file.read_text()
+        assert "mode=resolve\n" in content
+        # Config was read from our custom base; version should reflect it
+        assert "oh_version=9.9.9\n" in content
