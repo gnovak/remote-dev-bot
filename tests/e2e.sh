@@ -694,16 +694,18 @@ timeout_log_url=""
 if [[ -z "$TIMEOUT_RESULT" ]]; then
     timeout_status="TIMEOUT (e2e wait exceeded)"
     ((TIMEOUT_PHASE_FAIL++)) || true
-elif [[ "$TIMEOUT_RESULT" == "success" ]]; then
-    # Verify a failure comment was posted (agent couldn't finish in 5 min)
+elif [[ "$TIMEOUT_RESULT" == "success" || "$TIMEOUT_RESULT" == "failure" ]]; then
+    # Both success and failure are valid: the watchdog kills OpenHands (making the
+    # resolver step exit non-zero → job conclusion = failure), but cleanup steps
+    # still run due to if:always(). Accept either conclusion as "run completed".
     comment_count=$(gh api "repos/$TEST_REPO/issues/$timeout_issue_num/comments" \
-        --jq '[.[] | select(.body | contains("could not fully resolve"))] | length' \
+        --jq '[.[] | select(.body | contains("could not fully resolve") or contains("exited unexpectedly"))] | length' \
         2>/dev/null || echo "0")
     if [[ "$comment_count" -gt 0 ]]; then
-        timeout_status="PASS (run completed + failure comment posted)"
+        timeout_status="PASS (watchdog fired + comment posted) [${TIMEOUT_RESULT}]"
         ((TIMEOUT_PHASE_PASS++)) || true
     else
-        timeout_status="PASS (run completed, no failure comment found)"
+        timeout_status="PASS (run completed, no comment found) [${TIMEOUT_RESULT}]"
         ((TIMEOUT_PHASE_PASS++)) || true
     fi
 else
