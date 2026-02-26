@@ -263,6 +263,7 @@ jobs:
           exit $RESOLVE_EXIT_CODE
 
       - name: Create pull request
+        if: always()
         env:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
           LLM_MODEL: ${{ needs.parse.outputs.model }}
@@ -281,33 +282,54 @@ jobs:
           # contains "Agent reached maximum iteration") because the completion
           # function (LLM call) can false-positive when the agent did substantial
           # work but ran out of iterations mid-task.
+          # When output.jsonl is missing or empty (resolver crashed), treat as unknown.
           SUCCESS=$(python3 -c "
           import json, os, sys
           path = 'output/output.jsonl'
-          if os.path.exists(path):
-              data = json.loads(open(path).read())
-              error = data.get('error') or ''
-              if 'Agent reached maximum iteration' in error:
-                  # Agent hit max iterations - treat as failure regardless of
-                  # what the completion function returned
-                  print('false')
-              else:
-                  print('true' if data.get('success') else 'false')
-          else:
+          if not os.path.exists(path):
               print('unknown')
+              sys.exit(0)
+          content = open(path).read().strip()
+          if not content:
+              print('unknown')
+              sys.exit(0)
+          data = json.loads(content)
+          error = data.get('error') or ''
+          if 'Agent reached maximum iteration' in error:
+              # Agent hit max iterations - treat as failure regardless of
+              # what the completion function returned
+              print('false')
+          else:
+              print('true' if data.get('success') else 'false')
           " 2>/dev/null || echo "unknown")
 
-          if [[ "$SUCCESS" == "false" ]]; then
+          if [[ "$SUCCESS" == "unknown" ]]; then
+            # Resolver crashed before writing output (OOM, Docker failure, API key exhausted, etc.)
+            {
+              echo "### ⚠️ Agent process exited unexpectedly"
+              echo ""
+              echo "The agent process exited unexpectedly — see run logs for details."
+              echo ""
+              echo "See the [workflow run logs]($RUN_URL) for full details."
+            } > /tmp/failure_comment.md
+
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/failure_comment.md
+
+          elif [[ "$SUCCESS" == "false" ]]; then
             # Extract the agent's self-evaluation from the output
             EXPLANATION=$(python3 -c "
           import json, os
           path = 'output/output.jsonl'
           if os.path.exists(path):
-              data = json.loads(open(path).read())
-              val = data.get('result_explanation', '') or ''
-              if isinstance(val, list):
-                  val = '\n\n'.join(str(v) for v in val)
-              print(val)
+              content = open(path).read().strip()
+              if content:
+                  data = json.loads(content)
+                  val = data.get('result_explanation', '') or ''
+                  if isinstance(val, list):
+                      val = '\n\n'.join(str(v) for v in val)
+                  print(val)
           " 2>/dev/null || echo "")
 
             # Post a comment with the agent's evaluation
@@ -488,22 +510,27 @@ jobs:
           agent_state = "unknown"
           if os.path.exists(path):
               with open(path) as f:
-                  data = json.loads(f.read().strip())
-              m = data.get("metrics", {})
-              cost = m.get("accumulated_cost", 0) or 0
-              atu = m.get("accumulated_token_usage", {})
-              input_tokens = atu.get("prompt_tokens", 0) or 0
-              output_tokens = atu.get("completion_tokens", 0) or 0
-              if cost > 0 or input_tokens > 0 or output_tokens > 0:
-                  source = "openhands"
-              error = data.get("error", "") or ""
-              success = data.get("success")
-              if "reached maximum iteration" in str(error):
-                  agent_state = "hit_limit"
-              elif success is True:
-                  agent_state = "completed"
-              elif success is False:
-                  agent_state = "failed"
+                  content = f.read().strip()
+              if not content:
+                  # Resolver crashed before writing output
+                  agent_state = "crashed"
+              else:
+                  data = json.loads(content)
+                  m = data.get("metrics", {})
+                  cost = m.get("accumulated_cost", 0) or 0
+                  atu = m.get("accumulated_token_usage", {})
+                  input_tokens = atu.get("prompt_tokens", 0) or 0
+                  output_tokens = atu.get("completion_tokens", 0) or 0
+                  if cost > 0 or input_tokens > 0 or output_tokens > 0:
+                      source = "openhands"
+                  error = data.get("error", "") or ""
+                  success = data.get("success")
+                  if "reached maximum iteration" in str(error):
+                      agent_state = "hit_limit"
+                  elif success is True:
+                      agent_state = "completed"
+                  elif success is False:
+                      agent_state = "failed"
 
           # If OpenHands metrics are empty, try LiteLLM logs
           if source == "none" or (cost == 0 and input_tokens == 0 and output_tokens == 0):
@@ -538,6 +565,7 @@ jobs:
             completed)  STATE_LABEL="✓ Completed" ;;
             hit_limit)  STATE_LABEL="⚠️ Hit iteration limit" ;;
             failed)     STATE_LABEL="✗ Agent reported failure" ;;
+            crashed)    STATE_LABEL="💥 Agent process crashed" ;;
             *)          STATE_LABEL="Unknown" ;;
           esac
 
@@ -548,6 +576,10 @@ jobs:
             echo "**Model:** \`${ALIAS}\` (${MODEL})"
             echo "**Mode:** ${MODE}"
             echo ""
+            if [[ "$AGENT_STATE" == "crashed" ]]; then
+              echo "Agent process crashed — no output data available."
+              echo ""
+            fi
             echo "| Metric | Value |"
             echo "|--------|-------|"
             echo "| Agent outcome | ${STATE_LABEL} |"
@@ -1145,22 +1177,27 @@ jobs:
           agent_state = "unknown"
           if os.path.exists(path):
               with open(path) as f:
-                  data = json.loads(f.read().strip())
-              m = data.get("metrics", {})
-              cost = m.get("accumulated_cost", 0) or 0
-              atu = m.get("accumulated_token_usage", {})
-              input_tokens = atu.get("prompt_tokens", 0) or 0
-              output_tokens = atu.get("completion_tokens", 0) or 0
-              if cost > 0 or input_tokens > 0 or output_tokens > 0:
-                  source = "openhands"
-              error = data.get("error", "") or ""
-              success = data.get("success")
-              if "reached maximum iteration" in str(error):
-                  agent_state = "hit_limit"
-              elif success is True:
-                  agent_state = "completed"
-              elif success is False:
-                  agent_state = "failed"
+                  content = f.read().strip()
+              if not content:
+                  # Resolver crashed before writing output
+                  agent_state = "crashed"
+              else:
+                  data = json.loads(content)
+                  m = data.get("metrics", {})
+                  cost = m.get("accumulated_cost", 0) or 0
+                  atu = m.get("accumulated_token_usage", {})
+                  input_tokens = atu.get("prompt_tokens", 0) or 0
+                  output_tokens = atu.get("completion_tokens", 0) or 0
+                  if cost > 0 or input_tokens > 0 or output_tokens > 0:
+                      source = "openhands"
+                  error = data.get("error", "") or ""
+                  success = data.get("success")
+                  if "reached maximum iteration" in str(error):
+                      agent_state = "hit_limit"
+                  elif success is True:
+                      agent_state = "completed"
+                  elif success is False:
+                      agent_state = "failed"
 
           # If OpenHands metrics are empty, try LiteLLM logs
           if source == "none" or (cost == 0 and input_tokens == 0 and output_tokens == 0):
@@ -1193,6 +1230,7 @@ jobs:
             completed)  STATE_LABEL="✓ Completed" ;;
             hit_limit)  STATE_LABEL="⚠️ Hit iteration limit" ;;
             failed)     STATE_LABEL="✗ Agent reported failure" ;;
+            crashed)    STATE_LABEL="💥 Agent process crashed" ;;
             *)          STATE_LABEL="Unknown" ;;
           esac
 
@@ -1203,6 +1241,10 @@ jobs:
             echo "**Model:** \`${ALIAS}\` (${MODEL})"
             echo "**Mode:** ${MODE}"
             echo ""
+            if [[ "$AGENT_STATE" == "crashed" ]]; then
+              echo "Agent process crashed — no output data available."
+              echo ""
+            fi
             echo "| Metric | Value |"
             echo "|--------|-------|"
             echo "| Agent outcome | ${STATE_LABEL} |"
