@@ -112,9 +112,20 @@ target branch = design/gemini
 | `dev` | Long-lived integration branch, accumulates work ahead of `main` | Owner's own repo shims |
 | `e2e-test` | Ephemeral pointer, reset by e2e scripts before each test run | `remote-dev-bot-test` shim |
 
-**PRs go to `dev`, not `main`**, unless the change is a hotfix or doc/config-only (can't break anything).
+**PRs go to `dev`, not `main`**, unless the change is a bug fix or doc/config-only.
 
-**Bug-fix workflow:** fix on branch off `main` → PR → merge to `main` → rebase `dev` onto new `main`.
+**Feature workflow:** `git checkout -b my-feature origin/dev` → PR → merge to `dev`
+
+**Bug-fix workflow:** `git checkout -b my-fix origin/main` → PR → merge to `main` → rebase `dev` onto new `main`
+
+**CRITICAL — always branch from the remote ref, not the local ref:**
+```bash
+git checkout -b my-feature origin/dev   # CORRECT
+git checkout -b my-feature dev          # WRONG — local ref may be stale
+git checkout -b my-fix origin/main      # CORRECT
+git checkout -b my-fix main             # WRONG — local ref may be stale
+```
+`git fetch` updates `origin/dev` and `origin/main` but does NOT move local `dev` or `main`. Using the local ref silently branches from a stale commit.
 
 ### Dev Cycle (detailed)
 
@@ -134,7 +145,7 @@ This project has an unusual dev cycle because GitHub Actions only runs workflows
 - Changes to `lib/config.py` or `remote-dev-bot.yaml` on your feature branch take effect automatically when `e2e-test` points at your branch
 
 **Full dev cycle:**
-1. Create a feature branch from `dev`: `git checkout -b my-feature dev`
+1. Create a feature branch from `dev`: `git checkout -b my-feature origin/dev`
 2. Make changes, commit freely
 3. Point `e2e-test` at your branch: `git push --force-with-lease origin my-feature:e2e-test`
 4. In `remote-dev-bot-test`: create an issue, comment `/agent-resolve-claude-small`
