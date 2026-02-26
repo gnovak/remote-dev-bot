@@ -278,6 +278,30 @@ def test_parse_args_invalid_int():
         parse_args(["max iterations = not_a_number"])
 
 
+def test_parse_args_empty_name():
+    """Lines with empty name after = should be skipped."""
+    result = parse_args(["= value", "max iterations = 75"])
+    assert result == {"max_iterations": 75}
+
+
+def test_parse_args_empty_value():
+    """Lines with empty value after = should be skipped."""
+    result = parse_args(["max iterations =", "context = file.txt"])
+    assert result == {"context_files": ["file.txt"]}
+
+
+def test_parse_args_whitespace_only_name():
+    """Lines with whitespace-only name should be skipped."""
+    result = parse_args(["   = value", "max iterations = 75"])
+    assert result == {"max_iterations": 75}
+
+
+def test_parse_args_whitespace_only_value():
+    """Lines with whitespace-only value should be skipped."""
+    result = parse_args(["max iterations =   ", "context = file.txt"])
+    assert result == {"context_files": ["file.txt"]}
+
+
 # --- parse_invocation ---
 
 
