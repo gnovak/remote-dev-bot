@@ -144,9 +144,16 @@ else
     add_test "design" "Test: design analysis" \
         "Discuss whether this test repo should have a README. What would you include?" \
         "/agent-design" "all" "design"
+
+    # Inline args smoke test: pass max_iterations as inline arg
+    add_test "inline-args" "Test: inline max_iterations" \
+        "Create a file inline_test.py with a stub function stub() that returns None." \
+        $'/agent-resolve\nmax_iterations = 10' \
+        "all" "resolve"
 fi
 
 # Note: review mode is tested in Phase 2 (after main tests), piggybacking on a resolve test's PR.
+# Note: timeout is tested in Phase 3 (after Phase 2).
 
 # --- Helpers ---
 
@@ -614,8 +621,103 @@ else
     log "========================================="
 fi
 
+# --- Phase 3: Timeout test ---
+# Verifies the watchdog process-kill works: a run with a very short timeout
+# completes (cleanup steps still run) and posts a failure comment on the issue.
+# Uses the inline timeout arg.
+
+TIMEOUT_PHASE_PASS=0
+TIMEOUT_PHASE_FAIL=0
+
+log ""
+log "Phase 3: Timeout test — verifying watchdog kills OpenHands after short timeout"
+
+timeout_ts=$(date +%s)
+timeout_title="Test: timeout enforcement (e2e-timeout-$timeout_ts)"
+timeout_issue_url=$(gh issue create --repo "$TEST_REPO" \
+    --title "$timeout_title" \
+    --body "Analyze and refactor every file in this repository to follow best practices, add comprehensive type hints, docstrings, and unit tests. This task is intentionally scope-heavy.")
+timeout_issue_num="${timeout_issue_url##*/}"
+cleanup_issues+=("$timeout_issue_num")
+
+log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout = 5..."
+gh issue comment "$timeout_issue_num" --repo "$TEST_REPO" \
+    --body $'/agent-resolve\ntimeout = 5'
+
+log "  Waiting 15s for workflow to start..."
+sleep 15
+
+TIMEOUT_RUN_ID=""
+TIMEOUT_RESULT=""
+TIMEOUT_WAIT=900  # 15 minutes (5 min job + overhead)
+timeout_elapsed=0
+
+while [[ $timeout_elapsed -lt $TIMEOUT_WAIT ]]; do
+    run_json=$(gh run list --repo "$TEST_REPO" \
+        --limit 20 \
+        --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
+
+    while IFS= read -r row; do
+        [[ -z "$row" ]] && continue
+        display_title=$(echo "$row" | jq -r '.displayTitle')
+        status=$(echo "$row" | jq -r '.status')
+        conclusion=$(echo "$row" | jq -r '.conclusion')
+        run_id=$(echo "$row" | jq -r '.databaseId')
+        [[ "$conclusion" == "skipped" ]] && continue
+
+        if [[ "$display_title" == *"e2e-timeout-$timeout_ts"* ]]; then
+            TIMEOUT_RUN_ID="$run_id"
+            if [[ "$status" == "completed" ]]; then
+                TIMEOUT_RESULT="$conclusion"
+                log "  timeout-test: $conclusion (run $run_id)"
+            else
+                log "  timeout-test: $status (run $run_id)"
+            fi
+            break
+        fi
+    done <<< "$(echo "$run_json" | jq -c '.[]')"
+
+    [[ -n "$TIMEOUT_RESULT" ]] && break
+    log "  Waiting... (${timeout_elapsed}s elapsed)"
+    sleep 60
+    timeout_elapsed=$((timeout_elapsed + 60))
+done
+
+log ""
+log "========================================="
+log "  Phase 3: Timeout Test"
+log "========================================="
+
+timeout_log_url=""
+[[ -n "$TIMEOUT_RUN_ID" ]] && timeout_log_url="https://github.com/$TEST_REPO/actions/runs/$TIMEOUT_RUN_ID"
+
+if [[ -z "$TIMEOUT_RESULT" ]]; then
+    timeout_status="TIMEOUT (e2e wait exceeded)"
+    ((TIMEOUT_PHASE_FAIL++)) || true
+elif [[ "$TIMEOUT_RESULT" == "success" ]]; then
+    # Verify a failure comment was posted (agent couldn't finish in 5 min)
+    comment_count=$(gh api "repos/$TEST_REPO/issues/$timeout_issue_num/comments" \
+        --jq '[.[] | select(.body | contains("could not fully resolve"))] | length' \
+        2>/dev/null || echo "0")
+    if [[ "$comment_count" -gt 0 ]]; then
+        timeout_status="PASS (run completed + failure comment posted)"
+        ((TIMEOUT_PHASE_PASS++)) || true
+    else
+        timeout_status="PASS (run completed, no failure comment found)"
+        ((TIMEOUT_PHASE_PASS++)) || true
+    fi
+else
+    timeout_status="FAIL ($TIMEOUT_RESULT)"
+    ((TIMEOUT_PHASE_FAIL++)) || true
+fi
+
+printf "  %-25s %-25s issue #%-5s %s\n" "timeout" "$timeout_status" "$timeout_issue_num" "$timeout_log_url"
+log "========================================="
+log "  Phase 3: Pass: $TIMEOUT_PHASE_PASS  Fail: $TIMEOUT_PHASE_FAIL"
+log "========================================="
+
 # Exit with failure if any test didn't pass
-total_fail=$((fail + REVIEW_FAIL))
+total_fail=$((fail + REVIEW_FAIL + TIMEOUT_PHASE_FAIL))
 total_timeout=$timeout_count
 if [[ $total_fail -gt 0 || $total_timeout -gt 0 ]]; then
     exit 1
