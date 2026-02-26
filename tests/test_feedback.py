@@ -515,6 +515,22 @@ def test_search_existing_issues_json_error(mock_run):
     assert result == []
 
 
+
+
+@patch("lib.feedback.subprocess.run")
+def test_search_existing_issues_custom_repo_and_state(mock_run):
+    """search_existing_issues passes repo and state to gh."""
+    mock_run.return_value.stdout = "[]"
+
+    search_existing_issues("term", repo="myorg/myrepo", state="closed")
+
+    call_args = mock_run.call_args[0][0]
+    assert "--repo" in call_args
+    assert "myorg/myrepo" in call_args
+    assert "--state" in call_args
+    assert "closed" in call_args
+
+
 @patch("lib.feedback.search_existing_issues")
 def test_find_matching_issue_by_step(mock_search):
     """find_matching_issue should find issue by step number."""
@@ -605,6 +621,17 @@ def test_file_issue_empty_url(mock_run):
     result = file_issue("Test title", "Test body")
 
     assert result is None
+
+
+@patch("lib.feedback.subprocess.run")
+def test_file_issue_without_labels(mock_run):
+    """file_issue omits --label when labels is None."""
+    mock_run.return_value.stdout = "https://github.com/example/repo/issues/1\n"
+
+    file_issue("Title", "Body", labels=None)
+
+    call_args = mock_run.call_args[0][0]
+    assert "--label" not in call_args
 
 
 @patch("lib.feedback.subprocess.run")
