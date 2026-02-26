@@ -67,6 +67,7 @@ This is where you want the AI agent to help with development.
 |------|---------|
 | `.github/workflows/agent.yml` | **Required.** The shim workflow. Triggers on `/agent-resolve`, `/agent-design`, and `/agent-review` comments and calls `remote-dev-bot.yml` from remote-dev-bot. This is the only workflow file you need. |
 | `remote-dev-bot.yaml` | **Optional.** Override config. Add model aliases, change settings, or override defaults for this specific repo. Merged on top of the base config. |
+| `remote-dev-bot.local.yaml` | **Optional.** Local-only config. Deepest override layer; useful for per-machine tweaks. Gitignore it if you don't want it committed. |
 | `.openhands/microagents/repo.md` | **Optional.** Context for the AI agent. Describe your codebase, coding conventions, test commands, architecture — anything the agent should know. |
 
 **Repository Secrets (required):**
@@ -83,8 +84,8 @@ When someone comments `/agent-resolve-claude-large` on an issue:
 
 1. **Shim triggers** — The target repo's `agent.yml` fires on the comment
 2. **Calls reusable workflow** — The shim calls `remote-dev-bot.yml@main` from remote-dev-bot
-3. **Config checkout** — remote-dev-bot.yml checks out `lib/config.py` from remote-dev-bot
-4. **Config merge** — config.py loads base config from remote-dev-bot, merges with any override config in the target repo
+3. **Config checkout** — remote-dev-bot.yml sparse-checks out `remote-dev-bot.yaml` and `lib/` from remote-dev-bot
+4. **Config merge** — config.py loads base config from remote-dev-bot, merges with any override (and local) config in the target repo
 5. **Model resolution** — The alias `claude-large` is resolved to a model ID like `anthropic/claude-opus-4-5`
 6. **Feedback** — A rocket emoji is added to your comment and you're assigned to the issue, so you can see at a glance which issues have active work
 7. **Agent runs** — OpenHands reads the issue, explores the codebase, makes changes
@@ -116,7 +117,15 @@ User comments /agent-resolve-claude-large
 
 ## Config Layering
 
-Configuration is layered: target repo settings override remote-dev-bot defaults.
+Configuration is merged across up to three layers (each is optional, deeper layers win):
+
+| Layer | File | Where it lives |
+|-------|------|----------------|
+| Base | `remote-dev-bot.yaml` | remote-dev-bot repo (fetched via sparse-checkout) |
+| Override | `remote-dev-bot.yaml` | target repo root |
+| Local | `remote-dev-bot.local.yaml` | target repo root (gitignored by convention) |
+
+Example:
 
 ```yaml
 # remote-dev-bot/remote-dev-bot.yaml (base)
@@ -133,10 +142,38 @@ openhands:
 
 Result: `default_model: claude-large`, `max_iterations: 30`, `pr_type: ready` (inherited from base).
 
+Merges are deep (leaf-level): overriding `openhands.max_iterations` does not clobber other `openhands` fields.
+
 This lets you:
 - Use different default models per repo
 - Set lower iteration limits for repos with simpler tasks
 - Test config changes without modifying remote-dev-bot
+
+## Per-Invocation Arguments (Inline Args)
+
+Users can override config values for a single run by adding argument lines after the command in their GitHub comment:
+
+```
+/agent-resolve
+max iterations = 75
+target branch = my-feature
+context = docs/architecture.md extra-context.md
+```
+
+**How it works:**
+- `COMMENT_BODY` carries the full comment text into `lib/config.py`
+- The first line is the command; subsequent `name = value` lines are parsed as arguments
+- Argument names are normalized: spaces, dashes, and underscores are equivalent (`max iterations`, `max-iterations`, and `max_iterations` all resolve to the same thing)
+
+**Supported arguments:**
+
+| Argument | Applies to | Description |
+|----------|-----------|-------------|
+| `max_iterations` | `openhands.max_iterations` | Override iteration limit for this run |
+| `target_branch` | `openhands.target_branch` | Override target branch for this run |
+| `context` | mode's `context_files` | Append extra files (space-separated) — does not replace existing list |
+
+Unknown argument names are rejected with an error comment. The inline arg system is implemented in `lib/config.py` (`parse_invocation`, `parse_args`, `ALLOWED_ARGS`).
 
 ## Authentication and Bot Identity
 
