@@ -55,6 +55,7 @@ context = extra-context.md
 | Argument | Type | Description |
 |----------|------|-------------|
 | `max iterations` | integer | Override the iteration limit for this run |
+| `timeout minutes` | integer | Override the watchdog timeout in minutes for this run |
 | `target branch` | string | Target branch for the PR (default: `main`) |
 | `context` | list | Additional context files for the agent to read (space-separated) |
 
