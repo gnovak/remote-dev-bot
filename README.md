@@ -126,7 +126,7 @@ commit_trailer: ""
 The system has two parts:
 
 - **Shim workflow** (`.github/workflows/agent.yml`) — a thin trigger that lives in each target repo. Fires on `/agent-` commands and calls the reusable workflow. Copy this file to set up the shim install.
-- **Reusable workflow** (`.github/workflows/remote-dev-bot.yml`) — all the logic: parses commands, dispatches to resolve or design mode, runs the agent. Lives in this repo and is called by shims in target repos.
+- **Reusable workflow** (`.github/workflows/remote-dev-bot.yml`) — all the logic: parses commands, dispatches to resolve, design, or review mode, runs the agent. Lives in this repo and is called by shims in target repos.
 - **OpenHands** — the AI agent framework that does the actual code exploration and editing
 - **`remote-dev-bot.yaml`** — model aliases and OpenHands settings (version, max iterations, PR type)
 - **`runbook.md`** — step-by-step setup instructions, designed to be followed by a human or by an AI assistant (like Claude Code)
@@ -185,6 +185,26 @@ openhands:
 
 Use `draft` if you want to review and complete partial work yourself. The default `comment` is safer — it surfaces what happened without creating a PR that might be accidentally merged.
 
+### Other Configuration Options
+
+```yaml
+openhands:
+  # Target branch for PRs (default: main)
+  target_branch: main
+
+  # Assign the triggering user to the issue when the agent starts (default: true)
+  assign_issue: true
+
+  # Assign the triggering user to the resulting PR (default: true)
+  assign_pr: true
+
+  # Watchdog timeout in minutes — kills OpenHands after this many minutes
+  # so cost report and artifact upload steps still run (default: 120)
+  timeout_minutes: 120
+```
+
+You can also override `max_iterations`, `target_branch`, and `context` on a per-invocation basis without editing the config file — see [Per-Invocation Arguments](#per-invocation-arguments).
+
 ## Troubleshooting
 
 ### Getting a second PR instead of a revision
@@ -239,7 +259,7 @@ Dashboard, billing, and API key management links for each supported provider.
 
 ## Current Status
 
-**v0.3.0** — Mode-based commands + compiled workflows (Feb 15, 2026). Two command modes: `/agent-resolve` (opens PR) and `/agent-design` (posts analysis comment). Multi-provider support (Claude, GPT, Gemini). Two-file compiled install. Security guardrails and config layering. See [CHANGELOG.md](CHANGELOG.md) for details.
+**v0.3.0** — Mode-based commands + compiled workflows (Feb 15, 2026). Three command modes: `/agent-resolve` (opens PR), `/agent-design` (posts analysis comment), and `/agent-review` (posts code review on a PR). Multi-provider support (Claude, GPT, Gemini). Two-file compiled install. Security guardrails and config layering. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **v0.2.0** — Shim + reusable workflow (Feb 11, 2026). Refactored into a thin shim per target repo that calls a shared reusable workflow. Cross-repo support tested with separate test repo.
 
