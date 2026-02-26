@@ -347,6 +347,30 @@ def test_parse_invocation_unknown_mode():
         parse_invocation("/agent frobnicate", KNOWN_MODES)
 
 
+def test_parse_invocation_custom_prefix():
+    """Custom command_prefix replaces 'agent' in the expected slash command."""
+    assert parse_invocation("/dogfood resolve", KNOWN_MODES, "dogfood") == ("resolve", "", {})
+    assert parse_invocation("/dogfood-resolve-claude-large", KNOWN_MODES, "dogfood") == ("resolve", "claude-large", {})
+
+
+def test_parse_invocation_custom_prefix_with_args():
+    """Custom prefix with inline args on subsequent lines."""
+    comment = "/dogfood-resolve\nmax iterations = 75"
+    assert parse_invocation(comment, KNOWN_MODES, "dogfood") == ("resolve", "", {"max_iterations": 75})
+
+
+def test_parse_invocation_bare_custom_prefix():
+    """Bare /dogfood raises ValueError naming the custom prefix."""
+    with pytest.raises(ValueError, match="Bare /dogfood"):
+        parse_invocation("/dogfood", KNOWN_MODES, "dogfood")
+
+
+def test_parse_invocation_wrong_prefix():
+    """Comment using the wrong prefix raises 'Invalid command format'."""
+    with pytest.raises(ValueError, match="Invalid command format"):
+        parse_invocation("/agent resolve", KNOWN_MODES, "dogfood")
+
+
 # --- resolve_config ---
 
 
@@ -1163,3 +1187,15 @@ class TestConfigMain:
         ):
             main()
         assert exc.value.code == 1
+
+    def test_comment_body_custom_command_prefix(self, tmp_path):
+        """COMMAND_PREFIX env var changes the expected slash command prefix."""
+        output_file = tmp_path / "github_output"
+        with patch("sys.argv", ["config.py"]), patch.dict(
+            os.environ,
+            {"GITHUB_OUTPUT": str(output_file), "COMMENT_BODY": "/dogfood resolve", "COMMAND_PREFIX": "dogfood"},
+        ):
+            main()
+        content = output_file.read_text()
+        assert "mode=resolve\n" in content
+        assert "action=pr\n" in content
