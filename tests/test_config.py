@@ -101,6 +101,14 @@ def test_parse_command_design_with_model():
     assert parse_command("design-claude-large", KNOWN_MODES) == ("design", "claude-large")
 
 
+def test_parse_command_review():
+    assert parse_command("review", KNOWN_MODES) == ("review", "")
+
+
+def test_parse_command_review_with_model():
+    assert parse_command("review-claude-large", KNOWN_MODES) == ("review", "claude-large")
+
+
 def test_parse_command_multi_segment_model():
     """Model aliases with hyphens should be preserved."""
     assert parse_command("resolve-gpt-large", KNOWN_MODES) == ("resolve", "gpt-large")
@@ -270,6 +278,40 @@ def test_parse_args_invalid_int():
         parse_args(["max iterations = not_a_number"])
 
 
+def test_parse_args_empty_name():
+    """Lines with empty name after = should be skipped."""
+    result = parse_args(["= value", "max iterations = 75"])
+    assert result == {"max_iterations": 75}
+
+
+def test_parse_args_empty_value():
+    """Lines with empty value after = should be skipped."""
+    result = parse_args(["max iterations =", "context = file.txt"])
+    assert result == {"context_files": ["file.txt"]}
+
+
+def test_parse_args_whitespace_only_name():
+    """Lines with whitespace-only name should be skipped."""
+    result = parse_args(["   = value", "max iterations = 75"])
+    assert result == {"max_iterations": 75}
+
+
+def test_parse_args_whitespace_only_value():
+    """Lines with whitespace-only value should be skipped."""
+    result = parse_args(["max iterations =   ", "context = file.txt"])
+    assert result == {"context_files": ["file.txt"]}
+
+
+def test_parse_args_skip_empty_name_or_value():
+    """Lines with '=' but empty name or empty value are silently skipped."""
+    # Empty name: "= value" — normalize_arg_name("") → "" → skip
+    assert parse_args(["= some_value"]) == {}
+    # Empty value: "name =" — value.strip() == "" → skip
+    assert parse_args(["max_iterations ="]) == {}
+    # Both empty
+    assert parse_args(["="]) == {}
+
+
 # --- parse_invocation ---
 
 
@@ -337,6 +379,30 @@ def test_parse_invocation_unknown_mode():
     """Unknown mode should raise ValueError."""
     with pytest.raises(ValueError, match="Unknown mode"):
         parse_invocation("/agent frobnicate", KNOWN_MODES)
+
+
+def test_parse_invocation_custom_prefix():
+    """Custom command_prefix replaces 'agent' in the expected slash command."""
+    assert parse_invocation("/dogfood resolve", KNOWN_MODES, "dogfood") == ("resolve", "", {})
+    assert parse_invocation("/dogfood-resolve-claude-large", KNOWN_MODES, "dogfood") == ("resolve", "claude-large", {})
+
+
+def test_parse_invocation_custom_prefix_with_args():
+    """Custom prefix with inline args on subsequent lines."""
+    comment = "/dogfood-resolve\nmax iterations = 75"
+    assert parse_invocation(comment, KNOWN_MODES, "dogfood") == ("resolve", "", {"max_iterations": 75})
+
+
+def test_parse_invocation_bare_custom_prefix():
+    """Bare /dogfood raises ValueError naming the custom prefix."""
+    with pytest.raises(ValueError, match="Bare /dogfood"):
+        parse_invocation("/dogfood", KNOWN_MODES, "dogfood")
+
+
+def test_parse_invocation_wrong_prefix():
+    """Comment using the wrong prefix raises 'Invalid command format'."""
+    with pytest.raises(ValueError, match="Invalid command format"):
+        parse_invocation("/agent resolve", KNOWN_MODES, "dogfood")
 
 
 # --- resolve_config ---
@@ -1069,6 +1135,58 @@ def test_resolve_config_timeout_with_model(config_dir):
     assert result["alias"] == "claude-large"
 
 
+# --- resolve_config with args ---
+
+
+def test_resolve_config_args_max_iterations(config_dir):
+    """args can override max_iterations."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={"max_iterations": 75})
+    assert result["max_iterations"] == 75
+
+
+def test_resolve_config_args_context_files_no_mode_config(config_dir):
+    """args context_files used as-is when mode has no context_files."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "design", args={"context_files": ["custom.txt"]})
+    assert result["context_files"] == ["custom.txt"]
+
+
+def test_resolve_config_args_context_files_appends_to_mode_config(config_dir):
+    """args context_files should append to mode's context_files, not replace."""
+    tmp_path, base_path = config_dir
+    # Add context_files to design mode
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["modes"]["design"]["context_files"] = ["README.md", "AGENTS.md"]
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+
+    result = resolve_config(base_path, "nonexistent.yaml", "design", args={"context_files": ["custom.txt"]})
+    assert result["context_files"] == ["README.md", "AGENTS.md", "custom.txt"]
+
+
+def test_resolve_config_args_target_branch(config_dir):
+    """args can override target_branch."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={"target_branch": "design/gemini"})
+    assert result["target_branch"] == "design/gemini"
+
+
+def test_resolve_config_args_empty_dict(config_dir):
+    """Empty args dict should not change anything."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={})
+    assert result["max_iterations"] == 50  # default from config
+
+
+def test_resolve_config_args_none(config_dir):
+    """None args should not change anything."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", args=None)
+    assert result["max_iterations"] == 50  # default from config
+
+
 # --- main() — CLI entry point and GITHUB_OUTPUT writing ---
 
 
@@ -1099,7 +1217,7 @@ class TestConfigMain:
         for key in (
             "mode", "action", "model", "alias",
             "max_iterations", "oh_version", "pr_type", "on_failure", "commit_trailer",
-            "assign_issue", "assign_pr", "timeout_minutes",
+            "assign_issue", "assign_pr", "target_branch", "timeout_minutes",
         ):
             assert f"{key}=" in content, f"Missing key in GITHUB_OUTPUT: {key}"
 
@@ -1253,3 +1371,113 @@ class TestConfigMain:
         """timeout_minutes contains the per-invocation value when specified."""
         content = self._call_main("resolve", tmp_path, timeout_minutes=90)
         assert "timeout_minutes=90\n" in content
+
+    def test_resolve_writes_target_branch(self, tmp_path):
+        """target_branch is written to GITHUB_OUTPUT."""
+        content = self._call_main("resolve", tmp_path)
+        assert "target_branch=" in content
+
+    def _call_main_with_comment(self, comment_body, tmp_path):
+        """Run main() with COMMENT_BODY env var; return GITHUB_OUTPUT file contents."""
+        output_file = tmp_path / "github_output"
+        with patch("sys.argv", ["config.py"]), patch.dict(
+            os.environ, {"GITHUB_OUTPUT": str(output_file), "COMMENT_BODY": comment_body}
+        ):
+            main()
+        return output_file.read_text()
+
+    def test_comment_body_simple_command(self, tmp_path):
+        """COMMENT_BODY with simple command works."""
+        content = self._call_main_with_comment("/agent resolve", tmp_path)
+        assert "mode=resolve\n" in content
+        assert "action=pr\n" in content
+
+    def test_comment_body_with_model(self, tmp_path):
+        """COMMENT_BODY with model alias works."""
+        content = self._call_main_with_comment("/agent resolve claude-large", tmp_path)
+        assert "mode=resolve\n" in content
+        assert "alias=claude-large\n" in content
+
+    def test_comment_body_with_args(self, tmp_path):
+        """COMMENT_BODY with args on subsequent lines works."""
+        comment = "/agent resolve\nmax iterations = 75"
+        content = self._call_main_with_comment(comment, tmp_path)
+        assert "mode=resolve\n" in content
+        assert "max_iterations=75\n" in content
+
+    def test_comment_body_with_model_and_args(self, tmp_path):
+        """COMMENT_BODY with model and args works."""
+        comment = "/agent resolve claude-large\nmax iterations = 100"
+        content = self._call_main_with_comment(comment, tmp_path)
+        assert "mode=resolve\n" in content
+        assert "alias=claude-large\n" in content
+        assert "max_iterations=100\n" in content
+
+    def test_comment_body_design_with_context_append(self, tmp_path):
+        """COMMENT_BODY appends context_files to mode's existing list."""
+        comment = "/agent design\ncontext = custom.txt"
+        content = self._call_main_with_comment(comment, tmp_path)
+        assert "mode=design\n" in content
+        assert "custom.txt" in content
+
+    def test_comment_body_invalid_command_exits_one(self, tmp_path):
+        """Invalid command in COMMENT_BODY exits with code 1."""
+        with (
+            patch("sys.argv", ["config.py"]),
+            patch.dict(os.environ, {
+                "GITHUB_OUTPUT": str(tmp_path / "out"),
+                "COMMENT_BODY": "/agent frobnicate"
+            }),
+            pytest.raises(SystemExit) as exc,
+        ):
+            main()
+        assert exc.value.code == 1
+
+    def test_comment_body_custom_command_prefix(self, tmp_path):
+        """COMMAND_PREFIX env var changes the expected slash command prefix."""
+        output_file = tmp_path / "github_output"
+        with patch("sys.argv", ["config.py"]), patch.dict(
+            os.environ,
+            {"GITHUB_OUTPUT": str(output_file), "COMMENT_BODY": "/dogfood resolve", "COMMAND_PREFIX": "dogfood"},
+        ):
+            main()
+        content = output_file.read_text()
+        assert "mode=resolve\n" in content
+        assert "action=pr\n" in content
+
+    def test_comment_body_with_existing_base_config(self, tmp_path):
+        """COMMENT_BODY mode reads base config when it exists (covers main() lines 461-462)."""
+        # Write a minimal base config that main() will find at the hardcoded base_path
+        base_dir = tmp_path / ".remote-dev-bot"
+        base_dir.mkdir()
+        base_config = {
+            "default_model": "m1",
+            "models": {"m1": {"id": "anthropic/test-model"}},
+            "modes": {"resolve": {"action": "pr"}},
+            "openhands": {"version": "9.9.9", "max_iterations": 7, "pr_type": "ready"},
+        }
+        (base_dir / "remote-dev-bot.yaml").write_text(yaml.dump(base_config))
+
+        output_file = tmp_path / "github_output"
+        # Run main() with cwd set to tmp_path so the relative paths resolve correctly
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            with patch("sys.argv", ["config.py"]), patch.dict(
+                os.environ,
+                {"GITHUB_OUTPUT": str(output_file), "COMMENT_BODY": "/agent resolve"},
+                clear=False,
+            ):
+                # Remove COMMENT_BODY from real env if it exists to avoid interference
+                env = {k: v for k, v in os.environ.items() if k != "COMMENT_BODY"}
+                env["GITHUB_OUTPUT"] = str(output_file)
+                env["COMMENT_BODY"] = "/agent resolve"
+                with patch.dict(os.environ, env, clear=True):
+                    main()
+        finally:
+            os.chdir(old_cwd)
+
+        content = output_file.read_text()
+        assert "mode=resolve\n" in content
+        # Config was read from our custom base; version should reflect it
+        assert "oh_version=9.9.9\n" in content

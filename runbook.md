@@ -4,7 +4,7 @@
 
 This runbook will guide you through setting up Remote Dev Bot on your GitHub repository. By the end, you'll have an AI-powered bot that can automatically resolve issues and create pull requests when triggered by a `/agent-resolve` comment.
 
-**How the bot works:** When you comment `/agent-resolve` on an issue, a GitHub Actions workflow starts. It spins up [OpenHands](https://github.com/All-Hands-AI/OpenHands) (an open-source AI coding agent) in a sandboxed container, points it at your issue, and lets it work. The agent reads the issue, explores your codebase, writes code, runs tests, and iterates until it has a solution. Then it pushes a branch and opens a draft PR for your review. You can also use `/agent-design` for AI design analysis posted as a comment (no code changes).
+**How the bot works:** When you comment `/agent-resolve` on an issue, a GitHub Actions workflow starts. It spins up [OpenHands](https://github.com/All-Hands-AI/OpenHands) (an open-source AI coding agent) in a sandboxed container, points it at your issue, and lets it work. The agent reads the issue, explores your codebase, writes code, runs tests, and iterates until it has a solution. Then it pushes a branch and opens a draft PR for your review. You can also use `/agent-design` for AI design analysis posted as a comment (no code changes), or `/agent-review` on a pull request to get an AI code review.
 
 **What you'll set up:**
 
@@ -727,7 +727,7 @@ If the agent fails with `x-api-key header is required` or similar authentication
 - Verify the shim workflow file is on the default branch (usually `main`) of the target repo
 - Check that the commenter has collaborator/member/owner access to the repo
 - Look at the Actions tab for failed runs (go to `https://github.com/{owner}/{repo}/actions`)
-- Make sure the comment starts with exactly `/agent-resolve` or `/agent-design` (no leading spaces)
+- Make sure the comment starts with exactly `/agent-resolve`, `/agent-design`, or `/agent-review` (no leading spaces)
 - Verify the shim points to the correct ref (e.g., `@main` or `@dev`)
 
 ### Agent fails during setup steps (first 2 minutes)

@@ -464,3 +464,400 @@ def test_report_problems_summary_for_many_problems(mock_env):
     assert len(result["filed"]) == 1
     assert "Multiple problems" in result["filed"][0]["title"]
     assert f"{MAX_ISSUES_PER_INSTALL + 2} issues" in result["filed"][0]["title"]
+
+
+# --- Tests for subprocess-based functions (mocked) ---
+
+
+@patch("lib.feedback.subprocess.run")
+def test_search_existing_issues_success(mock_run):
+    """search_existing_issues should return parsed JSON on success."""
+    mock_run.return_value.stdout = '[{"number": 42, "title": "Test", "url": "https://..."}]'
+    mock_run.return_value.returncode = 0
+
+    result = search_existing_issues("Step 2.1")
+
+    assert len(result) == 1
+    assert result[0]["number"] == 42
+    mock_run.assert_called_once()
+
+
+@patch("lib.feedback.subprocess.run")
+def test_search_existing_issues_empty_result(mock_run):
+    """search_existing_issues should return empty list for empty result."""
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.returncode = 0
+
+    result = search_existing_issues("nonexistent")
+
+    assert result == []
+
+
+@patch("lib.feedback.subprocess.run")
+def test_search_existing_issues_subprocess_error(mock_run):
+    """search_existing_issues should return empty list on subprocess error."""
+    import subprocess
+    mock_run.side_effect = subprocess.CalledProcessError(1, "gh")
+
+    result = search_existing_issues("Step 2.1")
+
+    assert result == []
+
+
+@patch("lib.feedback.subprocess.run")
+def test_search_existing_issues_json_error(mock_run):
+    """search_existing_issues should return empty list on JSON parse error."""
+    mock_run.return_value.stdout = "not valid json"
+    mock_run.return_value.returncode = 0
+
+    result = search_existing_issues("Step 2.1")
+
+    assert result == []
+
+
+
+
+@patch("lib.feedback.subprocess.run")
+def test_search_existing_issues_custom_repo_and_state(mock_run):
+    """search_existing_issues passes repo and state to gh."""
+    mock_run.return_value.stdout = "[]"
+
+    search_existing_issues("term", repo="myorg/myrepo", state="closed")
+
+    call_args = mock_run.call_args[0][0]
+    assert "--repo" in call_args
+    assert "myorg/myrepo" in call_args
+    assert "--state" in call_args
+    assert "closed" in call_args
+
+
+@patch("lib.feedback.search_existing_issues")
+def test_find_matching_issue_by_step(mock_search):
+    """find_matching_issue should find issue by step number."""
+    mock_search.return_value = [{"number": 42, "title": "Step 2.1 issue"}]
+
+    problem = InstallProblem(
+        step="2.1", title="Enable Actions", result="fail", expected="x", actual="y"
+    )
+    result = find_matching_issue(problem)
+
+    assert result["number"] == 42
+    mock_search.assert_called_once_with("Step 2.1", DEFAULT_REPO)
+
+
+@patch("lib.feedback.search_existing_issues")
+def test_find_matching_issue_by_title(mock_search):
+    """find_matching_issue should fall back to title search."""
+    # First call (step search) returns empty, second call (title search) returns match
+    mock_search.side_effect = [[], [{"number": 99, "title": "Enable Actions issue"}]]
+
+    problem = InstallProblem(
+        step="2.1", title="Enable Actions Permissions", result="fail", expected="x", actual="y"
+    )
+    result = find_matching_issue(problem)
+
+    assert result["number"] == 99
+    assert mock_search.call_count == 2
+
+
+@patch("lib.feedback.search_existing_issues")
+def test_find_matching_issue_not_found(mock_search):
+    """find_matching_issue should return None when no match found."""
+    mock_search.return_value = []
+
+    problem = InstallProblem(
+        step="2.1", title="Enable Actions", result="fail", expected="x", actual="y"
+    )
+    result = find_matching_issue(problem)
+
+    assert result is None
+
+
+@patch("lib.feedback.subprocess.run")
+def test_file_issue_success(mock_run):
+    """file_issue should return issue info on success."""
+    mock_run.return_value.stdout = "https://github.com/owner/repo/issues/123"
+    mock_run.return_value.returncode = 0
+
+    result = file_issue("Test title", "Test body")
+
+    assert result["number"] == "123"
+    assert "123" in result["url"]
+
+
+@patch("lib.feedback.subprocess.run")
+def test_file_issue_with_labels(mock_run):
+    """file_issue should include labels in command."""
+    mock_run.return_value.stdout = "https://github.com/owner/repo/issues/456"
+    mock_run.return_value.returncode = 0
+
+    result = file_issue("Test title", "Test body", labels=["bug", "runbook"])
+
+    assert result["number"] == "456"
+    # Verify labels were passed
+    call_args = mock_run.call_args[0][0]
+    assert "--label" in call_args
+    assert "bug" in call_args
+    assert "runbook" in call_args
+
+
+@patch("lib.feedback.subprocess.run")
+def test_file_issue_failure(mock_run):
+    """file_issue should return None on failure."""
+    import subprocess
+    mock_run.side_effect = subprocess.CalledProcessError(1, "gh")
+
+    result = file_issue("Test title", "Test body")
+
+    assert result is None
+
+
+@patch("lib.feedback.subprocess.run")
+def test_file_issue_empty_url(mock_run):
+    """file_issue should return None when gh returns empty output."""
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.returncode = 0
+
+    result = file_issue("Test title", "Test body")
+
+    assert result is None
+
+
+@patch("lib.feedback.subprocess.run")
+def test_file_issue_without_labels(mock_run):
+    """file_issue omits --label when labels is None."""
+    mock_run.return_value.stdout = "https://github.com/example/repo/issues/1\n"
+
+    file_issue("Title", "Body", labels=None)
+
+    call_args = mock_run.call_args[0][0]
+    assert "--label" not in call_args
+
+
+@patch("lib.feedback.subprocess.run")
+def test_add_comment_success(mock_run):
+    """add_comment should return True on success."""
+    mock_run.return_value.returncode = 0
+
+    result = add_comment("42", "Test comment")
+
+    assert result is True
+
+
+@patch("lib.feedback.subprocess.run")
+def test_add_comment_failure(mock_run):
+    """add_comment should return False on failure."""
+    import subprocess
+    mock_run.side_effect = subprocess.CalledProcessError(1, "gh")
+
+    result = add_comment("42", "Test comment")
+
+    assert result is False
+
+
+# --- report_problems with mocked subprocess (non-dry_run) ---
+
+
+@patch("lib.feedback.file_issue")
+@patch("lib.feedback.find_matching_issue", return_value=None)
+def test_report_problems_files_new_issue(mock_find, mock_file):
+    """report_problems should file new issue when no existing match."""
+    mock_file.return_value = {"number": "123", "url": "https://..."}
+
+    report = InstallReport(os_info="Linux-5.4.0", shell="/bin/bash", python_version="3.11.0")
+    report.add_problem(
+        step="2.1",
+        title="Enable Actions Permissions",
+        result="fail",
+        expected="x",
+        actual="y",
+    )
+
+    result = report_problems(report, dry_run=False)
+
+    assert len(result["filed"]) == 1
+    assert result["filed"][0]["number"] == "123"
+    mock_file.assert_called_once()
+
+
+@patch("lib.feedback.file_issue")
+@patch("lib.feedback.find_matching_issue", return_value=None)
+def test_report_problems_file_issue_failure(mock_find, mock_file):
+    """report_problems should record error when file_issue fails."""
+    mock_file.return_value = None
+
+    report = InstallReport(os_info="Linux-5.4.0", shell="/bin/bash", python_version="3.11.0")
+    report.add_problem(
+        step="2.1",
+        title="Enable Actions Permissions",
+        result="fail",
+        expected="x",
+        actual="y",
+    )
+
+    result = report_problems(report, dry_run=False)
+
+    assert len(result["errors"]) == 1
+    assert "Failed to file issue" in result["errors"][0]["error"]
+
+
+@patch("lib.feedback.add_comment")
+@patch("lib.feedback.find_matching_issue")
+def test_report_problems_comments_existing_issue(mock_find, mock_comment):
+    """report_problems should add comment to existing issue."""
+    mock_find.return_value = {"number": 42, "title": "Existing issue", "url": "https://..."}
+    mock_comment.return_value = True
+
+    report = InstallReport(os_info="Linux-5.4.0", shell="/bin/bash", python_version="3.11.0")
+    report.add_problem(
+        step="2.1",
+        title="Enable Actions Permissions",
+        result="fail",
+        expected="x",
+        actual="y",
+    )
+
+    result = report_problems(report, dry_run=False)
+
+    assert len(result["commented"]) == 1
+    assert result["commented"][0]["number"] == 42
+    mock_comment.assert_called_once()
+
+
+@patch("lib.feedback.add_comment")
+@patch("lib.feedback.find_matching_issue")
+def test_report_problems_comment_failure(mock_find, mock_comment):
+    """report_problems should record error when add_comment fails."""
+    mock_find.return_value = {"number": 42, "title": "Existing issue", "url": "https://..."}
+    mock_comment.return_value = False
+
+    report = InstallReport(os_info="Linux-5.4.0", shell="/bin/bash", python_version="3.11.0")
+    report.add_problem(
+        step="2.1",
+        title="Enable Actions Permissions",
+        result="fail",
+        expected="x",
+        actual="y",
+    )
+
+    result = report_problems(report, dry_run=False)
+
+    assert len(result["errors"]) == 1
+    assert "Failed to add comment" in result["errors"][0]["error"]
+
+
+@patch("lib.feedback.file_issue")
+@patch("lib.feedback.get_environment_info")
+def test_report_problems_summary_non_dry_run(mock_env, mock_file):
+    """report_problems should file summary issue for many problems (non-dry_run)."""
+    mock_env.return_value = {"os": "Linux-5.4.0", "shell": "/bin/bash", "python": "3.11.0"}
+    mock_file.return_value = {"number": "999", "url": "https://..."}
+
+    report = InstallReport(os_info="Linux-5.4.0", shell="/bin/bash", python_version="3.11.0")
+    for i in range(MAX_ISSUES_PER_INSTALL + 2):
+        report.add_problem(
+            step=f"{i}.1",
+            title=f"Problem {i}",
+            result="fail",
+            expected="x",
+            actual="y",
+        )
+
+    result = report_problems(report, dry_run=False)
+
+    assert len(result["filed"]) == 1
+    assert result["filed"][0]["number"] == "999"
+    mock_file.assert_called_once()
+
+
+@patch("lib.feedback.file_issue")
+@patch("lib.feedback.get_environment_info")
+def test_report_problems_summary_file_failure(mock_env, mock_file):
+    """report_problems should record error when summary issue filing fails."""
+    mock_env.return_value = {"os": "Linux-5.4.0", "shell": "/bin/bash", "python": "3.11.0"}
+    mock_file.return_value = None
+
+    report = InstallReport(os_info="Linux-5.4.0", shell="/bin/bash", python_version="3.11.0")
+    for i in range(MAX_ISSUES_PER_INSTALL + 2):
+        report.add_problem(
+            step=f"{i}.1",
+            title=f"Problem {i}",
+            result="fail",
+            expected="x",
+            actual="y",
+        )
+
+    result = report_problems(report, dry_run=False)
+
+    assert len(result["errors"]) == 1
+    assert "Failed to file issue" in result["errors"][0]["error"]
+
+
+@patch("lib.feedback.file_issue")
+@patch("lib.feedback.find_matching_issue", return_value=None)
+def test_report_problems_files_all_at_limit_non_dry_run(mock_find, mock_file):
+    """report_problems should file all issues when exactly at MAX_ISSUES_PER_INSTALL."""
+    mock_file.return_value = {"number": "123", "url": "https://..."}
+
+    report = InstallReport(os_info="Linux-5.4.0", shell="/bin/bash", python_version="3.11.0")
+    # Add exactly MAX_ISSUES_PER_INSTALL problems
+    for i in range(MAX_ISSUES_PER_INSTALL):
+        report.add_problem(
+            step=f"{i}.1",
+            title=f"Problem {i}",
+            result="fail",
+            expected="x",
+            actual="y",
+        )
+
+    result = report_problems(report, dry_run=False)
+
+    # Should file all MAX_ISSUES_PER_INSTALL issues, none skipped
+    assert len(result["filed"]) == MAX_ISSUES_PER_INSTALL
+    assert len(result["skipped"]) == 0
+    assert mock_file.call_count == MAX_ISSUES_PER_INSTALL
+
+
+# --- format_summary_issue_body edge cases ---
+
+
+@patch("lib.feedback.get_environment_info")
+def test_format_summary_issue_body_with_workaround(mock_env):
+    """format_summary_issue_body should include workaround when present."""
+    mock_env.return_value = {"os": "Linux-5.4.0", "shell": "/bin/bash", "python": "3.11.0"}
+
+    report = InstallReport(os_info="Linux-5.4.0", shell="/bin/bash", python_version="3.11.0")
+    report.add_problem(
+        step="2.1",
+        title="Problem with workaround",
+        result="deviate",
+        expected="CLI method",
+        actual="403 error",
+        workaround="Used web UI instead",
+    )
+
+    body = format_summary_issue_body(report)
+
+    assert "Used web UI instead" in body
+    assert "**Workaround:**" in body
+
+
+@patch("lib.feedback.get_environment_info")
+def test_format_summary_issue_body_with_suggested_fix(mock_env):
+    """format_summary_issue_body should include suggested_fix when present."""
+    mock_env.return_value = {"os": "Linux-5.4.0", "shell": "/bin/bash", "python": "3.11.0"}
+
+    report = InstallReport(os_info="Linux-5.4.0", shell="/bin/bash", python_version="3.11.0")
+    report.add_problem(
+        step="2.1",
+        title="Problem with fix",
+        result="fail",
+        expected="CLI method",
+        actual="403 error",
+        suggested_fix="Add admin note to runbook",
+    )
+
+    body = format_summary_issue_body(report)
+
+    assert "Add admin note to runbook" in body
+    assert "**Suggested fix:**" in body

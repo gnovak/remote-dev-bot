@@ -46,10 +46,10 @@ KNOWN_PROVIDERS = ("anthropic/", "openai/", "gemini/")
 # Arguments that can be overridden via command-line args
 ALLOWED_ARGS = {
     "max_iterations": int,  # openhands.max_iterations
+    "timeout_minutes": int,  # openhands.timeout_minutes
     "context": list,  # mode's context_files (alias)
     "context_files": list,  # mode's context_files
     "target_branch": str,  # openhands.target_branch
-    "timeout_minutes": int,  # openhands.timeout_minutes (per-invocation override)
 }
 
 
@@ -261,7 +261,7 @@ def resolve_commit_trailer(template, alias, model_id, oh_version):
 DEFAULT_TIMEOUT_MINUTES = 120
 
 
-def resolve_config(base_path, override_path, command_string, local_path=None, args=None, timeout_minutes=None):
+def resolve_config(base_path, override_path, command_string, local_path=None, timeout_minutes=None, args=None):
     """Load configs, merge, resolve mode + alias, return outputs dict.
 
     Applies up to three config layers (each is optional):
@@ -270,8 +270,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ar
       local_path    — target repo's remote-dev-bot.local.yaml (deepest override)
 
     command_string is the raw text after '/agent-' (e.g. 'resolve-claude-large').
+    timeout_minutes is the per-invocation override (from --timeout-minutes argparse flag).
     args is an optional dict of command-line argument overrides (e.g. {'max_iterations': 75}).
-    timeout_minutes is the per-invocation override (from --timeout-minutes flag or inline arg).
 
     Returns a dict with keys: mode, model, alias, max_iterations, oh_version,
     pr_type, has_override, timeout_minutes, plus any mode-specific settings.
@@ -380,6 +380,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ar
     # Apply command-line arg overrides
     if "max_iterations" in args:
         max_iter = args["max_iterations"]
+    if "timeout_minutes" in args:
+        resolved_timeout = args["timeout_minutes"]
     if "target_branch" in args:
         target_branch = args["target_branch"]
 
@@ -440,11 +442,13 @@ def main():
     """Main entry point for config parsing.
 
     Accepts either:
-      1. A single command string argument (legacy): "resolve-claude-large"
-      2. A full comment body via stdin (new): "/agent resolve\\nmax iterations = 75"
+      1. COMMENT_BODY env var (primary, new): full comment body with optional args
+      2. Argparse with positional command and --timeout-minutes flag (legacy, internal):
+         called by the workflow step for backwards compatibility
 
-    When COMMENT_BODY env var is set, reads the full comment from stdin.
-    Otherwise, uses the first command-line argument as the command string.
+    When COMMENT_BODY env var is set, reads the full comment body and parses it
+    using parse_invocation (supports multi-line argument syntax).
+    Otherwise, falls back to argparse: positional command string + --timeout-minutes.
     """
     base_path = ".remote-dev-bot/remote-dev-bot.yaml"
     override_path = "remote-dev-bot.yaml"
@@ -454,10 +458,26 @@ def main():
     comment_body = os.environ.get("COMMENT_BODY", "")
     command_prefix = os.environ.get("COMMAND_PREFIX", "agent")
 
-    timeout_override = None
+    # Set up argparse for the legacy internal path (--timeout-minutes flag)
+    parser = argparse.ArgumentParser(description="Remote Dev Bot config resolver")
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="",
+        help="Command string following '/agent-' (e.g. 'resolve-claude-large')",
+    )
+    parser.add_argument(
+        "--timeout-minutes",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override job timeout in minutes for this invocation (internal, called by workflow)",
+    )
+    parsed_args = parser.parse_args()
+
     try:
         if comment_body:
-            # New mode: parse full comment body with inline args (max_iterations, timeout, etc.)
+            # Primary mode: parse full comment body with args (COMMENT_BODY env var)
             # First, we need to load config to get known_modes
             base_config = {}
             if os.path.exists(base_path):
@@ -474,24 +494,21 @@ def main():
             config = deep_merge(deep_merge(base_config, override_config), local_config)
             known_modes = set(config.get("modes", {}).keys())
 
-            mode, model_alias, parsed_args = parse_invocation(comment_body, known_modes, command_prefix)
+            mode, model_alias, invocation_args = parse_invocation(comment_body, known_modes, command_prefix)
             command_string = f"{mode}-{model_alias}" if model_alias else mode
-            result = resolve_config(base_path, override_path, command_string, local_path=local_path, args=parsed_args)
-            timeout_override = (parsed_args or {}).get("timeout_minutes")
-        else:
-            # Legacy mode: single command string + optional --timeout-minutes flag
-            parser = argparse.ArgumentParser(description="Remote Dev Bot config resolver")
-            parser.add_argument("command", nargs="?", default="",
-                                help="Command string following '/agent-'")
-            parser.add_argument("--timeout-minutes", type=int, default=None, metavar="N",
-                                help="Override job timeout in minutes for this invocation")
-            cli_args = parser.parse_args()
             result = resolve_config(
-                base_path, override_path, cli_args.command,
+                base_path, override_path, command_string,
                 local_path=local_path,
-                timeout_minutes=cli_args.timeout_minutes,
+                args=invocation_args,
             )
-            timeout_override = cli_args.timeout_minutes
+        else:
+            # Legacy mode: argparse with positional command + optional --timeout-minutes
+            # This path is called by the workflow step internally
+            result = resolve_config(
+                base_path, override_path, parsed_args.command,
+                local_path=local_path,
+                timeout_minutes=parsed_args.timeout_minutes,
+            )
     except (KeyError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
@@ -526,7 +543,12 @@ def main():
     print(f"Mode: {result['mode']} (action: {result['action']})")
     print(f"Model alias: {result['alias']}")
     print(f"Model ID: {result['model']}")
-    timeout_source = "per-invocation override" if timeout_override is not None else "default"
+    if comment_body:
+        timeout_source = "default (COMMENT_BODY mode)"
+    elif parsed_args.timeout_minutes is not None:
+        timeout_source = "per-invocation override (--timeout-minutes)"
+    else:
+        timeout_source = "default"
     print(f"Timeout: {result['timeout_minutes']} minutes ({timeout_source})")
 
 
