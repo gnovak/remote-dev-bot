@@ -41,6 +41,25 @@ Modes and model aliases are configured in `remote-dev-bot.yaml`.
 
 **Mobile-friendly syntax:** Commands are case-insensitive and you can use spaces instead of dashes: `/agent resolve claude large` works the same as `/agent-resolve-claude-large`.
 
+### Per-Invocation Arguments
+
+You can override settings for a single run by adding arguments on lines after the command:
+
+```
+/agent resolve
+max iterations = 75
+target branch = feature/my-branch
+context = extra-context.md
+```
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `max iterations` | integer | Override the iteration limit for this run |
+| `target branch` | string | Target branch for the PR (default: `main`) |
+| `context` | list | Additional context files for the agent to read (space-separated) |
+
+Argument names are flexible: `max iterations`, `max-iterations`, and `max_iterations` all work.
+
 ### Understanding Model Names
 
 Model aliases (like `claude-small`) map to **LiteLLM model identifiers** in `remote-dev-bot.yaml`. LiteLLM is the library OpenHands uses to talk to different LLM providers through a unified interface.
