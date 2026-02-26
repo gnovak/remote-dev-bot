@@ -16,7 +16,7 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 ### Key Files
 
 **Workflows** (`.github/workflows/`):
-- `remote-dev-bot.yml` — the reusable workflow; all real logic; jobs: `parse`, `resolve`, `design`, `review`, `explore`
+- `remote-dev-bot.yml` — the reusable workflow; all real logic; jobs: `parse`, `resolve`, `design`, `review`, `explore` (`explore` is dev-only, not yet released to `main`)
 - `agent.yml` — thin shim users copy into their repos; calls `remote-dev-bot.yml@main`
 - `dogfood.yml` — internal shim for rdb self-dev; fires on `/dogfood` comments; calls `remote-dev-bot.yml@dev`
 - `test.yml` — CI: runs pytest on PRs to main
