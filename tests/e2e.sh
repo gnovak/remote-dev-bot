@@ -640,9 +640,9 @@ timeout_issue_url=$(gh issue create --repo "$TEST_REPO" \
 timeout_issue_num="${timeout_issue_url##*/}"
 cleanup_issues+=("$timeout_issue_num")
 
-log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout = 5..."
+log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout_minutes = 5..."
 gh issue comment "$timeout_issue_num" --repo "$TEST_REPO" \
-    --body $'/agent-resolve\ntimeout = 5'
+    --body $'/agent-resolve\ntimeout_minutes = 5'
 
 log "  Waiting 15s for workflow to start..."
 sleep 15

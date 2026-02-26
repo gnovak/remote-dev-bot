@@ -15,7 +15,7 @@ name: Resolve Issue
 #   context = file1.txt file2.txt
 #
 # Argument names are normalized (spaces/dashes/underscores are equivalent).
-# Supported arguments: max_iterations, context (alias for context_files).
+# Supported arguments: max_iterations, timeout_minutes, target_branch, context (alias for context_files).
 
 on:
   workflow_call:
