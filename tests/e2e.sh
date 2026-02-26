@@ -362,7 +362,7 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
 
     # Get recent workflow runs once per poll cycle — check all workflow files
     run_json=$(gh run list --repo "$TEST_REPO" \
-        --limit 20 \
+        --limit 50 \
         --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
 
     for pos in "${!issue_nums[@]}"; do
@@ -544,7 +544,7 @@ else
 
     while [[ $review_elapsed -lt $REVIEW_TIMEOUT ]]; do
         run_json=$(gh run list --repo "$TEST_REPO" \
-            --limit 20 \
+            --limit 50 \
             --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
 
         while IFS= read -r row; do
@@ -654,7 +654,7 @@ timeout_elapsed=0
 
 while [[ $timeout_elapsed -lt $TIMEOUT_WAIT ]]; do
     run_json=$(gh run list --repo "$TEST_REPO" \
-        --limit 20 \
+        --limit 50 \
         --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
 
     while IFS= read -r row; do
