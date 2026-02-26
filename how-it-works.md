@@ -67,7 +67,6 @@ This is where you want the AI agent to help with development.
 |------|---------|
 | `.github/workflows/agent.yml` | **Required.** The shim workflow. Triggers on `/agent-resolve`, `/agent-design`, and `/agent-review` comments and calls `remote-dev-bot.yml` from remote-dev-bot. This is the only workflow file you need. |
 | `remote-dev-bot.yaml` | **Optional.** Override config. Add model aliases, change settings, or override defaults for this specific repo. Merged on top of the base config. |
-| `remote-dev-bot.local.yaml` | **Optional.** Local-only config. Deepest override layer; useful for per-machine tweaks. Gitignore it if you don't want it committed. |
 | `.openhands/microagents/repo.md` | **Optional.** Context for the AI agent. Describe your codebase, coding conventions, test commands, architecture — anything the agent should know. |
 
 **Repository Secrets (required):**
@@ -85,7 +84,7 @@ When someone comments `/agent-resolve-claude-large` on an issue:
 1. **Shim triggers** — The target repo's `agent.yml` fires on the comment
 2. **Calls reusable workflow** — The shim calls `remote-dev-bot.yml@main` from remote-dev-bot
 3. **Config checkout** — remote-dev-bot.yml sparse-checks out `remote-dev-bot.yaml` and `lib/` from remote-dev-bot
-4. **Config merge** — config.py loads base config from remote-dev-bot, merges with any override (and local) config in the target repo
+4. **Config merge** — config.py loads base config from remote-dev-bot, merges with any override config in the target repo
 5. **Model resolution** — The alias `claude-large` is resolved to a model ID like `anthropic/claude-opus-4-5`
 6. **Feedback** — A rocket emoji is added to your comment and you're assigned to the issue, so you can see at a glance which issues have active work
 7. **Agent runs** — OpenHands reads the issue, explores the codebase, makes changes
@@ -117,13 +116,12 @@ User comments /agent-resolve-claude-large
 
 ## Config Layering
 
-Configuration is merged across up to three layers (each is optional, deeper layers win):
+Configuration is merged across two layers (each is optional, deeper layers win):
 
 | Layer | File | Where it lives |
 |-------|------|----------------|
 | Base | `remote-dev-bot.yaml` | remote-dev-bot repo (fetched via sparse-checkout) |
 | Override | `remote-dev-bot.yaml` | target repo root |
-| Local | `remote-dev-bot.local.yaml` | target repo root (gitignored by convention) |
 
 Example:
 

@@ -43,6 +43,8 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 - `remote-dev-bot.local.yaml` — local overrides (gitignored); use for dev without affecting CI
 - `runbook.md` — setup instructions designed to be followed by humans or AI assistants
 
+**Note on config layering:** The config system has a `.local.yaml` override file (`remote-dev-bot.local.yaml`) used in the remote-dev-bot repo itself for self-development/dogfooding. This is a developer tool only — do NOT document it in user-facing docs (README.md, how-it-works.md, runbook.md). It belongs only in CONTRIBUTING.md. User-facing docs should describe only the two-layer system: base config (in remote-dev-bot repo) + target repo override (`remote-dev-bot.yaml` in the calling repo).
+
 ### Running Tests
 
 ```bash
