@@ -143,6 +143,11 @@ This lets you:
 - Set lower iteration limits for repos with simpler tasks
 - Override only the settings that matter to your repo — everything else is inherited from the base
 
+The workflow logs show which configs were loaded, so you can verify what's in effect:
+```
+Config: base=remote-dev-bot, override=target repo
+```
+
 ## Per-Invocation Arguments (Inline Args)
 
 Users can override config values for a single run by adding argument lines after the command in their GitHub comment:
@@ -238,27 +243,3 @@ Now updates to your fork flow to your target repos, and you control the release 
 | Give the agent context about my codebase | `.openhands/microagents/repo.md` in target repo |
 | Override a setting for a single run | Inline args in the trigger comment (see above) |
 
-## Troubleshooting
-
-**"Which config file is being used?"**
-
-The workflow logs show which configs were loaded:
-```
-Config: base=remote-dev-bot, override=target repo
-```
-or
-```
-Config: base=remote-dev-bot, override=none
-```
-
-**"My config changes aren't taking effect"**
-
-- If you changed `remote-dev-bot.yaml` in the target repo: changes should work immediately on the next run.
-
-**"I'm confused about which repo I'm in"**
-
-Check the `uses:` line in your shim:
-```yaml
-uses: gnovak/remote-dev-bot/.github/workflows/remote-dev-bot.yml@main
-```
-This tells you which remote-dev-bot repo (and branch) you're using.
