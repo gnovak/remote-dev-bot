@@ -90,8 +90,8 @@ def inline_config_parsing(config_yaml, mode):
     assign_issue = oh.get("assign_issue", True)
     assign_pr = oh.get("assign_pr", True)
 
-    # Commit trailer template (resolve mode only)
-    commit_trailer_template = config_yaml.get("commit_trailer", "")
+    # Commit trailer template (resolve mode only) — lives under openhands:
+    commit_trailer_template = config_yaml.get("openhands", {}).get("commit_trailer", "")
     # Escape for Python string literal
     commit_trailer_escaped = commit_trailer_template.replace('\\', '\\\\').replace('"', '\\"')
 
