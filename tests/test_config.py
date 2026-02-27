@@ -428,7 +428,7 @@ def config_dir(tmp_path):
             "design": {
                 "action": "comment",
                 "default_model": "claude-small",
-                "prompt_prefix": "You are analyzing this issue.",
+                "additional_instructions": "Focus on scalability.",
             },
             "review": {
                 "action": "review",
@@ -475,8 +475,8 @@ def test_resolve_config_design_mode(config_dir):
     assert result["mode"] == "design"
     assert result["action"] == "comment"
     assert result["alias"] == "claude-small"
-    assert "prompt_prefix" in result
-    assert "analyzing" in result["prompt_prefix"]
+    assert "additional_instructions" in result
+    assert "scalability" in result["additional_instructions"]
 
 
 def test_resolve_config_design_with_model(config_dir):
@@ -615,11 +615,11 @@ def test_resolve_config_no_context_files_for_resolve(config_dir):
     assert "context_files" not in result
 
 
-def test_resolve_config_no_prompt_prefix_for_resolve(config_dir):
-    """Resolve mode should not have a prompt_prefix."""
+def test_resolve_config_no_additional_instructions_for_resolve(config_dir):
+    """Resolve mode should not have additional_instructions."""
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
-    assert "prompt_prefix" not in result
+    assert "additional_instructions" not in result
 
 
 def test_resolve_config_openhands_defaults():

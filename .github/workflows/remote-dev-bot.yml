@@ -722,18 +722,12 @@ jobs:
 
           model = "${{ needs.parse.outputs.model }}"
 
-          # Load prompt_prefix from config
-          prompt_prefix = ""
-          config_path = ".remote-dev-bot/lib/../remote-dev-bot.yaml"
-          # Try the target repo's override first, fall back to base config
-          for path in ["remote-dev-bot.yaml", ".remote-dev-bot/remote-dev-bot.yaml"]:
-              if os.path.exists(path):
-                  with open(path) as f:
-                      cfg = yaml.safe_load(f) or {}
-                  mode_cfg = cfg.get("modes", {}).get("design", {})
-                  if "prompt_prefix" in mode_cfg:
-                      prompt_prefix = mode_cfg["prompt_prefix"]
-                      break
+          # Load additional_instructions from target repo's config (appended to canonical prompt)
+          additional_instructions = ""
+          if os.path.exists("remote-dev-bot.yaml"):
+              with open("remote-dev-bot.yaml") as f:
+                  cfg = yaml.safe_load(f) or {}
+              additional_instructions = cfg.get("modes", {}).get("design", {}).get("additional_instructions", "")
 
           # Generate repository file listing (tracked files only)
           import subprocess
@@ -770,14 +764,24 @@ jobs:
           {comments}
           """
 
-          system_prompt = prompt_prefix or (
+          system_prompt = (
               "You are analyzing a GitHub issue for design discussion. "
-              "Provide thoughtful analysis, surface trade-offs, suggest approaches, "
-              "and ask clarifying questions. Format your response as markdown suitable "
-              "for a GitHub comment. "
+              "Do NOT write code or open a PR. Instead, provide thoughtful "
+              "analysis, surface trade-offs, suggest approaches, and ask "
+              "clarifying questions. Respond in a GitHub comment. "
               "IMPORTANT: Never begin your response with a slash command like /agent "
-              "or any text that could trigger another bot action."
+              "or any text that could trigger another bot action. "
+              "Do NOT end your response with conversational invitations like "
+              '"Want me to elaborate?" or "Let me know if you have questions." '
+              "Your response is a design document, not a chat message. "
+              "IMPORTANT: You have been given a limited set of context files. If the "
+              "issue touches code or behavior you cannot verify from those files, say "
+              "so explicitly. Do NOT invent function names, describe behavior you "
+              "haven't seen, or assume how unshared code works. Acknowledging what "
+              "you cannot see is more useful than a confident answer based on guesses."
           )
+          if additional_instructions:
+              system_prompt += "\n\n" + additional_instructions
 
           if repo_context:
               system_prompt = "# Repository Context\n" + repo_context + "\n\n# Instructions\n\n" + system_prompt
