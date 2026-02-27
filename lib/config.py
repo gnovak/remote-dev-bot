@@ -308,6 +308,11 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         print("Local extension (remote-dev-bot.local.yaml):")
         print(yaml.dump(local_config, default_flow_style=False, sort_keys=False).rstrip())
         print()
+    if args:
+        print("Runtime args (from comment body):")
+        for k, v in args.items():
+            print(f"  {k} = {v}")
+        print()
     print("Merged:")
     print(yaml.dump(config, default_flow_style=False, sort_keys=False).rstrip())
     print("===================")
