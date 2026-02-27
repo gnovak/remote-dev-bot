@@ -157,6 +157,20 @@ fi
 log() { echo "==> $*"; }
 err() { echo "ERROR: $*" >&2; }
 
+# Extract cost from a Cost Summary comment body.
+# Returns the cost as a decimal string (e.g., "1.23") or "0.00" if not found.
+parse_cost_from_comment() {
+    local body="$1"
+    local result
+    # Look for "| **Estimated cost** | **$X.XX** |" pattern
+    result=$(echo "$body" | grep -oE '\*\*\$[0-9]+\.[0-9]+\*\*' | head -1 | tr -d '*$')
+    if [[ -n "$result" ]]; then
+        echo "$result"
+    else
+        echo "0.00"
+    fi
+}
+
 cleanup_issues=()
 cleanup_branches=()
 
@@ -676,12 +690,86 @@ fi
 
 printf "  %-25s %-30s issue #%-5s %s\n" "timeout" "$timeout_status" "$timeout_issue_num" "$timeout_log_url"
 
+# --- Collect costs from all tests ---
+log ""
+log "--- Cost Collection ---"
+
+total_cost=0.00
+cost_count=0
+
+# Collect costs from resolve/design test issues
+for pos in "${!issue_nums[@]}"; do
+    idx="${active_indices[$pos]}"
+    name="${all_names[$idx]}"
+    issue_num="${issue_nums[$pos]}"
+
+    # Fetch cost comment from the issue
+    cost_comment=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
+        --jq '[.[] | select(.body | contains("Cost Summary"))] | last | .body' \
+        2>/dev/null || echo "")
+
+    if [[ -n "$cost_comment" ]]; then
+        cost=$(parse_cost_from_comment "$cost_comment")
+        if [[ -n "$cost" && "$cost" != "0.00" ]]; then
+            total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
+            ((cost_count++)) || true
+            printf "  %-25s \$%s\n" "$name" "$cost"
+        else
+            printf "  %-25s (no cost data)\n" "$name"
+        fi
+    else
+        printf "  %-25s (no cost comment)\n" "$name"
+    fi
+done
+
+# Collect cost from review test
+if [[ "$REVIEW_SKIP" == "false" && -n "$REVIEW_PR_NUM" ]]; then
+    cost_comment=$(gh api "repos/$TEST_REPO/issues/$REVIEW_PR_NUM/comments" \
+        --jq '[.[] | select(.body | contains("Cost Summary"))] | last | .body' \
+        2>/dev/null || echo "")
+
+    if [[ -n "$cost_comment" ]]; then
+        cost=$(parse_cost_from_comment "$cost_comment")
+        if [[ -n "$cost" && "$cost" != "0.00" ]]; then
+            total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
+            ((cost_count++)) || true
+            printf "  %-25s \$%s\n" "review" "$cost"
+        else
+            printf "  %-25s (no cost data)\n" "review"
+        fi
+    else
+        printf "  %-25s (no cost comment)\n" "review"
+    fi
+fi
+
+# Collect cost from timeout test
+cost_comment=$(gh api "repos/$TEST_REPO/issues/$timeout_issue_num/comments" \
+    --jq '[.[] | select(.body | contains("Cost Summary"))] | last | .body' \
+    2>/dev/null || echo "")
+
+if [[ -n "$cost_comment" ]]; then
+    cost=$(parse_cost_from_comment "$cost_comment")
+    if [[ -n "$cost" && "$cost" != "0.00" ]]; then
+        total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
+        ((cost_count++)) || true
+        printf "  %-25s \$%s\n" "timeout" "$cost"
+    else
+        printf "  %-25s (no cost data)\n" "timeout"
+    fi
+else
+    printf "  %-25s (no cost comment)\n" "timeout"
+fi
+
+log ""
+log "  Total cost: \$$total_cost ($cost_count tests with cost data)"
+
 # --- Summary ---
 log ""
 log "========================================="
 log "  Resolve/Design: Pass: $pass  Fail: $fail  Timeout: $timeout_count"
 log "  Review:         Pass: $REVIEW_PASS  Fail: $REVIEW_FAIL"
 log "  Timeout test:   Pass: $TIMEOUT_PHASE_PASS  Fail: $TIMEOUT_PHASE_FAIL"
+log "  Total cost:     \$$total_cost"
 log "========================================="
 
 # Exit with failure if any test didn't pass
