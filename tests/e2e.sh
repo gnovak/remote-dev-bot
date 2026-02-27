@@ -151,6 +151,11 @@ else
         "Discuss whether this test repo should have a README. What would you include?" \
         "/agent-design" "all" "design"
 
+    # Explore mode smoke test (dev-only feature)
+    add_test "explore" "Test: explore analysis" \
+        "Discuss the design trade-offs of storing configuration in YAML vs TOML vs JSON for a developer tooling project." \
+        "/agent-explore" "all" "explore"
+
     # Inline args smoke test: pass max_iterations as inline arg
     add_test "inline-args" "Test: inline max_iterations" \
         "Create a file inline_test.py with a stub function stub() that returns None." \
@@ -742,6 +747,17 @@ for pos in "${!issue_nums[@]}"; do
                 status="PASS (comment posted)"
             else
                 status="PASS (no comment found)"
+            fi
+            ((pass++)) || true
+        elif [[ "$test_type" == "explore" ]]; then
+            # Explore mode: check if an analysis comment was posted
+            comment_count=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
+                --jq '[.[] | select(.body | contains("Exploration by"))] | length' \
+                2>/dev/null || echo "0")
+            if [[ "$comment_count" -gt 0 ]]; then
+                status="PASS (analysis posted)"
+            else
+                status="PASS (no analysis found)"
             fi
             ((pass++)) || true
         else
