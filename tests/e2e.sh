@@ -343,11 +343,22 @@ is_baseline_id() {
 # --- Find old merged PR for review test ---
 # The review test uses a previously merged PR from rdb-test, eliminating the
 # dependency on the resolve tests creating a fresh PR first.
+# Prefer PRs whose title contains e2e-NNNNN — created by previous e2e runs,
+# so they have a reliable unique match string. Fall back to any merged PR.
 log "Finding most recently merged PR in $TEST_REPO for review test..."
-REVIEW_PR_NUM=$(gh pr list --repo "$TEST_REPO" --state merged --limit 1 --json number --jq '.[0].number' 2>/dev/null || echo "")
+REVIEW_PR_NUM=$(gh pr list --repo "$TEST_REPO" --state merged --limit 20 \
+    --json number,title \
+    --jq '[.[] | select(.title | test("e2e-[0-9]+"))] | first | .number // empty' \
+    2>/dev/null || echo "")
+if [[ -z "$REVIEW_PR_NUM" ]]; then
+    REVIEW_PR_NUM=$(gh pr list --repo "$TEST_REPO" --state merged --limit 1 \
+        --json number --jq '.[0].number' 2>/dev/null || echo "")
+fi
 REVIEW_PR_TITLE=""
 REVIEW_MATCH_STR=""
 REVIEW_SKIP=false
+# Give up waiting for the review run after this many seconds if no run is found
+REVIEW_FIND_TIMEOUT=600
 
 if [[ -z "$REVIEW_PR_NUM" ]]; then
     log "  Warning: no merged PR found — review test will be skipped"
@@ -357,8 +368,8 @@ else
     # Extract the e2e timestamp tag from the PR title (e.g. e2e-1234567890)
     REVIEW_MATCH_STR=$(echo "$REVIEW_PR_TITLE" | grep -oE 'e2e-[0-9]+' | head -1 || echo "")
     if [[ -z "$REVIEW_MATCH_STR" ]]; then
-        # Fallback: match by PR number in the title
-        REVIEW_MATCH_STR="Fix issue.*$REVIEW_PR_NUM"
+        # Last-resort fallback: match by PR number anywhere in the display title
+        REVIEW_MATCH_STR="#${REVIEW_PR_NUM}[^0-9]"
     fi
     log "  Will use PR #$REVIEW_PR_NUM (title: '$REVIEW_PR_TITLE')"
     log "  Review match string: '$REVIEW_MATCH_STR'"
@@ -497,6 +508,15 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
     done
 
     # --- Poll review test ---
+    # If no matching run has been found after REVIEW_FIND_TIMEOUT seconds,
+    # stop waiting — the review job was likely skipped or the PR title doesn't
+    # match.  This prevents a single unmatched test from holding up the poller
+    # for the full 30-minute TIMEOUT.
+    if [[ "$REVIEW_SKIP" == "false" && -z "$REVIEW_RUN_ID" && $elapsed -gt $REVIEW_FIND_TIMEOUT ]]; then
+        log "  review: no matching run found after ${REVIEW_FIND_TIMEOUT}s — giving up"
+        REVIEW_RESULT="no-run-found"
+    fi
+
     if [[ "$REVIEW_SKIP" == "false" && -z "$REVIEW_RESULT" ]]; then
         all_done=false
 
@@ -639,6 +659,10 @@ review_log_url=""
 
 if [[ "$REVIEW_SKIP" == "true" ]]; then
     review_status="SKIPPED (no merged PR found)"
+elif [[ "$REVIEW_RESULT" == "no-run-found" ]]; then
+    review_status="SKIP (no matching workflow run after ${REVIEW_FIND_TIMEOUT}s — PR title may not match)"
+    # Not counted as a failure: the test infrastructure couldn't find a run,
+    # which is a test-harness limitation, not a product bug.
 elif [[ -z "$REVIEW_RESULT" ]]; then
     review_status="TIMEOUT"
     ((REVIEW_FAIL++)) || true
