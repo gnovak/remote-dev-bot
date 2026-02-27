@@ -237,15 +237,16 @@ def test_design_mode_has_context_files(bot_config):
     assert len(design_mode["context_files"]) > 0, "context_files should not be empty"
 
 
-def test_design_prompt_has_loop_prevention(bot_config):
-    """Verify the design mode prompt instructs LLM not to start with /agent."""
-    design_mode = bot_config["modes"]["design"]
-    prompt_prefix = design_mode.get("prompt_prefix", "")
-    assert "/agent" in prompt_prefix.lower(), (
-        "Design mode prompt_prefix should warn against starting with /agent"
+def test_design_prompt_has_loop_prevention(resolve_yml):
+    """Verify the design mode canonical prompt instructs LLM not to start with /agent.
+
+    The canonical prompt lives in the workflow, not in remote-dev-bot.yaml.
+    """
+    assert "/agent" in resolve_yml.lower(), (
+        "Design mode canonical prompt should warn against starting with /agent"
     )
-    assert "never" in prompt_prefix.lower() or "do not" in prompt_prefix.lower(), (
-        "Design mode prompt_prefix should contain prohibition language"
+    assert "never begin your response with a slash command" in resolve_yml.lower(), (
+        "Design mode canonical prompt should contain loop-prevention language"
     )
 
 

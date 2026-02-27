@@ -381,10 +381,8 @@ def compile_design(shim, workflow, config_yaml, output_path):
     security_roles = extract_security_gate(shim)
     design_steps = workflow["jobs"]["design"]["steps"]
 
-    # Build the prompt_prefix as a Python string for inlining
     modes_config = config_yaml.get("modes", {})
     design_config = modes_config.get("design", {})
-    prompt_prefix = design_config.get("prompt_prefix", "")
 
     steps = []
 
@@ -440,30 +438,9 @@ def compile_design(shim, workflow, config_yaml, output_path):
     gather_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(gather_step)
 
-    # Call LLM for design analysis — rewrite to inline prompt_prefix and context_files
+    # Call LLM for design analysis — rewrite to inline context_files
     llm_step = find_step(design_steps, "Call LLM for design analysis").copy()
-    # The step reads prompt_prefix from config files on disk. In compiled mode,
-    # we inline it. Replace the config-loading Python code.
-    if prompt_prefix:
-        escaped_prefix = prompt_prefix.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
-    else:
-        escaped_prefix = ""
     llm_run = llm_step.get("run", "")
-    # Replace the config-loading block with a simple variable assignment
-    # Note: re.sub interprets backslash sequences in the replacement string,
-    # so we need to escape backslashes again to preserve \n as literal \n
-    replacement = f'prompt_prefix = "{escaped_prefix}"\n'
-    replacement_escaped = replacement.replace('\\', '\\\\')
-    llm_run = re.sub(
-        r'# Load prompt_prefix from config.*?break\n',
-        replacement_escaped,
-        llm_run,
-        flags=re.DOTALL,
-    )
-    # Remove the remote-dev-bot checkout reference
-    llm_run = llm_run.replace(
-        'config_path = ".remote-dev-bot/lib/../remote-dev-bot.yaml"\n', ''
-    )
     # Inline the context_files list (compiled workflows can't read from config at runtime)
     context_files = design_config.get("context_files", [])
     context_files_repr = repr(context_files)
