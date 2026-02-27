@@ -99,11 +99,14 @@ if $ALL_MODELS; then
         exit 1
     fi
 
-    # Read all model aliases and their model family names from the config
+    # Read all model aliases and their model family names from the config.
+    # Tasks modify README.md rather than creating new files — Gemini models use
+    # insert_line=0 when creating files from scratch, which sets wrong file
+    # ownership and causes git add to fail with Permission denied. See #272.
     while IFS='|' read -r alias model_family; do
         safe_alias="${alias//-/_}"
-        add_test "$alias" "Test ($alias): add hello_${safe_alias}.py" \
-            "Create a file hello_${safe_alias}.py with a function hello() that returns 'Hello from ${alias}!'" \
+        add_test "$alias" "Test ($alias): update README for ${alias}" \
+            "Add a '## ${alias}' section to README.md containing a Python code block with a function hello_${safe_alias}() that returns 'Hello from ${alias}!'." \
             "/agent-resolve-$alias" "$model_family" "resolve"
     done < <(python3 -c "
 import yaml, sys
@@ -119,8 +122,8 @@ for alias, info in config.get('models', {}).items():
 ")
 
     # Default model test (resolve mode, no alias)
-    add_test "default-model" "Test (default): add hello_default.py" \
-        "Create a file hello_default.py with a function hello() that returns 'Hello from default!'" \
+    add_test "default-model" "Test (default): update README for default" \
+        "Add a '## Default' section to README.md containing a Python code block with a function hello_default() that returns 'Hello from default!'." \
         "/agent-resolve" "all" "resolve"
 else
     # Smoke tests: one small model per provider + default
@@ -136,8 +139,11 @@ else
         "Create a file wave.py with a function wave() that returns 'Wave!'" \
         "/agent-resolve-gpt-small" "gpt" "resolve"
 
-    add_test "gemini" "Test: add hi.py" \
-        "Create a file hi.py with a function hi() that returns 'Hi!'" \
+    # Modify README.md rather than creating a new file — Gemini models use
+    # insert_line=0 when creating files from scratch, which sets wrong file
+    # ownership and causes git add to fail with Permission denied. See #272.
+    add_test "gemini" "Test: update README with hi function" \
+        "Add a '## Gemini' section to README.md containing a Python code block with a function hi() that returns 'Hi!'." \
         "/agent-resolve-gemini-small" "gemini" "resolve"
 
     # Design mode smoke test
