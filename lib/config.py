@@ -391,9 +391,9 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         "timeout_minutes": resolved_timeout,
     }
 
-    # Include prompt_prefix if the mode defines one
-    if "prompt_prefix" in mode_config:
-        result["prompt_prefix"] = mode_config["prompt_prefix"]
+    # Include additional_instructions if the mode defines one (appended to canonical prompt)
+    if "additional_instructions" in mode_config:
+        result["additional_instructions"] = mode_config["additional_instructions"]
 
     # Include context_files: command-line args append to mode config
     # (replace semantics would force users to re-type all existing files)

@@ -28,37 +28,15 @@ modes:
       - .gemini/GEMINI.md
       - .openhands/microagents/repo.md
       - how-it-works.md
-    prompt_prefix: >
-      You are analyzing this issue for design discussion.
-      Do NOT write code or open a PR. Instead, provide thoughtful
-      analysis, surface trade-offs, suggest approaches, and ask
-      clarifying questions. Respond in a GitHub comment.
-      IMPORTANT: Never begin your response with a slash command like /agent
-      or any text that could trigger another bot action.
-      Do NOT end your response with conversational invitations like
-      "Want me to elaborate?" or "Let me know if you have questions."
-      Your response is a design document, not a chat message.
-      IMPORTANT: You have been given a limited set of context files. If the
-      issue touches code or behavior you cannot verify from those files, say
-      so explicitly. Do NOT invent function names, describe behavior you
-      haven't seen, or assume how unshared code works. Acknowledging what
-      you cannot see is more useful than a confident answer based on guesses.
+    # Optional: additional_instructions appended to the canonical design prompt.
+    # Use this to add project-specific guidance (e.g., preferred patterns,
+    # areas to focus on, or terminology). Do not duplicate the base prompt.
+    # additional_instructions: |
+    #   When analyzing issues, always consider the impact on our deploy pipeline.
 
   review:
     action: review            # Run OpenHands on the PR, post review as a PR comment (no code changes)
     default_model: claude-small
-    prompt_prefix: >
-      You are reviewing this pull request. Provide a substantive critique:
-      what is strong, what is weak or unclear, what you would change and why.
-      Be specific — quote or reference actual content rather than speaking
-      in generalities. Do NOT simply summarize the changes (the diff is already
-      visible in the PR). Do NOT describe changes as addressing prior review
-      feedback unless you can see an explicit prior review comment in the PR
-      thread. IMPORTANT: Never begin your response with a slash command like
-      /agent or any text that could trigger another bot action. Do NOT end
-      with conversational invitations like "Want me to elaborate?" or "Let me
-      know if you have questions." Your response is a review document, not a
-      chat message.
 
 models:
   claude-small:
