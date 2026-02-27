@@ -340,29 +340,24 @@ is_baseline_id() {
     echo "$BASELINE_IDS" | grep -qx "$id"
 }
 
-# --- Find old merged PR for review test ---
-# The review test uses a previously merged PR from rdb-test, eliminating the
-# dependency on the resolve tests creating a fresh PR first.
-log "Finding most recently merged PR in $TEST_REPO for review test..."
-REVIEW_PR_NUM=$(gh pr list --repo "$TEST_REPO" --state merged --limit 1 --json number --jq '.[0].number' 2>/dev/null || echo "")
-REVIEW_PR_TITLE=""
-REVIEW_MATCH_STR=""
-REVIEW_SKIP=false
-
-if [[ -z "$REVIEW_PR_NUM" ]]; then
-    log "  Warning: no merged PR found — review test will be skipped"
-    REVIEW_SKIP=true
-else
-    REVIEW_PR_TITLE=$(gh pr view "$REVIEW_PR_NUM" --repo "$TEST_REPO" --json title --jq '.title' 2>/dev/null || echo "")
-    # Extract the e2e timestamp tag from the PR title (e.g. e2e-1234567890)
-    REVIEW_MATCH_STR=$(echo "$REVIEW_PR_TITLE" | grep -oE 'e2e-[0-9]+' | head -1 || echo "")
-    if [[ -z "$REVIEW_MATCH_STR" ]]; then
-        # Fallback: match by PR number in the title
-        REVIEW_MATCH_STR="Fix issue.*$REVIEW_PR_NUM"
-    fi
-    log "  Will use PR #$REVIEW_PR_NUM (title: '$REVIEW_PR_TITLE')"
-    log "  Review match string: '$REVIEW_MATCH_STR'"
-fi
+# --- Review + Feedback test state ---
+# Review+Feedback is a self-contained test: create issue → resolve → review open PR → feedback resolve.
+# The rf-resolve step runs in parallel with the main tests. rf-review and rf-feedback
+# resolve) run sequentially after the main polling loop completes.
+RF_TS=$(date +%s)
+RF_ISSUE_NUM=""
+RF_RESOLVE_RUN_ID=""
+RF_RESOLVE_RESULT=""
+RF_PR_NUM=""
+RF_PR_BRANCH=""
+RF_INITIAL_SHA=""
+# Review step state
+RF_REVIEW_RUN_ID=""
+RF_REVIEW_RESULT=""
+# Feedback step state
+RF_FEEDBACK_RUN_ID=""
+RF_FEEDBACK_RESULT=""
+RF_FEEDBACK_NEW_SHA=""
 
 # --- Create all test issues and trigger all workflows simultaneously ---
 
@@ -396,14 +391,16 @@ for idx in "${active_indices[@]}"; do
     gh issue comment "$issue_num" --repo "$TEST_REPO" --body "$cmd"
 done
 
-# --- Trigger review test ---
-REVIEW_RUN_ID=""
-REVIEW_RESULT=""
-
-if [[ "$REVIEW_SKIP" == "false" ]]; then
-    log "Posting /agent-review on PR #$REVIEW_PR_NUM..."
-    gh pr comment "$REVIEW_PR_NUM" --repo "$TEST_REPO" --body "/agent-review"
-fi
+# --- Create review+feedback issue and trigger resolve ---
+# Uses a unique e2e-rv-$RF_TS tag so rf runs can be identified unambiguously.
+log "Creating review+feedback issue..."
+rf_issue_url=$(gh issue create --repo "$TEST_REPO" \
+    --title "Test: review+feedback (e2e-rv-$RF_TS)" \
+    --body "Add a '## ReviewFeedback' section to README.md containing a Python code block with a function rf_stub() that returns None.")
+RF_ISSUE_NUM="${rf_issue_url##*/}"
+cleanup_issues+=("$RF_ISSUE_NUM")
+log "  Issue #$RF_ISSUE_NUM created. Triggering /agent-resolve..."
+gh issue comment "$RF_ISSUE_NUM" --repo "$TEST_REPO" --body "/agent-resolve"
 
 # --- Trigger timeout test ---
 log "Creating timeout test issue..."
@@ -430,7 +427,7 @@ sleep 15
 #
 # Match runs to tests using displayTitle, which includes the issue/PR title.
 # Resolve tests: title contains e2e-$timestamp (unique per run) AND the test's title prefix.
-# Review test: title contains $REVIEW_MATCH_STR (from old merged PR's title).
+# Review+Feedback resolve: title contains e2e-rv-$RF_TS.
 # Timeout test: title contains e2e-timeout-$timeout_ts.
 # All non-baseline runs only (exclude pre-existing runs captured above).
 
@@ -496,8 +493,8 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
         fi
     done
 
-    # --- Poll review test ---
-    if [[ "$REVIEW_SKIP" == "false" && -z "$REVIEW_RESULT" ]]; then
+    # --- Poll review+feedback resolve ---
+    if [[ -z "$RF_RESOLVE_RESULT" ]]; then
         all_done=false
 
         while IFS= read -r row; do
@@ -510,13 +507,24 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
             [[ "$conclusion" == "skipped" ]] && continue
             is_baseline_id "$run_id" && continue
 
-            if [[ "$display_title" =~ $REVIEW_MATCH_STR ]]; then
-                REVIEW_RUN_ID="$run_id"
+            if [[ "$display_title" == *"e2e-rv-$RF_TS"* ]]; then
+                RF_RESOLVE_RUN_ID="$run_id"
                 if [[ "$status" == "completed" ]]; then
-                    REVIEW_RESULT="$conclusion"
-                    log "  review: $conclusion (run $run_id)"
+                    RF_RESOLVE_RESULT="$conclusion"
+                    log "  rf-resolve: $conclusion (run $run_id)"
+                    # Locate the PR and capture its initial commit SHA
+                    RF_PR_BRANCH="openhands-fix-issue-$RF_ISSUE_NUM"
+                    RF_PR_NUM=$(gh pr list --repo "$TEST_REPO" \
+                        --search "head:$RF_PR_BRANCH" \
+                        --json number --jq '.[0].number // empty' 2>/dev/null || echo "")
+                    if [[ -n "$RF_PR_NUM" ]]; then
+                        RF_INITIAL_SHA=$(gh api "repos/$TEST_REPO/git/ref/heads/$RF_PR_BRANCH" \
+                            --jq '.object.sha' 2>/dev/null || echo "")
+                        cleanup_branches+=("$RF_PR_BRANCH")
+                        log "  rf-resolve: PR #$RF_PR_NUM branch $RF_PR_BRANCH (SHA ${RF_INITIAL_SHA:0:7})"
+                    fi
                 else
-                    log "  review: $status (run $run_id)"
+                    log "  rf-resolve: $status (run $run_id)"
                 fi
                 break
             fi
@@ -558,6 +566,111 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
     sleep "$POLL_INTERVAL"
     elapsed=$((elapsed + POLL_INTERVAL))
 done
+
+# --- Review step (sequential, after main polling loop) ---
+# Post /agent-review on the open PR created by rf-resolve.
+# Capture a new baseline first so rf-resolve's run ID is excluded.
+
+if [[ "$RF_RESOLVE_RESULT" == "success" && -n "$RF_PR_NUM" ]]; then
+    log ""
+    log "rf-review: Posting /agent-review on PR #$RF_PR_NUM..."
+    RF_REVIEW_BASELINE=$(gh run list --repo "$TEST_REPO" --limit 50 --json databaseId \
+        --jq '.[].databaseId' 2>/dev/null || echo "")
+
+    gh pr comment "$RF_PR_NUM" --repo "$TEST_REPO" --body "/agent-review"
+
+    rf_review_elapsed=0
+    RF_REVIEW_TIMEOUT=1200  # 20 minutes
+
+    while [[ $rf_review_elapsed -lt $RF_REVIEW_TIMEOUT && -z "$RF_REVIEW_RESULT" ]]; do
+        rf_review_json=$(gh run list --repo "$TEST_REPO" --limit 50 \
+            --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
+
+        while IFS= read -r row; do
+            [[ -z "$row" ]] && continue
+            display_title=$(echo "$row" | jq -r '.displayTitle')
+            status=$(echo "$row" | jq -r '.status')
+            conclusion=$(echo "$row" | jq -r '.conclusion')
+            run_id=$(echo "$row" | jq -r '.databaseId')
+
+            [[ "$conclusion" == "skipped" ]] && continue
+            echo "$RF_REVIEW_BASELINE" | grep -qx "$run_id" && continue
+
+            if [[ "$display_title" == *"e2e-rv-$RF_TS"* ]]; then
+                RF_REVIEW_RUN_ID="$run_id"
+                if [[ "$status" == "completed" ]]; then
+                    RF_REVIEW_RESULT="$conclusion"
+                    log "  rf-review: $conclusion (run $run_id)"
+                else
+                    log "  rf-review: $status (run $run_id)"
+                fi
+                break
+            fi
+        done <<< "$(echo "$rf_review_json" | jq -c '.[]')"
+
+        if [[ -z "$RF_REVIEW_RESULT" ]]; then
+            log "  rf-review: waiting... (${rf_review_elapsed}s)"
+            sleep "$POLL_INTERVAL"
+            rf_review_elapsed=$((rf_review_elapsed + POLL_INTERVAL))
+        fi
+    done
+fi
+
+# --- Feedback step (sequential, after rf-review) ---
+# Post a feedback comment + /agent-resolve on the PR, then wait for a new commit.
+# Capture a new baseline so rf-review's run ID is excluded.
+
+if [[ "$RF_REVIEW_RESULT" == "success" && -n "$RF_PR_NUM" ]]; then
+    log ""
+    log "rf-feedback: Posting feedback + /agent-resolve on PR #$RF_PR_NUM..."
+    RF_FEEDBACK_BASELINE=$(gh run list --repo "$TEST_REPO" --limit 50 --json databaseId \
+        --jq '.[].databaseId' 2>/dev/null || echo "")
+
+    # Post feedback first, then trigger resolve
+    gh pr comment "$RF_PR_NUM" --repo "$TEST_REPO" \
+        --body "Please update rf_stub() to return the string 'hello world' instead of None."
+    sleep 2
+    gh pr comment "$RF_PR_NUM" --repo "$TEST_REPO" --body "/agent-resolve"
+
+    rf_feedback_elapsed=0
+    RF_FEEDBACK_TIMEOUT=1200  # 20 minutes
+
+    while [[ $rf_feedback_elapsed -lt $RF_FEEDBACK_TIMEOUT && -z "$RF_FEEDBACK_RESULT" ]]; do
+        rf_feedback_json=$(gh run list --repo "$TEST_REPO" --limit 50 \
+            --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
+
+        while IFS= read -r row; do
+            [[ -z "$row" ]] && continue
+            display_title=$(echo "$row" | jq -r '.displayTitle')
+            status=$(echo "$row" | jq -r '.status')
+            conclusion=$(echo "$row" | jq -r '.conclusion')
+            run_id=$(echo "$row" | jq -r '.databaseId')
+
+            [[ "$conclusion" == "skipped" ]] && continue
+            echo "$RF_FEEDBACK_BASELINE" | grep -qx "$run_id" && continue
+
+            if [[ "$display_title" == *"e2e-rv-$RF_TS"* ]]; then
+                RF_FEEDBACK_RUN_ID="$run_id"
+                if [[ "$status" == "completed" ]]; then
+                    RF_FEEDBACK_RESULT="$conclusion"
+                    log "  rf-feedback: $conclusion (run $run_id)"
+                    # Check whether the branch has a new commit
+                    RF_FEEDBACK_NEW_SHA=$(gh api "repos/$TEST_REPO/git/ref/heads/$RF_PR_BRANCH" \
+                        --jq '.object.sha' 2>/dev/null || echo "")
+                else
+                    log "  rf-feedback: $status (run $run_id)"
+                fi
+                break
+            fi
+        done <<< "$(echo "$rf_feedback_json" | jq -c '.[]')"
+
+        if [[ -z "$RF_FEEDBACK_RESULT" ]]; then
+            log "  rf-feedback: waiting... (${rf_feedback_elapsed}s)"
+            sleep "$POLL_INTERVAL"
+            rf_feedback_elapsed=$((rf_feedback_elapsed + POLL_INTERVAL))
+        fi
+    done
+fi
 
 # --- Verify results ---
 
@@ -627,40 +740,77 @@ for pos in "${!issue_nums[@]}"; do
     printf "  %-25s %-30s issue #%-5s %s\n" "$name" "$status" "$issue_num" "$log_url"
 done
 
-# --- Review test result ---
+# --- Review + Feedback results ---
 log ""
-log "--- Review Test ---"
+log "--- Review + Feedback Test ---"
 
-REVIEW_PASS=0
-REVIEW_FAIL=0
+RF_PASS=0
+RF_FAIL=0
+rf_pr_ref="${RF_PR_NUM:-N/A}"
 
-review_log_url=""
-[[ -n "$REVIEW_RUN_ID" ]] && review_log_url="https://github.com/$TEST_REPO/actions/runs/$REVIEW_RUN_ID"
+# rf-resolve result
+rf_resolve_url=""
+[[ -n "$RF_RESOLVE_RUN_ID" ]] && rf_resolve_url="https://github.com/$TEST_REPO/actions/runs/$RF_RESOLVE_RUN_ID"
+if [[ -z "$RF_RESOLVE_RESULT" ]]; then
+    rf_resolve_status="TIMEOUT"
+    ((RF_FAIL++)) || true
+elif [[ "$RF_RESOLVE_RESULT" == "success" ]]; then
+    if [[ -n "$RF_PR_NUM" ]]; then
+        rf_resolve_status="PASS (PR #$RF_PR_NUM)"
+    else
+        rf_resolve_status="PASS (no PR found)"
+    fi
+    ((RF_PASS++)) || true
+else
+    rf_resolve_status="FAIL ($RF_RESOLVE_RESULT)"
+    ((RF_FAIL++)) || true
+fi
+printf "  %-25s %-30s issue #%-5s %s\n" "rf-resolve" "$rf_resolve_status" "${RF_ISSUE_NUM:-N/A}" "$rf_resolve_url"
 
-if [[ "$REVIEW_SKIP" == "true" ]]; then
-    review_status="SKIPPED (no merged PR found)"
-elif [[ -z "$REVIEW_RESULT" ]]; then
-    review_status="TIMEOUT"
-    ((REVIEW_FAIL++)) || true
-elif [[ "$REVIEW_RESULT" == "success" ]]; then
-    # Verify review comment was posted on the PR
-    comment_count=$(gh api "repos/$TEST_REPO/issues/$REVIEW_PR_NUM/comments" \
+# rf-review result
+rf_review_url=""
+[[ -n "$RF_REVIEW_RUN_ID" ]] && rf_review_url="https://github.com/$TEST_REPO/actions/runs/$RF_REVIEW_RUN_ID"
+if [[ "$RF_RESOLVE_RESULT" != "success" || -z "$RF_PR_NUM" ]]; then
+    rf_review_status="SKIPPED (resolve didn't create PR)"
+elif [[ -z "$RF_REVIEW_RESULT" ]]; then
+    rf_review_status="TIMEOUT"
+    ((RF_FAIL++)) || true
+elif [[ "$RF_REVIEW_RESULT" == "success" ]]; then
+    comment_count=$(gh api "repos/$TEST_REPO/issues/$RF_PR_NUM/comments" \
         --jq '[.[] | select(.body | contains("Code review by"))] | length' \
         2>/dev/null || echo "0")
     if [[ "$comment_count" -gt 0 ]]; then
-        review_status="PASS (review comment posted)"
-        ((REVIEW_PASS++)) || true
+        rf_review_status="PASS (review comment posted)"
     else
-        review_status="PASS (no review comment found)"
-        ((REVIEW_PASS++)) || true
+        rf_review_status="PASS (no review comment found)"
     fi
+    ((RF_PASS++)) || true
 else
-    review_status="FAIL ($REVIEW_RESULT)"
-    ((REVIEW_FAIL++)) || true
+    rf_review_status="FAIL ($RF_REVIEW_RESULT)"
+    ((RF_FAIL++)) || true
 fi
+printf "  %-25s %-30s PR #%-5s  %s\n" "rf-review" "$rf_review_status" "$rf_pr_ref" "$rf_review_url"
 
-review_ref="${REVIEW_PR_NUM:-N/A}"
-printf "  %-25s %-30s PR #%-5s  %s\n" "review" "$review_status" "$review_ref" "$review_log_url"
+# rf-feedback result
+rf_feedback_url=""
+[[ -n "$RF_FEEDBACK_RUN_ID" ]] && rf_feedback_url="https://github.com/$TEST_REPO/actions/runs/$RF_FEEDBACK_RUN_ID"
+if [[ "$RF_REVIEW_RESULT" != "success" || -z "$RF_PR_NUM" ]]; then
+    rf_feedback_status="SKIPPED (review didn't complete)"
+elif [[ -z "$RF_FEEDBACK_RESULT" ]]; then
+    rf_feedback_status="TIMEOUT"
+    ((RF_FAIL++)) || true
+elif [[ "$RF_FEEDBACK_RESULT" == "success" ]]; then
+    if [[ -n "$RF_FEEDBACK_NEW_SHA" && -n "$RF_INITIAL_SHA" && "$RF_FEEDBACK_NEW_SHA" != "$RF_INITIAL_SHA" ]]; then
+        rf_feedback_status="PASS (new commit on branch)"
+    else
+        rf_feedback_status="PASS (no new commit detected)"
+    fi
+    ((RF_PASS++)) || true
+else
+    rf_feedback_status="FAIL ($RF_FEEDBACK_RESULT)"
+    ((RF_FAIL++)) || true
+fi
+printf "  %-25s %-30s PR #%-5s  %s\n" "rf-feedback" "$rf_feedback_status" "$rf_pr_ref" "$rf_feedback_url"
 
 # --- Timeout test result ---
 log ""
@@ -728,23 +878,41 @@ for pos in "${!issue_nums[@]}"; do
     fi
 done
 
-# Collect cost from review test
-if [[ "$REVIEW_SKIP" == "false" && -n "$REVIEW_PR_NUM" ]]; then
-    cost_comment=$(gh api "repos/$TEST_REPO/issues/$REVIEW_PR_NUM/comments" \
+# Collect cost from rf-resolve (issue comments)
+if [[ -n "$RF_ISSUE_NUM" ]]; then
+    cost_comment=$(gh api "repos/$TEST_REPO/issues/$RF_ISSUE_NUM/comments" \
         --jq '[.[] | select(.body | contains("Cost Summary"))] | last | .body' \
         2>/dev/null || echo "")
-
     if [[ -n "$cost_comment" ]]; then
         cost=$(parse_cost_from_comment "$cost_comment")
         if [[ -n "$cost" && "$cost" != "0.00" ]]; then
             total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
             ((cost_count++)) || true
-            printf "  %-25s \$%s\n" "review" "$cost"
+            printf "  %-25s \$%s\n" "rf-resolve" "$cost"
         else
-            printf "  %-25s (no cost data)\n" "review"
+            printf "  %-25s (no cost data)\n" "rf-resolve"
         fi
     else
-        printf "  %-25s (no cost comment)\n" "review"
+        printf "  %-25s (no cost comment)\n" "rf-resolve"
+    fi
+fi
+
+# Collect costs from rf-review and rf-feedback (PR comments)
+if [[ -n "$RF_PR_NUM" ]]; then
+    cost_comment=$(gh api "repos/$TEST_REPO/issues/$RF_PR_NUM/comments" \
+        --jq '[.[] | select(.body | contains("Cost Summary"))] | last | .body' \
+        2>/dev/null || echo "")
+    if [[ -n "$cost_comment" ]]; then
+        cost=$(parse_cost_from_comment "$cost_comment")
+        if [[ -n "$cost" && "$cost" != "0.00" ]]; then
+            total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
+            ((cost_count++)) || true
+            printf "  %-25s \$%s\n" "rf-review+feedback" "$cost"
+        else
+            printf "  %-25s (no cost data)\n" "rf-review+feedback"
+        fi
+    else
+        printf "  %-25s (no cost comment)\n" "rf-review+feedback"
     fi
 fi
 
@@ -773,13 +941,13 @@ log "  Total cost: \$$total_cost ($cost_count tests with cost data)"
 log ""
 log "========================================="
 log "  Resolve/Design: Pass: $pass  Fail: $fail  Timeout: $timeout_count"
-log "  Review:         Pass: $REVIEW_PASS  Fail: $REVIEW_FAIL"
+log "  Review+Feedback:  Pass: $RF_PASS  Fail: $RF_FAIL"
 log "  Timeout test:   Pass: $TIMEOUT_PHASE_PASS  Fail: $TIMEOUT_PHASE_FAIL"
 log "  Total cost:     \$$total_cost"
 log "========================================="
 
 # Exit with failure if any test didn't pass
-total_fail=$((fail + timeout_count + REVIEW_FAIL + TIMEOUT_PHASE_FAIL))
+total_fail=$((fail + timeout_count + RF_FAIL + TIMEOUT_PHASE_FAIL))
 if [[ $total_fail -gt 0 ]]; then
     exit 1
 fi
