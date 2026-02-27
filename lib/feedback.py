@@ -19,6 +19,14 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Optional
 
+# Repository where installation feedback issues are filed.
+# If you fork remote-dev-bot, update this to your fork's repo path.
+# All report_problems() callers accept a repo= parameter to override.
+DEFAULT_REPO = "gnovak/remote-dev-bot"
+
+# Maximum individual issues to file per install; beyond this, file a summary issue.
+MAX_ISSUES_PER_INSTALL = 3
+
 
 @dataclass
 class InstallProblem:
@@ -145,11 +153,6 @@ class InstallReport:
     def to_json(self) -> str:
         """Convert to JSON string."""
         return json.dumps(self.to_dict(), indent=2)
-
-
-# Default repository for filing issues
-DEFAULT_REPO = "gnovak/remote-dev-bot"
-MAX_ISSUES_PER_INSTALL = 3
 
 
 def get_environment_info() -> dict:
