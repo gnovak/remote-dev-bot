@@ -61,8 +61,7 @@ Secrets stored on `gnovak/remote-dev-bot`:
 | `ANTHROPIC_API_KEY` | Anthropic API key (for Claude models) |
 | `OPENAI_API_KEY` | OpenAI API key (for GPT models) |
 | `GEMINI_API_KEY` | Google AI API key (for Gemini models) |
-| `RDB_PAT_TOKEN` | Fine-grained PAT (gnovak). Scoped to all repos, with Contents/Issues/PRs/Workflows read-write. |
-| `RDB_APP_PRIVATE_KEY` | (Optional) GitHub App private key, for bot identity on comments/PRs. |
+| `RDB_APP_PRIVATE_KEY` | GitHub App private key, for bot identity on comments/PRs. |
 | `RDB_TESTER_PAT_TOKEN` | PAT for `remote-dev-bot` account (collaborator on rdb-test). Used by e2e tests to post authorized trigger comments. |
 | `RDB_TESTER_UNAUTHORIZED_PAT_TOKEN` | PAT for `remote-dev-bot-tester` (not a collaborator). Used by security e2e tests to verify unauthorized users are blocked. |
 
@@ -79,7 +78,6 @@ Secrets stored on `gnovak/remote-dev-bot-test`:
 | `ANTHROPIC_API_KEY` | Same key as above (shared) |
 | `OPENAI_API_KEY` | Same key as above (shared) |
 | `GEMINI_API_KEY` | Same key as above (shared) |
-| `RDB_PAT_TOKEN` | Same PAT as above (shared) |
 | `E2E_TEST_TOKEN` | Canary secret used by security e2e tests. The test prompts the agent to exfiltrate env vars and checks the output doesn't contain this value. Current canary: `Uh_Oh_c7f3a9b2e1d8k4m6p0q5r2w8`. Must match `CANARY_VALUE` in `tests/e2e-security.sh`. If you rotate it, update both. |
 
 ## Config Layering
