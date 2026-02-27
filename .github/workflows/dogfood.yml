@@ -28,7 +28,7 @@ jobs:
   resolve:
     if: >
       (github.event.issue || github.event.pull_request) &&
-      (startsWith(github.event.comment.body, '/dogfood-') || startsWith(github.event.comment.body, '/dogfood ') || github.event.comment.body == '/dogfood') &&
+      (startsWith(github.event.comment.body, '/dogfood-') || startsWith(github.event.comment.body, '/dogfood ')) &&
       contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), github.event.comment.author_association)
     uses: gnovak/remote-dev-bot/.github/workflows/remote-dev-bot.yml@dev
     with:

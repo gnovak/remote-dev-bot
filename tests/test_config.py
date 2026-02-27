@@ -205,22 +205,17 @@ def test_parse_args_target_branch():
 
 
 def test_parse_args_context_files():
-    """context_files should be parsed as list."""
-    assert parse_args(["context = file1.txt file2.txt"]) == {"context_files": ["file1.txt", "file2.txt"]}
+    """context_files should be parsed as list (various normalized name forms)."""
+    assert parse_args(["context_files = file1.txt file2.txt"]) == {"context_files": ["file1.txt", "file2.txt"]}
     assert parse_args(["context files = README.md"]) == {"context_files": ["README.md"]}
     assert parse_args(["context-files = a.txt b.txt c.txt"]) == {"context_files": ["a.txt", "b.txt", "c.txt"]}
-
-
-def test_parse_args_context_alias():
-    """'context' should be an alias for 'context_files'."""
-    assert parse_args(["context = file.txt"]) == {"context_files": ["file.txt"]}
 
 
 def test_parse_args_multiple():
     """Multiple args should all be parsed."""
     result = parse_args([
         "max iterations = 75",
-        "context = file1.txt file2.txt",
+        "context_files = file1.txt file2.txt",
     ])
     assert result == {
         "max_iterations": 75,
@@ -234,7 +229,7 @@ def test_parse_args_skip_empty_lines():
         "",
         "max iterations = 75",
         "",
-        "context = file.txt",
+        "context_files = file.txt",
         "",
     ])
     assert result == {
@@ -258,7 +253,7 @@ def test_parse_args_skip_lines_without_equals():
     result = parse_args([
         "max iterations = 75",
         "some random text",
-        "context = file.txt",
+        "context_files = file.txt",
     ])
     assert result == {
         "max_iterations": 75,
@@ -286,7 +281,7 @@ def test_parse_args_empty_name():
 
 def test_parse_args_empty_value():
     """Lines with empty value after = should be skipped."""
-    result = parse_args(["max iterations =", "context = file.txt"])
+    result = parse_args(["max iterations =", "context_files = file.txt"])
     assert result == {"context_files": ["file.txt"]}
 
 
@@ -298,7 +293,7 @@ def test_parse_args_whitespace_only_name():
 
 def test_parse_args_whitespace_only_value():
     """Lines with whitespace-only value should be skipped."""
-    result = parse_args(["max iterations =   ", "context = file.txt"])
+    result = parse_args(["max iterations =   ", "context_files = file.txt"])
     assert result == {"context_files": ["file.txt"]}
 
 
@@ -335,7 +330,7 @@ def test_parse_invocation_with_args():
 
 def test_parse_invocation_with_model_and_args():
     """Command with model and args."""
-    comment = "/agent resolve claude-large\nmax iterations = 100\ncontext = file.txt"
+    comment = "/agent resolve claude-large\nmax iterations = 100\ncontext_files = file.txt"
     mode, alias, args = parse_invocation(comment, KNOWN_MODES)
     assert mode == "resolve"
     assert alias == "claude-large"
@@ -344,7 +339,7 @@ def test_parse_invocation_with_model_and_args():
 
 def test_parse_invocation_dash_syntax():
     """Dash syntax should work with args."""
-    comment = "/agent-design-claude-small\ncontext = a.txt b.txt"
+    comment = "/agent-design-claude-small\ncontext_files = a.txt b.txt"
     mode, alias, args = parse_invocation(comment, KNOWN_MODES)
     assert mode == "design"
     assert alias == "claude-small"
@@ -434,6 +429,13 @@ def config_dir(tmp_path):
                 "action": "review",
                 "default_model": "claude-small",
             },
+            "explore": {
+                "action": "explore",
+                "default_model": "claude-small",
+                "max_iterations": 10,
+                "additional_instructions": "You are exploring this issue.",
+                "context_files": ["README.md", "AGENTS.md"],
+            },
         },
         "openhands": {
             "version": "1.4.0",
@@ -494,6 +496,29 @@ def test_resolve_config_review_with_model(config_dir):
     result = resolve_config(base_path, "nonexistent.yaml", "review-claude-large")
     assert result["mode"] == "review"
     assert result["alias"] == "claude-large"
+
+
+def test_resolve_config_explore_mode(config_dir):
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "explore")
+    assert result["mode"] == "explore"
+    assert result["action"] == "explore"
+    assert result["alias"] == "claude-small"
+    assert result["model"] == "anthropic/claude-sonnet-4-5"
+    assert "additional_instructions" in result
+    assert "exploring" in result["additional_instructions"]
+    assert "context_files" in result
+    assert result["context_files"] == ["README.md", "AGENTS.md"]
+    assert "explore_max_iterations" in result
+    assert result["explore_max_iterations"] == 10
+
+
+def test_resolve_config_explore_with_model(config_dir):
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "explore-claude-large")
+    assert result["mode"] == "explore"
+    assert result["alias"] == "claude-large"
+    assert result["model"] == "anthropic/claude-opus-4-5"
 
 
 def test_resolve_config_unknown_model(config_dir):
@@ -812,8 +837,7 @@ def test_resolve_config_commit_trailer_with_template():
                 "default_model": "m1",
                 "models": {"m1": {"id": "anthropic/test-model"}},
                 "modes": {"resolve": {"action": "pr"}},
-                "openhands": {"version": "1.3.0"},
-                "commit_trailer": "Model: {model_alias} ({model_id}), v{oh_version}",
+                "openhands": {"version": "1.3.0", "commit_trailer": "Model: {model_alias} ({model_id}), v{oh_version}"},
             },
             f,
         )
@@ -833,8 +857,7 @@ def test_resolve_config_commit_trailer_override():
                 "default_model": "m1",
                 "models": {"m1": {"id": "anthropic/test-model"}},
                 "modes": {"resolve": {"action": "pr"}},
-                "openhands": {"version": "1.3.0"},
-                "commit_trailer": "Base trailer: {model_alias}",
+                "openhands": {"version": "1.3.0", "commit_trailer": "Base trailer: {model_alias}"},
             },
             base_f,
         )
@@ -843,7 +866,7 @@ def test_resolve_config_commit_trailer_override():
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as override_f:
         yaml.dump(
             {
-                "commit_trailer": "Override trailer: {model_id}",
+                "openhands": {"commit_trailer": "Override trailer: {model_id}"},
             },
             override_f,
         )
@@ -865,7 +888,7 @@ def test_resolve_config_commit_trailer_disable_via_override():
                 "default_model": "m1",
                 "models": {"m1": {"id": "anthropic/test-model"}},
                 "modes": {"resolve": {"action": "pr"}},
-                "commit_trailer": "Base trailer: {model_alias}",
+                "openhands": {"commit_trailer": "Base trailer: {model_alias}"},
             },
             base_f,
         )
@@ -874,7 +897,7 @@ def test_resolve_config_commit_trailer_disable_via_override():
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as override_f:
         yaml.dump(
             {
-                "commit_trailer": "",
+                "openhands": {"commit_trailer": ""},
             },
             override_f,
         )
@@ -1152,9 +1175,9 @@ class TestConfigMain:
         assert "alias=claude-large\n" in content
 
     def test_timeout_minutes_default_when_not_specified(self, tmp_path):
-        """timeout_minutes is the hardcoded default (120) when not specified."""
+        """timeout_minutes comes from the config file (60) when not overridden."""
         content = self._call_main("resolve", tmp_path)
-        assert "timeout_minutes=120\n" in content
+        assert "timeout_minutes=60\n" in content
 
     def test_timeout_minutes_value_when_specified(self, tmp_path):
         """timeout_minutes contains the per-invocation value when specified."""
@@ -1204,7 +1227,7 @@ class TestConfigMain:
 
     def test_comment_body_design_with_context_append(self, tmp_path):
         """COMMENT_BODY appends context_files to mode's existing list."""
-        comment = "/agent design\ncontext = custom.txt"
+        comment = "/agent design\ncontext_files = custom.txt"
         content = self._call_main_with_comment(comment, tmp_path)
         assert "mode=design\n" in content
         assert "custom.txt" in content
