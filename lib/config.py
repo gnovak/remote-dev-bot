@@ -352,13 +352,23 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             f"openhands.on_failure must be 'comment' or 'draft', got: {on_failure!r}"
         )
 
+    # Graceful wrap-up settings
+    graceful_wrapup = oh.get("graceful_wrapup", {})
+    wrapup_enabled = graceful_wrapup.get("enabled", True)
+    wrapup_threshold = graceful_wrapup.get("threshold", 0.8)
+    if not (0 < wrapup_threshold <= 1):
+        raise ValueError(
+            f"openhands.graceful_wrapup.threshold must be between 0 and 1, got: {wrapup_threshold}"
+        )
+
     # Resolve timeout: per-invocation > yaml config > hardcoded default
-    # Per-invocation is passed via --timeout-minutes argparse flag (from the comment).
+    # Per-invocation can come from inline arg (timeout = N) or --timeout-minutes flag.
     # NOTE: GitHub Actions has a hard 6-hour limit. If a run legitimately needs
     # more than 6 hours, set timeout-minutes in the calling workflow's job definition.
     yaml_timeout = oh.get("timeout_minutes")
+    effective_timeout = timeout_minutes if timeout_minutes is not None else (args or {}).get("timeout_minutes")
     resolved_timeout = (
-        timeout_minutes if timeout_minutes is not None
+        effective_timeout if effective_timeout is not None
         else (yaml_timeout if yaml_timeout is not None
               else DEFAULT_TIMEOUT_MINUTES)
     )
@@ -374,6 +384,9 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     if "target_branch" in args:
         target_branch = args["target_branch"]
 
+    # Calculate the iteration warning threshold (iteration number at which to warn)
+    wrapup_iteration = int(max_iter * wrapup_threshold) if wrapup_enabled else 0
+
     result = {
         "mode": mode,
         "action": action,
@@ -387,6 +400,9 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         "assign_issue": assign_issue,
         "assign_pr": assign_pr,
         "has_override": bool(override_config),
+        "graceful_wrapup_enabled": wrapup_enabled,
+        "graceful_wrapup_threshold": wrapup_threshold,
+        "graceful_wrapup_iteration": wrapup_iteration,
         "timeout_minutes": resolved_timeout,
     }
 
@@ -513,7 +529,11 @@ def main():
             f.write(f"assign_pr={str(result['assign_pr']).lower()}\n")
             if "context_files" in result:
                 f.write(f"context_files={json.dumps(result['context_files'])}\n")
+            if "explore_max_iterations" in result:
+                f.write(f"explore_max_iterations={result['explore_max_iterations']}\n")
             f.write(f"commit_trailer={result['commit_trailer']}\n")
+            f.write(f"graceful_wrapup_enabled={str(result['graceful_wrapup_enabled']).lower()}\n")
+            f.write(f"graceful_wrapup_iteration={result['graceful_wrapup_iteration']}\n")
             f.write(f"timeout_minutes={result['timeout_minutes']}\n")
 
     # Log for visibility
