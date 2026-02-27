@@ -340,29 +340,24 @@ is_baseline_id() {
     echo "$BASELINE_IDS" | grep -qx "$id"
 }
 
-# --- Find old merged PR for review test ---
-# The review test uses a previously merged PR from rdb-test, eliminating the
-# dependency on the resolve tests creating a fresh PR first.
-log "Finding most recently merged PR in $TEST_REPO for review test..."
-REVIEW_PR_NUM=$(gh pr list --repo "$TEST_REPO" --state merged --limit 1 --json number --jq '.[0].number' 2>/dev/null || echo "")
-REVIEW_PR_TITLE=""
-REVIEW_MATCH_STR=""
-REVIEW_SKIP=false
-
-if [[ -z "$REVIEW_PR_NUM" ]]; then
-    log "  Warning: no merged PR found — review test will be skipped"
-    REVIEW_SKIP=true
-else
-    REVIEW_PR_TITLE=$(gh pr view "$REVIEW_PR_NUM" --repo "$TEST_REPO" --json title --jq '.title' 2>/dev/null || echo "")
-    # Extract the e2e timestamp tag from the PR title (e.g. e2e-1234567890)
-    REVIEW_MATCH_STR=$(echo "$REVIEW_PR_TITLE" | grep -oE 'e2e-[0-9]+' | head -1 || echo "")
-    if [[ -z "$REVIEW_MATCH_STR" ]]; then
-        # Fallback: match by PR number in the title
-        REVIEW_MATCH_STR="Fix issue.*$REVIEW_PR_NUM"
-    fi
-    log "  Will use PR #$REVIEW_PR_NUM (title: '$REVIEW_PR_TITLE')"
-    log "  Review match string: '$REVIEW_MATCH_STR'"
-fi
+# --- Phase 2: Review + Feedback test state ---
+# Phase 2 is a self-contained test: create issue → resolve → review open PR → feedback resolve.
+# Phase 2 resolve runs in parallel with Phase 1. Phase 2A (review) and Phase 2B (feedback
+# resolve) run sequentially after the main polling loop completes.
+PHASE2_TS=$(date +%s)
+PHASE2_ISSUE_NUM=""
+PHASE2_RESOLVE_RUN_ID=""
+PHASE2_RESOLVE_RESULT=""
+PHASE2_PR_NUM=""
+PHASE2_PR_BRANCH=""
+PHASE2_INITIAL_SHA=""
+# Phase 2A (review) state
+PHASE2A_RUN_ID=""
+PHASE2A_RESULT=""
+# Phase 2B (feedback resolve) state
+PHASE2B_RUN_ID=""
+PHASE2B_RESULT=""
+PHASE2B_NEW_SHA=""
 
 # --- Create all test issues and trigger all workflows simultaneously ---
 
@@ -396,14 +391,16 @@ for idx in "${active_indices[@]}"; do
     gh issue comment "$issue_num" --repo "$TEST_REPO" --body "$cmd"
 done
 
-# --- Trigger review test ---
-REVIEW_RUN_ID=""
-REVIEW_RESULT=""
-
-if [[ "$REVIEW_SKIP" == "false" ]]; then
-    log "Posting /agent-review on PR #$REVIEW_PR_NUM..."
-    gh pr comment "$REVIEW_PR_NUM" --repo "$TEST_REPO" --body "/agent-review"
-fi
+# --- Create Phase 2 (review+feedback) issue and trigger resolve ---
+# Uses a unique e2e-rv-$PHASE2_TS tag so Phase 2 runs can be identified unambiguously.
+log "Creating Phase 2 (review+feedback) issue..."
+phase2_issue_url=$(gh issue create --repo "$TEST_REPO" \
+    --title "Test: review+feedback (e2e-rv-$PHASE2_TS)" \
+    --body "Add a '## Phase2' section to README.md containing a Python code block with a function phase2_stub() that returns None.")
+PHASE2_ISSUE_NUM="${phase2_issue_url##*/}"
+cleanup_issues+=("$PHASE2_ISSUE_NUM")
+log "  Issue #$PHASE2_ISSUE_NUM created. Triggering /agent-resolve..."
+gh issue comment "$PHASE2_ISSUE_NUM" --repo "$TEST_REPO" --body "/agent-resolve"
 
 # --- Trigger timeout test ---
 log "Creating timeout test issue..."
@@ -430,7 +427,7 @@ sleep 15
 #
 # Match runs to tests using displayTitle, which includes the issue/PR title.
 # Resolve tests: title contains e2e-$timestamp (unique per run) AND the test's title prefix.
-# Review test: title contains $REVIEW_MATCH_STR (from old merged PR's title).
+# Phase 2 resolve: title contains e2e-rv-$PHASE2_TS.
 # Timeout test: title contains e2e-timeout-$timeout_ts.
 # All non-baseline runs only (exclude pre-existing runs captured above).
 
@@ -496,8 +493,8 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
         fi
     done
 
-    # --- Poll review test ---
-    if [[ "$REVIEW_SKIP" == "false" && -z "$REVIEW_RESULT" ]]; then
+    # --- Poll Phase 2 resolve ---
+    if [[ -z "$PHASE2_RESOLVE_RESULT" ]]; then
         all_done=false
 
         while IFS= read -r row; do
@@ -510,13 +507,24 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
             [[ "$conclusion" == "skipped" ]] && continue
             is_baseline_id "$run_id" && continue
 
-            if [[ "$display_title" =~ $REVIEW_MATCH_STR ]]; then
-                REVIEW_RUN_ID="$run_id"
+            if [[ "$display_title" == *"e2e-rv-$PHASE2_TS"* ]]; then
+                PHASE2_RESOLVE_RUN_ID="$run_id"
                 if [[ "$status" == "completed" ]]; then
-                    REVIEW_RESULT="$conclusion"
-                    log "  review: $conclusion (run $run_id)"
+                    PHASE2_RESOLVE_RESULT="$conclusion"
+                    log "  phase2-resolve: $conclusion (run $run_id)"
+                    # Locate the PR and capture its initial commit SHA
+                    PHASE2_PR_BRANCH="openhands-fix-issue-$PHASE2_ISSUE_NUM"
+                    PHASE2_PR_NUM=$(gh pr list --repo "$TEST_REPO" \
+                        --search "head:$PHASE2_PR_BRANCH" \
+                        --json number --jq '.[0].number // empty' 2>/dev/null || echo "")
+                    if [[ -n "$PHASE2_PR_NUM" ]]; then
+                        PHASE2_INITIAL_SHA=$(gh api "repos/$TEST_REPO/git/ref/heads/$PHASE2_PR_BRANCH" \
+                            --jq '.object.sha' 2>/dev/null || echo "")
+                        cleanup_branches+=("$PHASE2_PR_BRANCH")
+                        log "  phase2-resolve: PR #$PHASE2_PR_NUM branch $PHASE2_PR_BRANCH (SHA ${PHASE2_INITIAL_SHA:0:7})"
+                    fi
                 else
-                    log "  review: $status (run $run_id)"
+                    log "  phase2-resolve: $status (run $run_id)"
                 fi
                 break
             fi
@@ -558,6 +566,111 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
     sleep "$POLL_INTERVAL"
     elapsed=$((elapsed + POLL_INTERVAL))
 done
+
+# --- Phase 2A: Review (sequential, after main polling loop) ---
+# Post /agent-review on the open PR created by Phase 2 resolve.
+# Capture a new baseline first so Phase 2 resolve's run ID is excluded.
+
+if [[ "$PHASE2_RESOLVE_RESULT" == "success" && -n "$PHASE2_PR_NUM" ]]; then
+    log ""
+    log "Phase 2A: Posting /agent-review on PR #$PHASE2_PR_NUM..."
+    PHASE2A_BASELINE=$(gh run list --repo "$TEST_REPO" --limit 50 --json databaseId \
+        --jq '.[].databaseId' 2>/dev/null || echo "")
+
+    gh pr comment "$PHASE2_PR_NUM" --repo "$TEST_REPO" --body "/agent-review"
+
+    elapsed2a=0
+    PHASE2A_TIMEOUT=1200  # 20 minutes
+
+    while [[ $elapsed2a -lt $PHASE2A_TIMEOUT && -z "$PHASE2A_RESULT" ]]; do
+        run_json2=$(gh run list --repo "$TEST_REPO" --limit 50 \
+            --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
+
+        while IFS= read -r row; do
+            [[ -z "$row" ]] && continue
+            display_title=$(echo "$row" | jq -r '.displayTitle')
+            status=$(echo "$row" | jq -r '.status')
+            conclusion=$(echo "$row" | jq -r '.conclusion')
+            run_id=$(echo "$row" | jq -r '.databaseId')
+
+            [[ "$conclusion" == "skipped" ]] && continue
+            echo "$PHASE2A_BASELINE" | grep -qx "$run_id" && continue
+
+            if [[ "$display_title" == *"e2e-rv-$PHASE2_TS"* ]]; then
+                PHASE2A_RUN_ID="$run_id"
+                if [[ "$status" == "completed" ]]; then
+                    PHASE2A_RESULT="$conclusion"
+                    log "  phase2a-review: $conclusion (run $run_id)"
+                else
+                    log "  phase2a-review: $status (run $run_id)"
+                fi
+                break
+            fi
+        done <<< "$(echo "$run_json2" | jq -c '.[]')"
+
+        if [[ -z "$PHASE2A_RESULT" ]]; then
+            log "  Phase 2A: waiting... (${elapsed2a}s)"
+            sleep "$POLL_INTERVAL"
+            elapsed2a=$((elapsed2a + POLL_INTERVAL))
+        fi
+    done
+fi
+
+# --- Phase 2B: PR Feedback Loop (sequential, after Phase 2A) ---
+# Post a feedback comment + /agent-resolve on the PR, then wait for a new commit.
+# Capture a new baseline so Phase 2A's run ID is excluded.
+
+if [[ "$PHASE2A_RESULT" == "success" && -n "$PHASE2_PR_NUM" ]]; then
+    log ""
+    log "Phase 2B: Posting feedback + /agent-resolve on PR #$PHASE2_PR_NUM..."
+    PHASE2B_BASELINE=$(gh run list --repo "$TEST_REPO" --limit 50 --json databaseId \
+        --jq '.[].databaseId' 2>/dev/null || echo "")
+
+    # Post feedback first, then trigger resolve
+    gh pr comment "$PHASE2_PR_NUM" --repo "$TEST_REPO" \
+        --body "Please update phase2_stub() to return the string 'hello world' instead of None."
+    sleep 2
+    gh pr comment "$PHASE2_PR_NUM" --repo "$TEST_REPO" --body "/agent-resolve"
+
+    elapsed2b=0
+    PHASE2B_TIMEOUT=1200  # 20 minutes
+
+    while [[ $elapsed2b -lt $PHASE2B_TIMEOUT && -z "$PHASE2B_RESULT" ]]; do
+        run_json3=$(gh run list --repo "$TEST_REPO" --limit 50 \
+            --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
+
+        while IFS= read -r row; do
+            [[ -z "$row" ]] && continue
+            display_title=$(echo "$row" | jq -r '.displayTitle')
+            status=$(echo "$row" | jq -r '.status')
+            conclusion=$(echo "$row" | jq -r '.conclusion')
+            run_id=$(echo "$row" | jq -r '.databaseId')
+
+            [[ "$conclusion" == "skipped" ]] && continue
+            echo "$PHASE2B_BASELINE" | grep -qx "$run_id" && continue
+
+            if [[ "$display_title" == *"e2e-rv-$PHASE2_TS"* ]]; then
+                PHASE2B_RUN_ID="$run_id"
+                if [[ "$status" == "completed" ]]; then
+                    PHASE2B_RESULT="$conclusion"
+                    log "  phase2b-feedback: $conclusion (run $run_id)"
+                    # Check whether the branch has a new commit
+                    PHASE2B_NEW_SHA=$(gh api "repos/$TEST_REPO/git/ref/heads/$PHASE2_PR_BRANCH" \
+                        --jq '.object.sha' 2>/dev/null || echo "")
+                else
+                    log "  phase2b-feedback: $status (run $run_id)"
+                fi
+                break
+            fi
+        done <<< "$(echo "$run_json3" | jq -c '.[]')"
+
+        if [[ -z "$PHASE2B_RESULT" ]]; then
+            log "  Phase 2B: waiting... (${elapsed2b}s)"
+            sleep "$POLL_INTERVAL"
+            elapsed2b=$((elapsed2b + POLL_INTERVAL))
+        fi
+    done
+fi
 
 # --- Verify results ---
 
@@ -627,40 +740,77 @@ for pos in "${!issue_nums[@]}"; do
     printf "  %-25s %-30s issue #%-5s %s\n" "$name" "$status" "$issue_num" "$log_url"
 done
 
-# --- Review test result ---
+# --- Phase 2: Review + Feedback results ---
 log ""
-log "--- Review Test ---"
+log "--- Phase 2: Review + Feedback ---"
 
-REVIEW_PASS=0
-REVIEW_FAIL=0
+PHASE2_PASS=0
+PHASE2_FAIL=0
+p2_pr_ref="${PHASE2_PR_NUM:-N/A}"
 
-review_log_url=""
-[[ -n "$REVIEW_RUN_ID" ]] && review_log_url="https://github.com/$TEST_REPO/actions/runs/$REVIEW_RUN_ID"
+# Phase 2 resolve result
+p2_resolve_url=""
+[[ -n "$PHASE2_RESOLVE_RUN_ID" ]] && p2_resolve_url="https://github.com/$TEST_REPO/actions/runs/$PHASE2_RESOLVE_RUN_ID"
+if [[ -z "$PHASE2_RESOLVE_RESULT" ]]; then
+    p2_resolve_status="TIMEOUT"
+    ((PHASE2_FAIL++)) || true
+elif [[ "$PHASE2_RESOLVE_RESULT" == "success" ]]; then
+    if [[ -n "$PHASE2_PR_NUM" ]]; then
+        p2_resolve_status="PASS (PR #$PHASE2_PR_NUM)"
+    else
+        p2_resolve_status="PASS (no PR found)"
+    fi
+    ((PHASE2_PASS++)) || true
+else
+    p2_resolve_status="FAIL ($PHASE2_RESOLVE_RESULT)"
+    ((PHASE2_FAIL++)) || true
+fi
+printf "  %-25s %-30s issue #%-5s %s\n" "phase2-resolve" "$p2_resolve_status" "${PHASE2_ISSUE_NUM:-N/A}" "$p2_resolve_url"
 
-if [[ "$REVIEW_SKIP" == "true" ]]; then
-    review_status="SKIPPED (no merged PR found)"
-elif [[ -z "$REVIEW_RESULT" ]]; then
-    review_status="TIMEOUT"
-    ((REVIEW_FAIL++)) || true
-elif [[ "$REVIEW_RESULT" == "success" ]]; then
-    # Verify review comment was posted on the PR
-    comment_count=$(gh api "repos/$TEST_REPO/issues/$REVIEW_PR_NUM/comments" \
+# Phase 2A review result
+p2a_url=""
+[[ -n "$PHASE2A_RUN_ID" ]] && p2a_url="https://github.com/$TEST_REPO/actions/runs/$PHASE2A_RUN_ID"
+if [[ "$PHASE2_RESOLVE_RESULT" != "success" || -z "$PHASE2_PR_NUM" ]]; then
+    p2a_status="SKIPPED (resolve didn't create PR)"
+elif [[ -z "$PHASE2A_RESULT" ]]; then
+    p2a_status="TIMEOUT"
+    ((PHASE2_FAIL++)) || true
+elif [[ "$PHASE2A_RESULT" == "success" ]]; then
+    comment_count=$(gh api "repos/$TEST_REPO/issues/$PHASE2_PR_NUM/comments" \
         --jq '[.[] | select(.body | contains("Code review by"))] | length' \
         2>/dev/null || echo "0")
     if [[ "$comment_count" -gt 0 ]]; then
-        review_status="PASS (review comment posted)"
-        ((REVIEW_PASS++)) || true
+        p2a_status="PASS (review comment posted)"
     else
-        review_status="PASS (no review comment found)"
-        ((REVIEW_PASS++)) || true
+        p2a_status="PASS (no review comment found)"
     fi
+    ((PHASE2_PASS++)) || true
 else
-    review_status="FAIL ($REVIEW_RESULT)"
-    ((REVIEW_FAIL++)) || true
+    p2a_status="FAIL ($PHASE2A_RESULT)"
+    ((PHASE2_FAIL++)) || true
 fi
+printf "  %-25s %-30s PR #%-5s  %s\n" "phase2a-review" "$p2a_status" "$p2_pr_ref" "$p2a_url"
 
-review_ref="${REVIEW_PR_NUM:-N/A}"
-printf "  %-25s %-30s PR #%-5s  %s\n" "review" "$review_status" "$review_ref" "$review_log_url"
+# Phase 2B feedback loop result
+p2b_url=""
+[[ -n "$PHASE2B_RUN_ID" ]] && p2b_url="https://github.com/$TEST_REPO/actions/runs/$PHASE2B_RUN_ID"
+if [[ "$PHASE2A_RESULT" != "success" || -z "$PHASE2_PR_NUM" ]]; then
+    p2b_status="SKIPPED (review didn't complete)"
+elif [[ -z "$PHASE2B_RESULT" ]]; then
+    p2b_status="TIMEOUT"
+    ((PHASE2_FAIL++)) || true
+elif [[ "$PHASE2B_RESULT" == "success" ]]; then
+    if [[ -n "$PHASE2B_NEW_SHA" && -n "$PHASE2_INITIAL_SHA" && "$PHASE2B_NEW_SHA" != "$PHASE2_INITIAL_SHA" ]]; then
+        p2b_status="PASS (new commit on branch)"
+    else
+        p2b_status="PASS (no new commit detected)"
+    fi
+    ((PHASE2_PASS++)) || true
+else
+    p2b_status="FAIL ($PHASE2B_RESULT)"
+    ((PHASE2_FAIL++)) || true
+fi
+printf "  %-25s %-30s PR #%-5s  %s\n" "phase2b-feedback" "$p2b_status" "$p2_pr_ref" "$p2b_url"
 
 # --- Timeout test result ---
 log ""
@@ -728,23 +878,41 @@ for pos in "${!issue_nums[@]}"; do
     fi
 done
 
-# Collect cost from review test
-if [[ "$REVIEW_SKIP" == "false" && -n "$REVIEW_PR_NUM" ]]; then
-    cost_comment=$(gh api "repos/$TEST_REPO/issues/$REVIEW_PR_NUM/comments" \
+# Collect cost from Phase 2 resolve (issue comments)
+if [[ -n "$PHASE2_ISSUE_NUM" ]]; then
+    cost_comment=$(gh api "repos/$TEST_REPO/issues/$PHASE2_ISSUE_NUM/comments" \
         --jq '[.[] | select(.body | contains("Cost Summary"))] | last | .body' \
         2>/dev/null || echo "")
-
     if [[ -n "$cost_comment" ]]; then
         cost=$(parse_cost_from_comment "$cost_comment")
         if [[ -n "$cost" && "$cost" != "0.00" ]]; then
             total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
             ((cost_count++)) || true
-            printf "  %-25s \$%s\n" "review" "$cost"
+            printf "  %-25s \$%s\n" "phase2-resolve" "$cost"
         else
-            printf "  %-25s (no cost data)\n" "review"
+            printf "  %-25s (no cost data)\n" "phase2-resolve"
         fi
     else
-        printf "  %-25s (no cost comment)\n" "review"
+        printf "  %-25s (no cost comment)\n" "phase2-resolve"
+    fi
+fi
+
+# Collect costs from Phase 2A review and Phase 2B feedback (PR comments)
+if [[ -n "$PHASE2_PR_NUM" ]]; then
+    cost_comment=$(gh api "repos/$TEST_REPO/issues/$PHASE2_PR_NUM/comments" \
+        --jq '[.[] | select(.body | contains("Cost Summary"))] | last | .body' \
+        2>/dev/null || echo "")
+    if [[ -n "$cost_comment" ]]; then
+        cost=$(parse_cost_from_comment "$cost_comment")
+        if [[ -n "$cost" && "$cost" != "0.00" ]]; then
+            total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
+            ((cost_count++)) || true
+            printf "  %-25s \$%s\n" "phase2-review+feedback" "$cost"
+        else
+            printf "  %-25s (no cost data)\n" "phase2-review+feedback"
+        fi
+    else
+        printf "  %-25s (no cost comment)\n" "phase2-review+feedback"
     fi
 fi
 
@@ -773,13 +941,13 @@ log "  Total cost: \$$total_cost ($cost_count tests with cost data)"
 log ""
 log "========================================="
 log "  Resolve/Design: Pass: $pass  Fail: $fail  Timeout: $timeout_count"
-log "  Review:         Pass: $REVIEW_PASS  Fail: $REVIEW_FAIL"
+log "  Phase 2:        Pass: $PHASE2_PASS  Fail: $PHASE2_FAIL"
 log "  Timeout test:   Pass: $TIMEOUT_PHASE_PASS  Fail: $TIMEOUT_PHASE_FAIL"
 log "  Total cost:     \$$total_cost"
 log "========================================="
 
 # Exit with failure if any test didn't pass
-total_fail=$((fail + timeout_count + REVIEW_FAIL + TIMEOUT_PHASE_FAIL))
+total_fail=$((fail + timeout_count + PHASE2_FAIL + TIMEOUT_PHASE_FAIL))
 if [[ $total_fail -gt 0 ]]; then
     exit 1
 fi
