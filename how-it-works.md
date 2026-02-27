@@ -1,6 +1,6 @@
 # How Remote Dev Bot Works
 
-This document explains the architecture of Remote Dev Bot: what files live where, how the pieces connect, and how to think about the system when setting it up or developing it.
+This document explains the architecture of Remote Dev Bot: what files live where, how the pieces connect, and how to think about the system when setting it up.
 
 ## The Two-Repo Model
 
@@ -34,8 +34,6 @@ Remote Dev Bot uses a **shim + reusable workflow** pattern that involves two rep
 │                                                                             │
 │   remote-dev-bot.yaml            ←── Base config: model aliases, settings   │
 │                                                                             │
-│   lib/config.py                  ←── Config parsing logic                   │
-│                                                                             │
 │   .github/workflows/agent.yml    ←── Shim (also the template for target repos)│
 │                                                                             │
 │   runbook.md                     ←── Setup instructions                     │
@@ -52,11 +50,10 @@ This is the "engine" — the shared infrastructure that all target repos use.
 |------|---------|
 | `.github/workflows/remote-dev-bot.yml` | The reusable workflow. Contains all the logic: parses model aliases, installs OpenHands, resolves issues, creates PRs. Target repos call this. |
 | `remote-dev-bot.yaml` | Base configuration. Defines model aliases (`claude-small`, `claude-large`, etc.) and OpenHands settings (version, max iterations, PR type). |
-| `lib/config.py` | Config parsing logic. Loads base config, merges with target repo overrides, resolves aliases. Used by remote-dev-bot.yml at runtime. |
 | `.github/workflows/agent.yml` | Shim workflow. Also serves as the template — copy this to target repos. |
 | `runbook.md` | Step-by-step setup instructions for humans or AI assistants. |
 
-**Who maintains this:** You (if you forked it) or the upstream maintainer (gnovak). Updates here automatically flow to all target repos that reference it.
+**Who maintains this:** The upstream maintainer (gnovak), or you if you forked it. Updates here automatically flow to all target repos that reference it.
 
 ### In Each Target Repo
 
@@ -83,7 +80,7 @@ When someone comments `/agent-resolve-claude-large` on an issue:
 1. **Shim triggers** — The target repo's `agent.yml` fires on the comment
 2. **Calls reusable workflow** — The shim calls `remote-dev-bot.yml@main` from remote-dev-bot
 3. **Config checkout** — remote-dev-bot.yml sparse-checks out `remote-dev-bot.yaml` and `lib/` from remote-dev-bot
-4. **Config merge** — config.py loads base config from remote-dev-bot, merges with any override config in the target repo
+4. **Config merge** — base config from remote-dev-bot is merged with any override config in the target repo
 5. **Model resolution** — The alias `claude-large` is resolved to a model ID like `anthropic/claude-opus-4-5`
 6. **Feedback** — A rocket emoji is added to your comment and you're assigned to the issue, so you can see at a glance which issues have active work
 7. **Agent runs** — OpenHands reads the issue, explores the codebase, makes changes
@@ -144,7 +141,7 @@ Merges are deep (leaf-level): overriding `openhands.max_iterations` does not clo
 This lets you:
 - Use different default models per repo
 - Set lower iteration limits for repos with simpler tasks
-- Test config changes without modifying remote-dev-bot
+- Override only the settings that matter to your repo — everything else is inherited from the base
 
 ## Per-Invocation Arguments (Inline Args)
 
@@ -158,7 +155,6 @@ context_files = docs/architecture.md extra-context.md
 ```
 
 **How it works:**
-- `COMMENT_BODY` carries the full comment text into `lib/config.py`
 - The first line is the command; subsequent `name = value` lines are parsed as arguments
 - Argument names are normalized: spaces, dashes, and underscores are equivalent (`max iterations`, `max-iterations`, and `max_iterations` all resolve to the same thing)
 
@@ -171,7 +167,7 @@ context_files = docs/architecture.md extra-context.md
 | `timeout_minutes` | `openhands.timeout_minutes` | Override watchdog timeout for this run |
 | `context_files` | the mode's `context_files` | Append extra files (space-separated) — does not replace existing list |
 
-Unknown argument names are rejected with an error comment. The inline arg system is implemented in `lib/config.py` (`parse_invocation`, `parse_args`, `ALLOWED_ARGS`).
+Unknown argument names are rejected with an error comment.
 
 ## Authentication and Bot Identity
 
@@ -233,32 +229,14 @@ Now updates to your fork flow to your target repos, and you control the release 
 
 **Private forks:** If you keep your fork private, your target repos must be in the same org/user account (GitHub doesn't allow cross-owner calls to private repo workflows). Set the Actions access level as described in step 3.
 
-## The Special Case: Developing Remote-Dev-Bot Itself
+## Quick Reference
 
-When using remote-dev-bot to develop remote-dev-bot, the two repos are the same. This creates a bootstrapping situation:
-
-- The shim (`agent.yml`) lives in remote-dev-bot
-- The reusable workflow (`remote-dev-bot.yml`) also lives in remote-dev-bot
-- The shim calls `remote-dev-bot.yml@main`, so changes on feature branches don't take effect
-
-**Solution: Use a separate test repo.**
-
-The recommended dev cycle uses two repos:
-- `remote-dev-bot` — the main repo with the reusable workflow
-- `remote-dev-bot-test` — a test repo whose shim points at `remote-dev-bot.yml@e2e-test`
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full dev cycle, including how the `e2e-test` branch works as a test pointer.
-
-## Quick Reference: What Goes Where
-
-| I want to... | File to edit | Which repo |
-|--------------|--------------|------------|
-| Add a new model alias | `remote-dev-bot.yaml` | remote-dev-bot (or your fork) |
-| Change the default model for one repo | `remote-dev-bot.yaml` | target repo |
-| Modify how the agent runs | `.github/workflows/remote-dev-bot.yml` | remote-dev-bot |
-| Give the agent context about my codebase | `.openhands/microagents/repo.md` (or any file via `context_files`) | target repo |
-| Set up a new repo to use the bot | `.github/workflows/agent.yml` + secrets | target repo |
-| Change config parsing logic | `lib/config.py` | remote-dev-bot |
+| I want to... | Where |
+|--------------|-------|
+| Set up a new repo to use the bot | Follow [runbook.md](runbook.md) |
+| Change the default model for my repo | `remote-dev-bot.yaml` in target repo |
+| Give the agent context about my codebase | `.openhands/microagents/repo.md` in target repo |
+| Override a setting for a single run | Inline args in the trigger comment (see above) |
 
 ## Troubleshooting
 
@@ -275,9 +253,7 @@ Config: base=remote-dev-bot, override=none
 
 **"My config changes aren't taking effect"**
 
-- If you changed `remote-dev-bot.yaml` in the target repo: changes should work immediately
-- If you changed `remote-dev-bot.yaml` in remote-dev-bot: the target repo's shim must reference the branch with your changes (e.g., `@dev` instead of `@main`)
-- If you changed `lib/config.py`: this is checked out from `main` at runtime, so changes must be merged to main first (see [CONTRIBUTING.md](CONTRIBUTING.md) for details)
+- If you changed `remote-dev-bot.yaml` in the target repo: changes should work immediately on the next run.
 
 **"I'm confused about which repo I'm in"**
 
