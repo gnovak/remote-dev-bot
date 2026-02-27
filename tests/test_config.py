@@ -438,7 +438,7 @@ def config_dir(tmp_path):
                 "action": "explore",
                 "default_model": "claude-small",
                 "max_iterations": 10,
-                "prompt_prefix": "You are exploring this issue.",
+                "additional_instructions": "You are exploring this issue.",
                 "context_files": ["README.md", "AGENTS.md"],
             },
         },
@@ -510,8 +510,8 @@ def test_resolve_config_explore_mode(config_dir):
     assert result["action"] == "explore"
     assert result["alias"] == "claude-small"
     assert result["model"] == "anthropic/claude-sonnet-4-5"
-    assert "prompt_prefix" in result
-    assert "exploring" in result["prompt_prefix"]
+    assert "additional_instructions" in result
+    assert "exploring" in result["additional_instructions"]
     assert "context_files" in result
     assert result["context_files"] == ["README.md", "AGENTS.md"]
     assert "explore_max_iterations" in result

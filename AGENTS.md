@@ -4,13 +4,13 @@ Project conventions for AI coding agents working on this repository.
 
 ## Project
 
-Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to resolve issues and create PRs, controlled via `/agent-resolve` and `/agent-design` comments on GitHub issues.
+Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to resolve issues and create PRs, controlled via `/agent-resolve`, `/agent-design`, and `/agent-review` comments on GitHub issues and PRs.
 
 ### How It Works
-1. User comments `/agent-resolve[-<model>]` or `/agent-design[-<model>]` on a GitHub issue
+1. User comments `/agent-resolve[-<model>]`, `/agent-design[-<model>]`, or `/agent-review[-<model>]` on a GitHub issue or PR
 2. Target repo's shim workflow calls `remote-dev-bot.yml` from this repo
 3. Reusable workflow parses the mode and model, dispatches to the right job
-4. Resolve mode: OpenHands runs, edits code, opens a draft PR. Design mode: LLM analyzes the issue, posts a comment.
+4. Resolve mode: OpenHands runs, edits code, opens a PR. Design mode: LLM analyzes the issue, posts a comment. Review mode: LLM reviews a PR, posts a code review comment.
 5. Iterative: comment `/agent-resolve` again on the PR with feedback for another pass
 
 ### Key Files
@@ -27,7 +27,7 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 **Python**:
 - `lib/config.py` — config parsing: `parse_invocation`, `parse_args`, `resolve_config`, `ALLOWED_ARGS`; called by the workflow and unit tests
 - `lib/feedback.py` — install feedback collection: `InstallReport`, `InstallProblem`, `report_problems`; used during runbook execution
-- `scripts/compile.py` — compiles `remote-dev-bot.yml` → `dist/agent-resolve.yml`, `dist/agent-design.yml`; finds steps by **name** not index
+- `scripts/compile.py` — compiles `remote-dev-bot.yml` → `dist/agent-resolve.yml`, `dist/agent-design.yml`, `dist/agent-review.yml`; finds steps by **name** not index
 
 **Tests** (`tests/`):
 - `test_config.py` — unit tests for all `lib/config.py` functions
@@ -79,6 +79,13 @@ pytest --doctest-modules lib/config.py
 2. Add a job to `.github/workflows/remote-dev-bot.yml`
 3. `resolve_config()` in `lib/config.py` reads the mode's config from the YAML — no code change needed unless the mode has a novel output field
 
+### Adding a new model provider (e.g., a new LLM vendor)
+1. Add the provider prefix to `KNOWN_PROVIDERS` in `lib/config.py` (e.g., `"newvendor/"`)
+2. Add an API key check in the "Determine API key" step of `.github/workflows/remote-dev-bot.yml` — there are four copies (resolve, design, review, explore); update all of them
+3. Add model aliases under `models:` in `remote-dev-bot.yaml` with IDs using the new prefix
+4. Add the API key secret (`NEWVENDOR_API_KEY`) to the secrets passed through in `agent.yml` and `dogfood.yml`
+5. Update the runbook.md to mention the new provider as an option
+
 ### Changing the cost/metrics step
 The `parse_litellm_logs` Python function lives inside a bash heredoc in the "Calculate and post cost" step of `remote-dev-bot.yml`. `test_cost.py` extracts it directly from the YAML at test time, so tests always exercise the live code. After changing the step, run `pytest tests/test_cost.py -v`.
 
@@ -88,7 +95,7 @@ Users can pass per-invocation arguments on lines after the command:
 ```
 /agent resolve
 max iterations = 75
-context = extra-file.md
+context_files = extra-file.md
 target branch = design/gemini
 ```
 
@@ -98,11 +105,11 @@ target branch = design/gemini
 - `parse_args(lines)` parses `name = value` lines; `normalize_arg_name` maps spaces/dashes/underscores to underscores
 - `ALLOWED_ARGS` in `lib/config.py` defines accepted names and types; unknown names are rejected with an error
 - `resolve_config(..., args=...)` applies parsed args on top of YAML config
-- `context` is an alias for `context_files`; it **appends** to the mode's existing list (does not replace)
+- `context_files` **appends** to the mode's existing list (does not replace)
 
-## compile.py: Two-File Output
+## compile.py: Three-File Output
 
-`scripts/compile.py` inlines config parsing and selected steps from `remote-dev-bot.yml` into two standalone files: `dist/agent-resolve.yml` and `dist/agent-design.yml`. It finds steps by **name** (not index), so reordering steps is safe as long as step names don't change.
+`scripts/compile.py` inlines config parsing and selected steps from `remote-dev-bot.yml` into three standalone files: `dist/agent-resolve.yml`, `dist/agent-design.yml`, and `dist/agent-review.yml`. It finds steps by **name** (not index), so reordering steps is safe as long as step names don't change.
 
 **Rule: if you add, remove, or rename a step in remote-dev-bot.yml, update compile.py to match**, then run `pytest tests/test_compile.py -v`. The step-count tripwire tests will catch mismatches.
 

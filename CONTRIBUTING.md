@@ -40,7 +40,7 @@ Three separate GitHub identities are used so each role is cleanly separated:
 - Created at https://github.com/settings/apps/remote-dev-bot (owned by `gnovak`)
 - When used, the bot posts as `remote-dev-bot[bot]` — a clearly distinct identity from the repo owner
 - App ID: `2895037`
-- Installed on all `gnovak` repos (blanket install). Only repos with `RDB_APP_PRIVATE_KEY` secret actually use it. Currently configured on: `gnovak/remote-dev-bot`, `gnovak/remote-dev-bot-test`, `gnovak/bridge-analysis`
+- Installed on all `gnovak` repos (blanket install). Only repos with `RDB_APP_PRIVATE_KEY` secret actually use it. Currently configured on: `gnovak/remote-dev-bot`, `gnovak/remote-dev-bot-test`
 - Permissions (all Read & write): Contents, Issues, Pull Requests, Workflows, Actions, Checks
   - **Workflows** is included because this app devs rdb itself, so the agent may need to modify `.github/workflows/` files. Regular rdb users should *not* grant this — the runbook intentionally omits it.
   - **Actions + Checks** are included so the agent can inspect CI logs and check run results when debugging ("PR XYZ is failing, dig into the logs"). The OpenHands sandbox has `gh` CLI and GitHub API access, so these work. Regular rdb users don't need these unless they specifically want the agent to debug CI.
@@ -70,7 +70,7 @@ Variables stored on `gnovak/remote-dev-bot`:
 
 | Variable | Value | What it is |
 |----------|-------|-----------|
-| `RDB_APP_ID` | `2895037` | GitHub App ID for the "remote-dev-bot" app. Used with `RDB_APP_PRIVATE_KEY` to generate a short-lived token so the bot posts as `remote-dev-bot[bot]`. This is a variable (not a secret) because app IDs are public. Set on `remote-dev-bot`, `remote-dev-bot-test`, and `bridge-analysis`. |
+| `RDB_APP_ID` | `2895037` | GitHub App ID for the "remote-dev-bot" app. Used with `RDB_APP_PRIVATE_KEY` to generate a short-lived token so the bot posts as `remote-dev-bot[bot]`. This is a variable (not a secret) because app IDs are public. Set on `remote-dev-bot` and `remote-dev-bot-test`. |
 
 Secrets stored on `gnovak/remote-dev-bot-test`:
 
@@ -84,13 +84,14 @@ Secrets stored on `gnovak/remote-dev-bot-test`:
 
 ## Config Layering
 
-rdb uses a three-layer config merge (each layer is optional, deeper layers win):
+rdb uses a three-layer config merge plus optional per-invocation runtime args (each layer is optional, deeper layers win):
 
-| Layer | Path | Source |
-|-------|------|--------|
+| Layer | Path / Source | Notes |
+|-------|---------------|-------|
 | Base | `.remote-dev-bot/remote-dev-bot.yaml` | rdb repo, via sparse-checkout |
 | Override | `remote-dev-bot.yaml` | Target repo (user's settings) |
-| Local | `remote-dev-bot.local.yaml` | Target repo (deepest override) |
+| Local | `remote-dev-bot.local.yaml` | Target repo (deepest override; gitignored) |
+| Runtime args | Inline `name = value` lines in the trigger comment | Override for a single run; see `ALLOWED_ARGS` in `lib/config.py` |
 
 All merges are deep (leaf-level), so overriding `modes.design.max_iterations`
 does not clobber `modes.design.context_files`.  Lists replace entirely (no
@@ -198,7 +199,7 @@ E2E tests cost real money (they invoke LLM APIs), so the full test suite is not 
    ```bash
    python scripts/compile.py
    ```
-   This writes `dist/agent-resolve.yml` and `dist/agent-design.yml`. Commit the updated dist files if they changed.
+   This writes `dist/agent-resolve.yml`, `dist/agent-design.yml`, and `dist/agent-review.yml`. Commit the updated dist files if they changed.
 
 4. **Tag the release**:
    ```bash
@@ -208,13 +209,13 @@ E2E tests cost real money (they invoke LLM APIs), so the full test suite is not 
 
 5. **Create the GitHub release** with both compiled workflows:
    ```bash
-   gh release create vX.Y.Z dist/agent-resolve.yml dist/agent-design.yml \
+   gh release create vX.Y.Z dist/agent-resolve.yml dist/agent-design.yml dist/agent-review.yml \
      --title "vX.Y.Z" \
      --notes "Release notes here"
    ```
 
 ### What goes in a release
 
-- Two compiled workflow files: `agent-resolve.yml` (issue resolution) and `agent-design.yml` (design analysis). Both are self-contained with inlined config, model aliases, and security guardrails.
+- Three compiled workflow files: `agent-resolve.yml` (issue resolution), `agent-design.yml` (design analysis), and `agent-review.yml` (code review). All are self-contained with inlined config, model aliases, and security guardrails.
 - Users who installed via compiled workflows get updates by downloading the new release.
 - Users who installed via the shim get updates automatically (the shim calls `remote-dev-bot.yml@main`).
