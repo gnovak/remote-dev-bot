@@ -1,10 +1,16 @@
 # Remote Dev Bot — Setup Runbook
 
-## Overview
+## Quick Start
 
 This runbook will guide you through setting up Remote Dev Bot on your GitHub repository. By the end, you'll have an AI-powered bot that can automatically resolve issues and create pull requests when triggered by a `/agent-resolve` comment.
 
-**How the bot works:** When you comment `/agent-resolve` on an issue, a GitHub Actions workflow starts. It spins up [OpenHands](https://github.com/All-Hands-AI/OpenHands) (an open-source AI coding agent) in a sandboxed container, points it at your issue, and lets it work. The agent reads the issue, explores your codebase, writes code, runs tests, and iterates until it has a solution. Then it pushes a branch and opens a draft PR for your review. You can also use `/agent-design` for AI design analysis posted as a comment (no code changes), or `/agent-review` on a pull request to get an AI code review.
+The easiest way to install is to tell your favorite AI agent "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}."
+
+---
+
+## Overview
+
+**How the bot works:** When you comment `/agent-resolve` on an issue, a GitHub Actions workflow starts. It spins up [OpenHands](https://github.com/All-Hands-AI/OpenHands) (an open-source AI coding agent) in a sandboxed container, points it at your issue, and lets it work. The agent reads the issue, explores your codebase, writes code, runs tests, and iterates until it has a solution. Then it pushes a branch and opens a draft PR for your review. You can also use `/agent-design` for AI design analysis posted as a comment (no code changes), or `/agent-review` on a pull request to get an AI code review.  Once you have human or machine generated comments and requested changes on the PR, you can comment '/agent-resolve' on the PR to make the requested changes.
 
 **What you'll set up:**
 
@@ -236,7 +242,7 @@ gh api repos/{owner}/{repo}/actions/permissions/workflow
 6. **Note:** Google AI Studio is separate from a Google One AI Premium subscription ($20/mo). The subscription gives access to the Gemini chatbot; it does not provide API credits or affect API billing.
 7. **Useful links:** [API keys](https://aistudio.google.com/app/apikey) · [Usage & rate limits](https://aistudio.google.com/app/usage) · [Projects](https://aistudio.google.com/app/projects)
 
-**Tip:** Store your API key in a password manager. Name it "remote-dev-bot" so you can find it later when adding it to other repos.
+**Tip:** Store your API key in a password manager.
 
 ### Step 2.2.1: Set Cost Limits (Recommended)
 
@@ -287,10 +293,10 @@ Anthropic provides usage limits that cap your monthly spending.
 3. **Set API quotas** (rate limits, not dollar limits):
    - Go to https://console.cloud.google.com/apis/api/generativelanguage.googleapis.com/quotas
    - The most relevant quotas to limit are:
-     - `GenerateContent requests per minute per region` — e.g., set to 3-10
-     - `Request limit per model per day per project` — e.g., set to 100-500
-     - `GenerateContent input token count per model per minute` — e.g., set to 20,000-100,000
-   - **Note:** These limit API calls, not dollars. A few expensive calls can still add up.
+     - `GenerateContent requests per minute per region` — e.g., set to 30
+     - `Request limit per model per day per project` — e.g., set to 1000
+     - `GenerateContent input token count per model per minute` — e.g., set to 500,000
+   - **Note:** These limit API calls, not dollars.  The limits suggested here are conservative in an attempt to limit the damage that can be caused by a leaked API key, but the resulting bill can still be large.
 
 **Recommended approach for Google:** If you need hard cost limits, consider using OpenAI or Anthropic instead. If you must use Google with billing enabled, set conservative API quotas and monitor your budget alerts closely. The free tier is the only way to guarantee $0 spend.
 
@@ -513,17 +519,17 @@ gh issue create --repo {owner}/{repo} \
 
 ### Step 4.2: Trigger the Agent
 
-Comment on the issue to trigger the agent. For your first test, use `claude-small` (Sonnet) — it's the default and handles most tasks well.
+Comment on the issue to trigger the agent.
 
 **Via web interface:**
 1. Go to `https://github.com/{owner}/{repo}/issues/{issue-number}` (or click on the issue you just created)
 2. Scroll to the comment box at the bottom
-3. Type `/agent-resolve-claude-small`
+3. Type `/agent-resolve`
 4. Click "Comment"
 
 **Via command line:**
 ```bash
-gh issue comment {issue-number} --repo {owner}/{repo} --body "/agent-resolve-claude-small"
+gh issue comment {issue-number} --repo {owner}/{repo} --body "/agent-resolve"
 ```
 
 ### Step 4.3: Monitor the Run
@@ -566,19 +572,13 @@ If successful, you should see:
 gh pr list --repo {owner}/{repo}
 ```
 
-**If the run fails**, check the logs for the specific error. Common first-run issues:
+**If the run fails**, check the logs for the specific error. Some issues:
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `ModuleNotFoundError: No module named 'yaml'` | PyYAML not installed before config parsing | **Compiled:** Re-download latest from [releases](https://github.com/gnovak/remote-dev-bot/releases). **Shim:** Should auto-fix (uses latest remote-dev-bot.yml) |
-| `ImportError: cannot import name 'WorkspaceState'` | Old OpenHands version | **Compiled:** Re-download latest from [releases](https://github.com/gnovak/remote-dev-bot/releases). **Shim:** Should auto-fix |
-| `error: the following arguments are required: --selected-repo` | OpenHands 1.x API change | Update workflow — `--repo` was renamed to `--selected-repo` |
-| `ValueError: Username is required` | Missing env vars | Workflow needs `GITHUB_USERNAME` and `GIT_USERNAME` |
-| `Missing Anthropic API Key` or `x-api-key header is required` | API key not reaching the workflow | **Shim install:** Ensure secrets are passed explicitly (not via `secrets: inherit`) — see `.github/workflows/agent.yml`. **Both installs:** Re-check the secret value via web (`https://github.com/{owner}/{repo}/settings/secrets/actions`) |
-| `Agent reached maximum iteration` | Agent loops instead of finishing | Try `/agent-resolve-claude-large` for complex tasks |
-| `429 Too Many Requests` | GitHub API rate limit | Wait a few minutes and try again |
-| `KeyError: 'LLM_API_KEY'` in PR creation step | Missing env vars in PR step | Update workflow to pass `LLM_API_KEY` and `LLM_MODEL` to both steps |
-| Workflow file issue (instant failure, 0s) | Reusable workflow not accessible | **Shim install:** Ensure `gnovak/remote-dev-bot` (or your fork) is public, or set Actions access to `user` level if using a private fork |
+| `Missing Anthropic API Key` or `x-api-key header is required` | API key not reaching the workflow | Re-check the secret value via web (`https://github.com/{owner}/{repo}/settings/secrets/actions`) |
+| `Agent reached maximum iteration` | Agent may be looping instead of finishing | Try a more capable model |
+| Workflow file issue (instant failure, 0s) | Reusable workflow not accessible | If using a private fork of `gnovak/remote-dev-bot` set Actions access to `user` level |
 
 ---
 
@@ -737,7 +737,7 @@ If the agent fails with `x-api-key header is required` or similar authentication
 ### Agent runs but hits max iterations
 - The agent completed the work but couldn't gracefully stop
 - Try a more capable model: `/agent-resolve-claude-large`
-- Or lower `max_iterations` in `remote-dev-bot.yaml`
+- Or increase `max_iterations` in `remote-dev-bot.yaml`
 
 ### Agent runs but skips PR creation
 - The log will say "Issue was not successfully resolved. Skipping PR creation."
