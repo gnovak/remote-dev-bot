@@ -129,15 +129,15 @@ The system has two parts:
 - **Reusable workflow** (`.github/workflows/remote-dev-bot.yml`) — all the logic: parses commands, dispatches to resolve, design, or review mode, runs the agent. Lives in this repo and is called by shims in target repos.
 - **OpenHands** — the AI agent framework that does the actual code exploration and editing
 - **`remote-dev-bot.yaml`** — model aliases and OpenHands settings (version, max iterations, PR type)
-- **`runbook.md`** — step-by-step setup instructions, designed to be followed by a human or by an AI assistant (like Claude Code)
+- **`install.md`** — step-by-step setup instructions, designed to be followed by a human or by an AI assistant (like Claude Code)
 
 ## Setup
 
-See `runbook.md` for complete setup instructions. The runbook is designed so you (or an AI assistant) can follow it step-by-step to get this running in your own GitHub account.
+See `install.md` for complete setup instructions. It's designed so you (or an AI assistant) can follow it step-by-step to get this running in your own GitHub account.
 
 **Quick version:** You need a GitHub repo, API keys for your preferred LLM provider(s), and about 10 minutes. No PAT or special authentication is required — the bot works with GitHub's built-in token and posts as `github-actions[bot]`.
 
-**Advanced auth options:** If you want bot PRs to auto-trigger CI, or a custom bot identity (e.g., `your-app[bot]`), see the advanced auth section in the runbook. Options include a GitHub App (recommended) or a PAT.
+**Advanced auth options:** If you want bot PRs to auto-trigger CI, or a custom bot identity (e.g., `your-app[bot]`), see the advanced auth section in `install.md`. Options include a GitHub App (recommended) or a PAT.
 
 ## Customization
 
@@ -276,7 +276,7 @@ The assistant can fetch the logs via `gh run view`, identify the failure point, 
 
 ### Other issues
 
-See the Troubleshooting section in `runbook.md` for installation-related problems (workflow not triggering, secrets not reaching the workflow, etc.).
+See the Troubleshooting section in `install.md` for installation-related problems (workflow not triggering, secrets not reaching the workflow, etc.).
 
 ## LLM Provider Quick Reference
 

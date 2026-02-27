@@ -41,9 +41,9 @@ Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to reso
 **Config**:
 - `remote-dev-bot.yaml` — model aliases and OpenHands settings (canonical config; also serves as template for user repos)
 - `remote-dev-bot.local.yaml` — local overrides (gitignored); use for dev without affecting CI
-- `runbook.md` — setup instructions designed to be followed by humans or AI assistants
+- `install.md` — setup instructions designed to be followed by humans or AI assistants
 
-**Note on config layering:** The config system has a `.local.yaml` override file (`remote-dev-bot.local.yaml`) used in the remote-dev-bot repo itself for self-development/dogfooding. This is a developer tool only — do NOT document it in user-facing docs (README.md, how-it-works.md, runbook.md). It belongs only in CONTRIBUTING.md. User-facing docs should describe only the two-layer system: base config (in remote-dev-bot repo) + target repo override (`remote-dev-bot.yaml` in the calling repo).
+**Note on config layering:** The config system has a `.local.yaml` override file (`remote-dev-bot.local.yaml`) used in the remote-dev-bot repo itself for self-development/dogfooding. This is a developer tool only — do NOT document it in user-facing docs (README.md, how-it-works.md, install.md). It belongs only in CONTRIBUTING.md. User-facing docs should describe only the two-layer system: base config (in remote-dev-bot repo) + target repo override (`remote-dev-bot.yaml` in the calling repo).
 
 ### Running Tests
 
@@ -181,7 +181,7 @@ gh run view RUN_ID --repo gnovak/remote-dev-bot-test --log | tail -40
 
 ## Runbook Execution
 
-When executing `runbook.md` to set up remote-dev-bot for a user:
+When executing `install.md` to set up remote-dev-bot for a user:
 
 ### Problem Collection
 

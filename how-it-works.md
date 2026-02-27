@@ -38,7 +38,7 @@ Remote Dev Bot uses a **shim + reusable workflow** pattern that involves two rep
 │                                                                             │
 │   .github/workflows/agent.yml    ←── Shim (also the template for target repos)│
 │                                                                             │
-│   runbook.md                     ←── Setup instructions                     │
+│   install.md                     ←── Setup instructions                     │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -54,7 +54,7 @@ This is the "engine" — the shared infrastructure that all target repos use.
 | `remote-dev-bot.yaml` | Base configuration. Defines model aliases (`claude-small`, `claude-large`, etc.) and OpenHands settings (version, max iterations, PR type). |
 | `lib/config.py` | Config parsing logic. Loads base config, merges with target repo overrides, resolves aliases. Used by remote-dev-bot.yml at runtime. |
 | `.github/workflows/agent.yml` | Shim workflow. Also serves as the template — copy this to target repos. |
-| `runbook.md` | Step-by-step setup instructions for humans or AI assistants. |
+| `install.md` | Step-by-step setup instructions for humans or AI assistants. |
 | `AGENTS.md` | Development guidance for AI assistants working on this repo. |
 
 **Who maintains this:** You (if you forked it) or the upstream maintainer (gnovak). Updates here automatically flow to all target repos that reference it.
@@ -216,7 +216,7 @@ A GitHub App gives the bot a distinct identity (e.g., `remote-dev-bot[bot]`) and
 
 ### Advanced: PAT setup
 
-A PAT is simpler than a GitHub App but the bot posts as your personal account. See the runbook for PAT creation instructions. Store it as `RDB_PAT_TOKEN`.
+A PAT is simpler than a GitHub App but the bot posts as your personal account. See [install.md](install.md) for PAT creation instructions. Store it as `RDB_PAT_TOKEN`.
 
 ### Visibility requirements
 
