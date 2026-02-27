@@ -180,32 +180,37 @@ All e2e tests (functional, compiled, security) use `remote-dev-bot-test` as thei
 
 ## Release Procedure
 
-Releases distribute two compiled workflows (`agent-resolve.yml` and `agent-design.yml`) that users download into their repos.
+Releases distribute three compiled workflows (`agent-resolve.yml`, `agent-design.yml`, `agent-review.yml`) that users download into their repos.
 
-E2E tests cost real money (they invoke LLM APIs), so the full test suite is not automated. Run it manually before each release.
+E2E tests cost real money (they invoke LLM APIs), so the full test suite is not automated. Run it manually before each release. The key rule: **test on `dev` before merging to `main`** — once something is on `main` it's live for users.
 
 ### Steps
 
-1. **Ensure main is clean**: all PRs merged, unit CI green.
+1. **Ensure `dev` is ready**: all intended PRs merged to `dev`, unit CI green.
 
-2. **Run the full test suite** via GitHub Actions → Full Test Suite → Run workflow (branch: main).
+2. **Run the full test suite on `dev`** via GitHub Actions → Full Test Suite → Run workflow (branch: **dev**).
    - This runs unit tests → e2e shim (all models) → e2e compiled (all models) → e2e security, sequentially.
    - Do not trigger other e2e workflows while this is running — they share the test repo and will interfere.
-   - If it fails, debug using targeted e2e triggers (one at a time), fix on a branch, merge to main, and re-run.
+   - If it fails, debug using targeted e2e triggers (one at a time), fix on a branch, merge to `dev`, and re-run.
 
-3. **Compile the release artifacts**:
+3. **Merge `dev` → `main`** once the full test suite passes:
+   ```bash
+   git checkout main && git merge --ff-only dev && git push
+   ```
+
+4. **Compile the release artifacts** (on `main`):
    ```bash
    python scripts/compile.py
    ```
    This writes `dist/agent-resolve.yml`, `dist/agent-design.yml`, and `dist/agent-review.yml`. Commit the updated dist files if they changed.
 
-4. **Tag the release**:
+5. **Tag the release**:
    ```bash
    git tag -a vX.Y.Z -m "Release vX.Y.Z: summary of changes"
    git push origin vX.Y.Z
    ```
 
-5. **Create the GitHub release** with both compiled workflows:
+6. **Create the GitHub release** with compiled workflows:
    ```bash
    gh release create vX.Y.Z dist/agent-resolve.yml dist/agent-design.yml dist/agent-review.yml \
      --title "vX.Y.Z" \
@@ -214,6 +219,6 @@ E2E tests cost real money (they invoke LLM APIs), so the full test suite is not 
 
 ### What goes in a release
 
-- Three compiled workflow files: `agent-resolve.yml` (issue resolution), `agent-design.yml` (design analysis), and `agent-review.yml` (code review). All are self-contained with inlined config, model aliases, and security guardrails.
+- Three compiled workflow files: `agent-resolve.yml` (issue resolution), `agent-design.yml` (design analysis), `agent-review.yml` (code review). All are self-contained with inlined config, model aliases, and security guardrails.
 - Users who installed via compiled workflows get updates by downloading the new release.
-- Users who installed via the shim get updates automatically (the shim calls `remote-dev-bot.yml@main`).
+- Users who installed via the shim get updates automatically when `main` is updated (the shim calls `remote-dev-bot.yml@main`).
