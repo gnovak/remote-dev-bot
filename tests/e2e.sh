@@ -188,6 +188,7 @@ cleanup_branches=()
 ORIGINAL_SHIM_CONTENT=""  # base64-encoded original shim
 ORIGINAL_SHIM_SHA=""      # SHA for restoring
 DESIGN_WORKFLOW_SHA=""     # SHA for removing agent-design.yml on cleanup
+REVIEW_WORKFLOW_SHA=""     # SHA for removing agent-review.yml on cleanup
 
 install_compiled_workflow() {
     log "Compiling workflows..."
@@ -232,6 +233,29 @@ install_compiled_workflow() {
     }
     DESIGN_WORKFLOW_SHA=$(echo "$design_response" | jq -r '.content.sha' 2>/dev/null || echo "")
 
+    log "Adding compiled review workflow..."
+    local review_content
+    review_content=$(base64 < /tmp/compiled-workflows/agent-review.yml | tr -d '\n')
+
+    local review_response
+    review_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
+        --method PUT \
+        -f message="E2E: add compiled review workflow (pre-release test)" \
+        -f content="$review_content" 2>&1) || {
+        # File may already exist; get its SHA and update
+        local existing_sha
+        existing_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
+            --jq '.sha' 2>/dev/null || echo "")
+        if [[ -n "$existing_sha" ]]; then
+            review_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
+                --method PUT \
+                -f message="E2E: update compiled review workflow (pre-release test)" \
+                -f content="$review_content" \
+                -f sha="$existing_sha")
+        fi
+    }
+    REVIEW_WORKFLOW_SHA=$(echo "$review_response" | jq -r '.content.sha' 2>/dev/null || echo "")
+
     log "Compiled workflows installed. Waiting 10s for GitHub to register..."
     sleep 10
 }
@@ -271,6 +295,18 @@ restore_shim() {
             -f message="E2E: remove compiled design workflow after pre-release test" \
             -f sha="$design_sha" >/dev/null 2>&1 || true
         log "  Compiled design workflow removed."
+    fi
+
+    # Remove agent-review.yml if we added it
+    local review_sha
+    review_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
+        --jq '.sha' 2>/dev/null || echo "")
+    if [[ -n "$review_sha" ]]; then
+        gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
+            -X DELETE \
+            -f message="E2E: remove compiled review workflow after pre-release test" \
+            -f sha="$review_sha" >/dev/null 2>&1 || true
+        log "  Compiled review workflow removed."
     fi
 }
 

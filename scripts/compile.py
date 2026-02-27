@@ -89,6 +89,7 @@ def inline_config_parsing(config_yaml, mode):
     target_branch = oh.get("target_branch", "main")
     assign_issue = oh.get("assign_issue", True)
     assign_pr = oh.get("assign_pr", True)
+    timeout_minutes = oh.get("timeout_minutes", 120)
 
     # Commit trailer template (resolve mode only) — lives under openhands:
     commit_trailer_template = config_yaml.get("openhands", {}).get("commit_trailer", "")
@@ -145,6 +146,9 @@ ASSIGN_PR = "{assign_pr_str}"
 # Supported variables: {{model_alias}}, {{model_id}}, {{oh_version}}
 COMMIT_TRAILER_TEMPLATE = "{commit_trailer_escaped}"
 
+# --- TIMEOUT_MINUTES: watchdog timeout for the agent process ---
+TIMEOUT_MINUTES = {timeout_minutes}
+
 # Parse alias from comment — mode is known at compile time
 comment = os.environ.get("COMMENT", "")
 # Strip the known prefix: "/agent-{mode}-claude-large do X" -> "claude-large"
@@ -159,6 +163,27 @@ if alias not in MODELS:
     sys.exit(1)
 
 model = MODELS[alias]
+
+# Parse inline args from subsequent comment lines (e.g. "timeout_minutes = 5")
+for line in comment.split("\\n")[1:]:
+    line = line.strip()
+    if not line or "=" not in line:
+        continue
+    key, _, val = line.partition("=")
+    key = re.sub(r'[\\s-]+', '_', key.strip().lower())
+    val = val.strip()
+    if key == "timeout_minutes" and val:
+        try:
+            TIMEOUT_MINUTES = int(val)
+        except ValueError:
+            pass
+    elif key == "max_iterations" and val:
+        try:
+            MAX_ITERATIONS = int(val)
+        except ValueError:
+            pass
+    elif key == "target_branch" and val:
+        TARGET_BRANCH = val
 
 # Resolve commit trailer template
 commit_trailer = ""
@@ -183,12 +208,14 @@ if output_file:
         f.write(f"assign_issue={{ASSIGN_ISSUE}}\\n")
         f.write(f"assign_pr={{ASSIGN_PR}}\\n")
         f.write(f"commit_trailer={{commit_trailer}}\\n")
+        f.write(f"timeout_minutes={{TIMEOUT_MINUTES}}\\n")
 
 # Log for visibility
 print(f"Mode: {mode}")
 print(f"Model alias: {{alias}}")
 print(f"Model ID: {{model}}")
 print(f"PR type: {{PR_TYPE}}")
+print(f"Timeout: {{TIMEOUT_MINUTES}} minutes")
 PYTHON_EOF
 '''
     return code
