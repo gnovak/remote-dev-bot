@@ -143,26 +143,13 @@ Follow the prompts:
 - Press Enter to open the browser (or manually go to https://github.com/login/device)
 - Paste the code and authorize the GitHub CLI
 
-### Step 1.3: Add Required Scopes
-
-**What this does:** Grants the GitHub CLI permission to manage workflows and set up Git authentication.
-
-```bash
-# Add workflow scope (required to manage Actions workflows)
-gh auth refresh --hostname github.com --scopes workflow
-
-# Set up git credential helper (allows git commands to use gh authentication)
-gh auth setup-git
-```
-
-### Step 1.4: Verify Authentication
+### Step 1.3: Verify Authentication
 
 **What this does:** Confirms that authentication is working correctly and you have the necessary permissions.
 
 ```bash
 # Check authentication status
 gh auth status
-# Should show you logged in with the `workflow` scope
 
 # Test by listing your repositories
 gh repo list --limit 5
@@ -240,7 +227,6 @@ gh api repos/{owner}/{repo}/actions/permissions/workflow
 4. **Copy the key immediately** (it starts with `AIza`)
 5. **Billing:** The free tier works for testing and light use (5-15 RPM depending on model). On the free tier, a compromised key can't cost you money — it's just rate-limited. For production use, enable billing on the underlying Google Cloud project. Paid tier (Tier 1) unlocks 150-300 RPM.
 6. **Note:** Google AI Studio is separate from a Google One AI Premium subscription ($20/mo). The subscription gives access to the Gemini chatbot; it does not provide API credits or affect API billing.
-7. **Useful links:** [API keys](https://aistudio.google.com/app/apikey) · [Usage & rate limits](https://aistudio.google.com/app/usage) · [Projects](https://aistudio.google.com/app/projects)
 
 **Tip:** Store your API key in a password manager.
 
@@ -360,6 +346,7 @@ A GitHub App gives the bot a clear, distinct identity and triggers CI on bot PRs
 
 1. Go to https://github.com/settings/apps/new
 2. **Name:** Choose a name (this becomes the `name[bot]` identity)
+   - **Avatar:** The bot will use the app owner's avatar by default. To set a custom avatar, upload one on the app settings page after creation.
 3. **Homepage URL:** Your repo URL is fine
 4. **Uncheck** Webhook "Active" (not needed)
 5. **Repository permissions** — set to Read & write:
@@ -420,7 +407,6 @@ A PAT is an alternative to the GitHub App. Choose this if you prefer not to crea
    - Contents
    - Issues
    - Pull requests
-   - Workflows
 8. Click "Generate token"
 9. **Copy the token immediately** — you won't be able to see it again
 
@@ -437,34 +423,40 @@ gh secret set RDB_PAT_TOKEN --repo {owner}/{repo}
 
 ## Phase 3: Install the Workflow
 
-### Step 3.1: Download the Workflow Files
+### Step 3.1: Download the Workflow File
 
-**What this does:** Adds two self-contained workflow files to your repository. Each file includes everything the bot needs — model configuration, config parsing, security guardrails, and the agent runner.
+**What this does:** Adds a thin shim workflow to your repository. The shim calls the reusable workflow from `gnovak/remote-dev-bot`, so you automatically get updates when the bot is improved — no need to download new releases.
 
 ```bash
 # From within the target repo:
 mkdir -p .github/workflows
-curl -o .github/workflows/agent-resolve.yml \
-  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent-resolve.yml
-curl -o .github/workflows/agent-design.yml \
-  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent-design.yml
+curl -o .github/workflows/agent.yml \
+  https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/.github/workflows/agent.yml
 ```
 
-The files are self-contained and configurable. Search for these markers to customize:
-- `MODEL_CONFIG` — change the default model or available aliases
-- `MAX_ITERATIONS` — adjust how many steps the agent can take
-- `PR_STYLE` — switch between draft and ready PRs
-- `SECURITY_GATE` — change who can trigger the agent
+The file is self-documenting — read the comments at the top for notes on optional secrets and auth.
 
-### Step 3.2: Push and Verify
+**Using your own fork:** For full control, fork `gnovak/remote-dev-bot`, then edit the `uses:` line to point at your fork. If the fork is in the same owner/org as your target repos, `secrets: inherit` will work. You'll need to set Actions access to `user` level on the fork (see Troubleshooting).
+
+**Note to `gnovak/remote-dev-bot` users:** GitHub does not notify repo owners when someone forks their repository. If you'd like the maintainer to know about your usage (and potentially get notified of relevant updates), consider starring the repo or opening a brief issue.
+
+### Step 3.2: Commit and Push the Workflow File
 
 ```bash
-git add .github/workflows/agent-resolve.yml .github/workflows/agent-design.yml
-git commit -m "Add remote dev bot workflows"
+git add .github/workflows/agent.yml
+git commit -m "Add remote dev bot workflow"
+```
+
+> **AI agents:** Stop here. Pushing `.github/workflows/` files requires `workflow` scope, which your `gh` credential helper may not have. Ask the user to run `git push` (or `git push -u origin main` for a new repo) and confirm it succeeded before continuing.
+
+> **New empty repo?** If your repository has no commits yet, you'll need to set the branch name before pushing: `git branch -M main && git push -u origin main`.
+
+Push to your repo:
+```bash
 git push
 ```
 
-> **New empty repo?** If your repository has no commits yet, you'll need to set the branch name before pushing: `git branch -M main` before `git push -u origin main`.
+> **If `git push` fails with a scope error:** Your `gh` credential helper needs `workflow` scope. Run `gh auth refresh --hostname github.com --scopes workflow` then retry. Alternatively, push using SSH if you have SSH keys configured.
 
 **Verify the workflow is recognized:**
 
@@ -477,24 +469,27 @@ gh workflow list --repo {owner}/{repo}
 ```
 
 <details>
-<summary><strong>Alternative: Shim install (auto-updating)</strong></summary>
+<summary><strong>Alternative: Compiled install (self-contained, pinned)</strong></summary>
 
-Instead of the self-contained file, you can use a thin shim that calls the reusable workflow from `gnovak/remote-dev-bot`. This means you automatically get updates when the bot is improved — no need to download new releases.
-
-Download the canonical shim directly from the repo (single source of truth):
+Instead of the shim, you can download self-contained workflow files that include all the logic inline. These don't auto-update — you control when to upgrade by downloading new releases. Useful if your organization restricts calling reusable workflows from external repos.
 
 ```bash
 mkdir -p .github/workflows
-curl -o .github/workflows/agent.yml \
-  https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/.github/workflows/agent.yml
-git add .github/workflows/agent.yml
-git commit -m "Add remote dev bot shim workflow"
-git push
+curl -o .github/workflows/agent-resolve.yml \
+  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent-resolve.yml
+curl -o .github/workflows/agent-design.yml \
+  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent-design.yml
+curl -o .github/workflows/agent-review.yml \
+  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent-review.yml
 ```
 
-The file is self-documenting — read the comments at the top for notes on optional secrets and auth.
+The files are configurable. Search for these markers to customize:
+- `MODEL_CONFIG` — change the default model or available aliases
+- `MAX_ITERATIONS` — adjust how many steps the agent can take
+- `PR_STYLE` — switch between draft and ready PRs
+- `SECURITY_GATE` — change who can trigger the agent
 
-**Using your own fork:** For full control, fork `gnovak/remote-dev-bot`, then edit the `uses:` line in the downloaded file to point at your fork. If the fork is in the same owner/org as your target repos, `secrets: inherit` will work. You'll need to set Actions access to `user` level on the fork (see Troubleshooting).
+Commit and push all three files the same way as the shim install above.
 
 </details>
 
@@ -670,38 +665,7 @@ if report.has_problems():
 
 ## Security
 
-### Who Can Trigger the Agent
-
-The workflow only runs when someone with **OWNER**, **COLLABORATOR**, or **MEMBER** role on the repository posts a `/agent-` comment. Anonymous users, first-time contributors, and external users cannot trigger agent runs — even on public repos.
-
-This is controlled by GitHub's `author_association` field, which the workflow checks before starting any agent work. You can adjust who is allowed by editing the `SECURITY_GATE` marker in your workflow file.
-
-### What the Agent Can Do
-
-The agent has significant access to your repository:
-
-- Reads all files — code, configuration, documentation, secrets referenced in the codebase
-- Creates branches and pushes commits
-- Opens draft pull requests and posts comments
-
-The agent's file access is scoped to the repository. It cannot access other repositories or organization-level secrets beyond those explicitly passed as workflow secrets.
-
-### Prompt Injection Risk
-
-The agent reads issue and PR comment text as instructions. Malicious issue text could attempt to manipulate the agent — for example, asking it to commit secrets, exfiltrate data, or do something unrelated to the issue. This is called prompt injection.
-
-Built-in mitigations:
-
-- **Collaborator gating**: Only people you've explicitly granted repo access to can trigger agent runs. An external attacker who can write an issue cannot trigger the agent unless they're already a collaborator.
-- **Security microagent**: The workflow includes hardened system prompt instructions (visible at the `SECURITY_GATE` marker) that tell the agent to refuse requests to exfiltrate secrets, modify CI pipelines, or take other unauthorized actions.
-- **OpenHands sandboxing**: The agent runs inside a container with limited access to the GitHub Actions runner environment.
-
-### Recommendations
-
-- **Review all agent PRs before merging.** Agent-created branches are draft PRs by default — treat them as you would code from any external contributor.
-- **Use branch protection rules.** Require PR reviews on `main` so no agent-created branch can be merged without a human sign-off.
-- **Don't put secrets in issue bodies.** The agent reads issues; sensitive data in issue text can appear in agent logs or commit messages.
-- **Audit the `SECURITY_GATE` policy** in your workflow file if you want to further restrict who can trigger the agent (e.g., OWNER-only on sensitive repos).
+See the [Security section in README.md](README.md#security) for an overview of who can trigger the agent, what it can access, prompt injection mitigations, and recommendations.
 
 ---
 
