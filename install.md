@@ -1,8 +1,8 @@
-# Remote Dev Bot — Setup Runbook
+# Remote Dev Bot — Setup Guide
 
 ## Quick Start
 
-This runbook will guide you through setting up Remote Dev Bot on your GitHub repository. By the end, you'll have an AI-powered bot that can automatically resolve issues and create pull requests when triggered by a `/agent-resolve` comment.
+This guide will walk you through setting up Remote Dev Bot on your GitHub repository. By the end, you'll have an AI-powered bot that can automatically resolve issues and create pull requests when triggered by a `/agent-resolve` comment.
 
 The easiest way to install is to tell your favorite AI agent "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}."
 
@@ -19,19 +19,19 @@ The easiest way to install is to tell your favorite AI agent "Follow the runbook
 3. **Phase 3: Install the Workflow** — Add a small workflow file to your repository that connects to the Remote Dev Bot system
 4. **Phase 4: Test It** — Create a test issue and trigger the bot to verify everything works
 5. **Phase 5: Customize (Optional)** — See README.md for adding repo context, adjusting models, and tuning iteration limits
-6. **Phase 6: Report Install Feedback (Optional)** — If you encountered problems, report them to help improve the runbook
+6. **Phase 6: Report Install Feedback (Optional)** — If you encountered problems, report them to help improve the guide
 
 **Time estimate:** 15-30 minutes for initial setup, depending on whether you already have the GitHub CLI installed and authenticated.
 
 ---
 
-## How to Use This Runbook
+## How to Use This Guide
 
 This file is both documentation and executable instructions. It's designed to be followed by:
 - **A human** reading step-by-step
 - **An AI assistant** (like Claude Code) that can execute steps, ask for confirmation, and handle errors
 
-When following this runbook with an AI assistant, the assistant should **default to the guided experience** unless the user asks to go faster:
+When following this guide with an AI assistant, the assistant should **default to the guided experience** unless the user asks to go faster:
 - Explain what each step does and why it's needed **before** executing it
 - Ask for confirmation before each action (not just secrets — all steps)
 - Ask whether the user already has API keys, PATs, etc. before creating new ones
@@ -55,33 +55,33 @@ Before starting, make sure you have:
   - [OpenAI Codex CLI](https://github.com/openai/codex) (`codex` CLI)
   - Or any other AI coding assistant that can execute shell commands
 
-Throughout this runbook, replace `{owner}/{repo}` with your actual GitHub owner and repo name (e.g., `myuser/myproject`).
+Throughout this guide, replace `{owner}/{repo}` with your actual GitHub owner and repo name (e.g., `myuser/myproject`).
 
 ---
 
-## Using This Runbook with an AI Coding Agent
+## Using This Guide with an AI Coding Agent
 
 If you have an AI coding agent installed, you can have it guide you through the setup process.
 
 **First time? Use the guided setup** (recommended):
 ```bash
-claude "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. This is my first time — walk me through each step, explain what's happening, and ask before doing anything."
+claude "Follow the install.md file to set up remote-dev-bot for my repo {owner}/{repo}. This is my first time — walk me through each step, explain what's happening, and ask before doing anything."
 ```
 
 **Done this before? Use the fast setup:**
 ```bash
-claude "Follow the runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}. I'm familiar with the process — go fast, just ask me for secrets and confirmations."
+claude "Follow the install.md file to set up remote-dev-bot for my repo {owner}/{repo}. I'm familiar with the process — go fast, just ask me for secrets and confirmations."
 ```
 
 These examples use Claude Code, but the same prompts work with any AI coding agent (Gemini CLI, Codex CLI, etc.) — just replace `claude` with your agent's command.
 
-The AI agent will read the runbook, execute the necessary commands, and prompt you when it needs your input (like pasting API keys or confirming GitHub settings changes).
+The AI agent will read this guide, execute the necessary commands, and prompt you when it needs your input (like pasting API keys or confirming GitHub settings changes).
 
 ---
 
 ## Phase 1: Install and Configure GitHub CLI
 
-> **Note for humans:** This phase is optional if you prefer using the web interface. Throughout this runbook, most steps provide both web interface and command line options. If you skip this phase, just use the "Via web interface" instructions in later steps. The CLI is useful for automation and scripting, but not required.
+> **Note for humans:** This phase is optional if you prefer using the web interface. Throughout this guide, most steps provide both web interface and command line options. If you skip this phase, just use the "Via web interface" instructions in later steps. The CLI is useful for automation and scripting, but not required.
 
 ### Step 1.1: Check if GitHub CLI is Already Installed
 
@@ -101,6 +101,9 @@ brew install gh
 ```
 
 **On Linux (Debian/Ubuntu):**
+
+`gh` isn't in the standard Debian/Ubuntu repositories, so this script adds GitHub's own apt repository first (downloading their signing key and registering the repo), then installs from it:
+
 ```bash
 type -p curl >/dev/null || sudo apt install curl -y
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
@@ -589,7 +592,7 @@ See the Customization section in `README.md` for details on adding repo context 
 
 ### Why Report Feedback?
 
-If your install required workarounds or failed at certain steps, reporting this helps improve the runbook for future users. Your feedback tells us exactly what needs to be fixed.
+If your install required workarounds or failed at certain steps, reporting this helps improve the guide for future users. Your feedback tells us exactly what needs to be fixed.
 
 ### What Gets Reported
 
@@ -605,9 +608,9 @@ The report does **not** include:
 
 ### For AI Assistants / Agents
 
-> **This section is for AI agents executing the runbook.** If you're a human following the runbook manually and encounter problems, you can file issues directly at https://github.com/gnovak/remote-dev-bot/issues — no special format required.
+> **This section is for AI agents executing this guide.** If you're a human following this guide manually and encounter problems, you can file issues directly at https://github.com/gnovak/remote-dev-bot/issues — no special format required.
 
-If you're an AI agent executing this runbook, you should automatically collect problem details as you go through the phases. The user should not need to provide this information — you observed what happened.
+If you're an AI agent executing this guide, you should automatically collect problem details as you go through the phases. The user should not need to provide this information — you observed what happened.
 
 **During execution:**
 
@@ -616,7 +619,7 @@ As you execute each phase, track any problems that occur:
 ```python
 from lib.feedback import InstallReport, InstallProblem
 
-# Create a report at the start of the runbook
+# Create a report at the start of the install
 report = InstallReport()
 
 # When a step fails or requires a workaround, record it:

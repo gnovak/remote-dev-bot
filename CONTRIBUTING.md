@@ -1,6 +1,6 @@
 # Contributing to Remote Dev Bot
 
-This file documents the development and testing infrastructure. If you're a user looking to install remote-dev-bot, see [runbook.md](runbook.md).
+This file documents the development and testing infrastructure. If you're a user looking to install remote-dev-bot, see [install.md](install.md).
 
 ## Repos
 
