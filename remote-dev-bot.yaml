@@ -1,25 +1,20 @@
 # Remote Dev Bot Configuration
 # Usage: /agent-<mode>[-<model>]
-#   /agent-resolve             — resolve issue, open PR (default model)
+#   /agent-resolve              — resolve issue, open PR (default model)
 #   /agent-resolve-claude-large — resolve issue with specific model
-#   /agent-design              — design discussion, post comment
+#   /agent-design               — design discussion, post comment
 #   /agent-design-claude-large  — design discussion with specific model
+#   /agent-review               — code review on a PR, post comment
+#   /agent-review-claude-large  — code review with specific model
 
 default_model: claude-small
-
-# Commit trailer appended to OpenHands commits (resolve mode only).
-# Supported variables: {model_alias}, {model_id}, {oh_version}
-# Set to empty string to disable.
-commit_trailer: "Model: {model_alias} ({model_id}), openhands-ai v{oh_version}"
 
 # Modes define what the agent does. Each mode has an action and optional defaults.
 modes:
   resolve:
     action: pr               # Run OpenHands, open a draft PR
-    default_model: claude-small
   design:
     action: comment           # Post analysis as an issue comment (no code changes)
-    default_model: claude-small
     context_files:
       - README.md
       - CONTRIBUTING.md
@@ -36,7 +31,6 @@ modes:
 
   review:
     action: review            # Run OpenHands on the PR, post review as a PR comment (no code changes)
-    default_model: claude-small
 
   explore:
     action: explore           # Multi-round agentic loop with tool calling for design analysis
@@ -50,7 +44,7 @@ modes:
       - .gemini/GEMINI.md
       - .openhands/microagents/repo.md
       - how-it-works.md
-    prompt_prefix: >
+    additional_instructions: >
       You are analyzing this issue for design discussion using an agentic exploration loop.
       You have access to tools to read files and search the codebase.
       Use these tools to gather the information you need before providing your analysis.
@@ -109,10 +103,10 @@ openhands:
   assign_pr: true
   # Watchdog timeout in minutes. The runner kills the OpenHands process after this
   # many minutes, then cleanup steps (cost report, artifact upload) still run.
-  # Override per-invocation with: timeout = 120 (inline arg in comment body)
+  # Override per-invocation with: timeout_minutes = 60 (inline arg in comment body)
   # Note: GitHub Actions has a hard 6-hour cap. If you need longer runs, set
   # timeout-minutes in your calling workflow's job definition.
-  timeout_minutes: 120
+  timeout_minutes: 60
   # Graceful wrap-up: inject instructions when approaching max iterations
   # This helps the agent commit partial work before hitting the limit
   graceful_wrapup:
@@ -121,3 +115,9 @@ openhands:
     # Threshold as fraction of max_iterations (0.8 = 80%)
     # At this point, the agent receives instructions to wrap up
     threshold: 0.8
+  # Commit trailer appended to OpenHands commits (resolve mode only).
+  # Supported variables: {model_alias}, {model_id}, {oh_version}
+  # Set to empty string to disable.
+  # Note: the amend step does `git commit --amend` after OpenHands pushes,
+  # which requires a force-push to update the branch.
+  commit_trailer: "Model: {model_alias} ({model_id}), openhands-ai v{oh_version}"

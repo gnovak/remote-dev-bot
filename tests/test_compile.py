@@ -200,8 +200,12 @@ def test_design_comment_footer_includes_model(compiled_dir):
     assert "(${MODEL})_" in content or "(${{ steps.parse.outputs.model }})_" in content
     # Also check the blocked case footer
     assert "_Blocked by " in content
-    # Verify MODEL variable is assigned in the Post comment step
-    assert 'MODEL="${{ steps.parse.outputs.model }}"' in content
+    # Verify MODEL variable is assigned in the Post comment step.
+    # May appear as a block scalar (unescaped) or quoted YAML string (escaped).
+    assert (
+        'MODEL="${{ steps.parse.outputs.model }}"' in content
+        or r'MODEL=\"${{ steps.parse.outputs.model }}\"' in content
+    )
 
 
 # --- Both: model aliases ---

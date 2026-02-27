@@ -1,4 +1,4 @@
-name: Resolve Issue
+name: Remote Dev Bot
 
 # Reusable workflow — called by thin shims in target repos.
 # See .github/workflows/agent.yml for the shim template.
@@ -26,7 +26,7 @@ on:
         default: 'main'
         type: string
       command_prefix:
-        description: 'Command prefix the shim triggers on (e.g. "agent" for /agent-resolve, "dogfood" for /dogfood-resolve). Default: agent.'
+        description: 'Command prefix the shim triggers on (e.g. "agent" for /agent-resolve). Default: agent.'
         required: false
         default: 'agent'
         type: string
@@ -160,6 +160,11 @@ jobs:
       - name: Determine API key
         id: apikey
         run: |
+          # Select the correct API key based on the model's provider prefix.
+          # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
+          # GitHub Actions automatically masks secret values in logs — this does
+          # NOT print the key. The key is consumed by the next step as
+          # ${{ steps.apikey.outputs.key }} and never appears in plaintext output.
           MODEL="${{ needs.parse.outputs.model }}"
           if [[ "$MODEL" == anthropic/* ]]; then
             echo "key=${{ secrets.ANTHROPIC_API_KEY }}" >> "$GITHUB_OUTPUT"
@@ -662,6 +667,11 @@ jobs:
       - name: Determine API key
         id: apikey
         run: |
+          # Select the correct API key based on the model's provider prefix.
+          # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
+          # GitHub Actions automatically masks secret values in logs — this does
+          # NOT print the key. The key is consumed by the next step as
+          # ${{ steps.apikey.outputs.key }} and never appears in plaintext output.
           MODEL="${{ needs.parse.outputs.model }}"
           if [[ "$MODEL" == anthropic/* ]]; then
             echo "key=${{ secrets.ANTHROPIC_API_KEY }}" >> "$GITHUB_OUTPUT"
@@ -684,8 +694,8 @@ jobs:
           ISSUE_TITLE=$(echo "$ISSUE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['title'])")
           ISSUE_BODY=$(echo "$ISSUE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body','') or '')")
 
-          # Fetch recent comments (last 10)
-          COMMENTS_JSON=$(gh api "repos/${{ github.repository }}/issues/${ISSUE_NUMBER}/comments?per_page=10&direction=desc")
+          # Fetch all comments (up to 100 — GitHub API max per page)
+          COMMENTS_JSON=$(gh api "repos/${{ github.repository }}/issues/${ISSUE_NUMBER}/comments?per_page=100")
           COMMENTS=$(echo "$COMMENTS_JSON" | python3 -c "
           import sys, json
           comments = json.load(sys.stdin)
@@ -958,6 +968,11 @@ jobs:
       - name: Determine API key
         id: apikey
         run: |
+          # Select the correct API key based on the model's provider prefix.
+          # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
+          # GitHub Actions automatically masks secret values in logs — this does
+          # NOT print the key. The key is consumed by the next step as
+          # ${{ steps.apikey.outputs.key }} and never appears in plaintext output.
           MODEL="${{ needs.parse.outputs.model }}"
           if [[ "$MODEL" == anthropic/* ]]; then
             echo "key=${{ secrets.ANTHROPIC_API_KEY }}" >> "$GITHUB_OUTPUT"
@@ -1105,10 +1120,20 @@ jobs:
           import json, os
           path = 'output/output.jsonl'
           if os.path.exists(path):
-              data = json.loads(open(path).read())
+              # output.jsonl is JSON Lines — read the last line (the final result)
+              lines = open(path).read().strip().splitlines()
+              data = json.loads(lines[-1]) if lines else {}
               val = data.get('result_explanation', '') or ''
+              # result_explanation may be a list or a JSON-encoded list string
               if isinstance(val, list):
                   val = '\n\n'.join(str(v) for v in val)
+              elif isinstance(val, str) and val.startswith('['):
+                  try:
+                      items = json.loads(val)
+                      if isinstance(items, list):
+                          val = '\n\n'.join(str(v) for v in items)
+                  except json.JSONDecodeError:
+                      pass
               print(val)
           " 2>/dev/null || echo "")
           fi
@@ -1331,6 +1356,11 @@ jobs:
       - name: Determine API key
         id: apikey
         run: |
+          # Select the correct API key based on the model's provider prefix.
+          # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
+          # GitHub Actions automatically masks secret values in logs — this does
+          # NOT print the key. The key is consumed by the next step as
+          # ${{ steps.apikey.outputs.key }} and never appears in plaintext output.
           MODEL="${{ needs.parse.outputs.model }}"
           if [[ "$MODEL" == anthropic/* ]]; then
             echo "key=${{ secrets.ANTHROPIC_API_KEY }}" >> "$GITHUB_OUTPUT"
@@ -1353,8 +1383,8 @@ jobs:
           ISSUE_TITLE=$(echo "$ISSUE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['title'])")
           ISSUE_BODY=$(echo "$ISSUE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body','') or '')")
 
-          # Fetch recent comments (last 10)
-          COMMENTS_JSON=$(gh api "repos/${{ github.repository }}/issues/${ISSUE_NUMBER}/comments?per_page=10&direction=desc")
+          # Fetch all comments (up to 100 — GitHub API max per page)
+          COMMENTS_JSON=$(gh api "repos/${{ github.repository }}/issues/${ISSUE_NUMBER}/comments?per_page=100")
           COMMENTS=$(echo "$COMMENTS_JSON" | python3 -c "
           import sys, json
           comments = json.load(sys.stdin)

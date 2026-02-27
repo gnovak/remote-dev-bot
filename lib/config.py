@@ -4,16 +4,16 @@ Loads base config from remote-dev-bot repo, merges with optional
 per-repo override config, resolves model aliases and modes, and writes
 GitHub Actions outputs.
 
-Commands follow the pattern: /agent-<verb>[-<model>] [--timeout N]
-  /agent-resolve           — resolve mode, default model
+Commands follow the pattern: /agent-<verb>[-<model>]
+  /agent-resolve              — resolve mode, default model
   /agent-resolve-claude-large — resolve mode, specific model
-  /agent-design            — design mode, default model
-  /agent-resolve --timeout 120 — resolve mode, override timeout to 120 minutes
+  /agent-design               — design mode, default model
 
 Arguments can be passed on subsequent lines:
   /agent resolve
-  max iterations = 75
-  context = file1.txt file2.txt
+  max_iterations = 75
+  context_files = file1.txt file2.txt
+  timeout_minutes = 60
 
 Argument names are normalized (spaces/dashes/underscores are equivalent).
 Values after = can be single values or space-separated lists.
@@ -43,11 +43,12 @@ def deep_merge(base, override):
 
 KNOWN_PROVIDERS = ("anthropic/", "openai/", "gemini/")
 
-# Arguments that can be overridden via command-line args
+DEFAULT_TIMEOUT_MINUTES = 120
+
+# Arguments that can be overridden via inline args (lines after the command)
 ALLOWED_ARGS = {
     "max_iterations": int,  # openhands.max_iterations
     "timeout_minutes": int,  # openhands.timeout_minutes
-    "context": list,  # mode's context_files (alias)
     "context_files": list,  # mode's context_files
     "target_branch": str,  # openhands.target_branch
 }
@@ -79,7 +80,7 @@ def parse_args(lines):
     {'max_iterations': 75}
     >>> parse_args(["max-iterations = 100"])
     {'max_iterations': 100}
-    >>> parse_args(["context = file1.txt file2.txt"])
+    >>> parse_args(["context_files = file1.txt file2.txt"])
     {'context_files': ['file1.txt', 'file2.txt']}
     >>> parse_args(["context files = README.md"])
     {'context_files': ['README.md']}
@@ -102,10 +103,6 @@ def parse_args(lines):
 
         if not name or not value:
             continue
-
-        # Map 'context' alias to 'context_files'
-        if name == "context":
-            name = "context_files"
 
         if name not in ALLOWED_ARGS:
             raise ValueError(
@@ -142,7 +139,7 @@ def parse_invocation(comment_body, known_modes, command_prefix="agent"):
     ('resolve', 'claude-large', {})
     >>> parse_invocation("/agent resolve\\nmax iterations = 75", {"resolve", "design"})
     ('resolve', '', {'max_iterations': 75})
-    >>> parse_invocation("/agent-design-claude-small\\ncontext = a.txt b.txt", {"resolve", "design"})
+    >>> parse_invocation("/agent-design-claude-small\\ncontext_files = a.txt b.txt", {"resolve", "design"})
     ('design', 'claude-small', {'context_files': ['a.txt', 'b.txt']})
     >>> parse_invocation("/dogfood resolve", {"resolve", "design"}, command_prefix="dogfood")
     ('resolve', '', {})
@@ -258,9 +255,6 @@ def resolve_commit_trailer(template, alias, model_id, oh_version):
     )
 
 
-DEFAULT_TIMEOUT_MINUTES = 120
-
-
 def resolve_config(base_path, override_path, command_string, local_path=None, timeout_minutes=None, args=None):
     """Load configs, merge, resolve mode + alias, return outputs dict.
 
@@ -313,6 +307,11 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     if local_config:
         print("Local extension (remote-dev-bot.local.yaml):")
         print(yaml.dump(local_config, default_flow_style=False, sort_keys=False).rstrip())
+        print()
+    if args:
+        print("Runtime args (from comment body):")
+        for k, v in args.items():
+            print(f"  {k} = {v}")
         print()
     print("Merged:")
     print(yaml.dump(config, default_flow_style=False, sort_keys=False).rstrip())
@@ -429,8 +428,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     if "max_iterations" in mode_config:
         result["explore_max_iterations"] = mode_config["max_iterations"]
 
-    # Resolve commit_trailer template (for resolve mode)
-    commit_trailer_template = config.get("commit_trailer", "")
+    # Resolve commit_trailer template (for resolve mode) — lives under openhands:
+    commit_trailer_template = config.get("openhands", {}).get("commit_trailer", "")
     result["commit_trailer"] = resolve_commit_trailer(
         commit_trailer_template, alias, model_id, oh_version
     )
