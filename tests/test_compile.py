@@ -274,24 +274,27 @@ def test_review_trigger(compiled_dir):
     assert "startsWith(github.event.comment.body, '/agent-review')" in content
 
 
-def test_review_has_security_microagent(compiled_dir):
+def test_review_has_litellm_loop(compiled_dir):
+    """Review mode uses a litellm agentic loop, not OpenHands."""
     content = _read_text(compiled_dir / "agent-review.yml")
-    assert "Security Rules (injected by remote-dev-bot)" in content
-    assert "remote-dev-bot-security.md" in content
+    assert "litellm" in content
+    assert "submit_review" in content
+    assert "Run review loop" in content
 
 
-def test_review_has_review_microagent(compiled_dir):
+def test_review_has_pr_context_step(compiled_dir):
+    """Review mode gathers PR context (diff, title, branches)."""
     content = _read_text(compiled_dir / "agent-review.yml")
-    assert "Code Review Task (injected by remote-dev-bot)" in content
-    assert "remote-dev-bot-review.md" in content
-    assert "rdb_review.md" in content
+    assert "Gather PR context" in content
+    assert "pr_diff" in content
+    assert "pr_title" in content
 
 
-def test_review_has_openhands_steps(compiled_dir):
+def test_review_has_no_openhands(compiled_dir):
+    """Review mode must not use OpenHands."""
     content = _read_text(compiled_dir / "agent-review.yml")
-    assert "Install OpenHands" in content
-    assert "Review pull request" in content
-    assert "openhands.resolver" in content
+    assert "Install OpenHands" not in content
+    assert "openhands.resolver" not in content
 
 
 def test_review_has_no_pr_creation(compiled_dir):
@@ -311,7 +314,7 @@ def test_review_has_post_review_step(compiled_dir):
 
 def test_review_has_cost_step(compiled_dir):
     content = _read_text(compiled_dir / "agent-review.yml")
-    assert "Calculate and post cost" in content
+    assert "Post cost comment" in content
     assert "Cost Summary" in content
 
 
@@ -385,22 +388,21 @@ EXPECTED_REVIEW_STEPS = [
     "Determine API key",
     "React to comment",
     "Assign commenter to issue",
-    "Install OpenHands",
-    "Inject security guardrails",
-    "Review pull request",
+    "Install dependencies",
+    "Gather PR context",
+    "Run review loop",
     "Post review comment",
-    "Upload output artifact",
-    "Calculate and post cost",
+    "Post cost comment",
 ]
 
 
 def test_review_step_count(compiled_dir):
-    """Tripwire: fails if steps are added/removed from resolve.yml without updating compile.py."""
+    """Tripwire: fails if steps are added/removed from remote-dev-bot.yml without updating compile.py."""
     data = _load_compiled(compiled_dir / "agent-review.yml")
     job = list(data["jobs"].values())[0]
     actual = [s.get("name", "(unnamed)") for s in job["steps"]]
     assert actual == EXPECTED_REVIEW_STEPS, (
-        f"Compiled review steps changed. If you added/removed a step in resolve.yml, "
+        f"Compiled review steps changed. If you added/removed a step in remote-dev-bot.yml, "
         f"update compile.py and this list.\n  Expected: {EXPECTED_REVIEW_STEPS}\n  Actual:   {actual}"
     )
 

@@ -521,6 +521,9 @@ def compile_review(shim, workflow, config_yaml, output_path):
     security_roles = extract_security_gate(shim)
     review_steps = workflow["jobs"]["review"]["steps"]
 
+    modes_config = config_yaml.get("modes", {})
+    review_config = modes_config.get("review", {})
+
     steps = []
 
     # Generate app token (optional — only runs if RDB_APP_ID is set)
@@ -535,11 +538,14 @@ def compile_review(shim, workflow, config_yaml, output_path):
         },
     })
 
-    # Checkout
+    # Checkout (full history so gh pr checkout works)
     steps.append({
         "name": "Checkout repository",
         "uses": "actions/checkout@v4",
-        "with": {"token": "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"},
+        "with": {
+            "token": "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}",
+            "fetch-depth": 0,
+        },
     })
 
     # Set up Python
@@ -567,29 +573,44 @@ def compile_review(shim, workflow, config_yaml, output_path):
     assign_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(assign_step)
 
-    # Install OpenHands
-    steps.append(find_step(review_steps, "Install OpenHands").copy())
+    # Install dependencies
+    steps.append(find_step(review_steps, "Install dependencies").copy())
 
-    # Inject security guardrails (includes review microagent)
-    steps.append(find_step(review_steps, "Inject security guardrails").copy())
+    # Gather PR context (update token)
+    gather_step = find_step(review_steps, "Gather PR context").copy()
+    gather_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
+    steps.append(gather_step)
 
-    # Review pull request (strip internal canary var, update token)
-    review_step = find_step(review_steps, "Review pull request").copy()
-    review_step["env"] = {k: v for k, v in review_step["env"].items()
-                          if k != "SANDBOX_ENV_E2E_TEST_TOKEN"}
-    review_step["env"]["GITHUB_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
-    steps.append(review_step)
+    # Run review loop — rewrite to inline context_files
+    review_loop_step = find_step(review_steps, "Run review loop").copy()
+    review_run = review_loop_step.get("run", "")
+    # Inline the context_files list (compiled workflows can't read from config at runtime)
+    context_files = review_config.get("context_files", [])
+    context_files_repr = repr(context_files)
+    review_run = review_run.replace(
+        'context_files = json.loads(os.environ.get("CONTEXT_FILES", "[]") or "[]")',
+        f'context_files = {context_files_repr}',
+    )
+    # Inline max_iterations constant
+    max_iterations = review_config.get("max_iterations", 10)
+    review_run = review_run.replace(
+        'max_iterations = int(os.environ.get("REVIEW_MAX_ITERATIONS", "10") or "10")',
+        f'max_iterations = {max_iterations}',
+    )
+    review_loop_step["run"] = review_run
+    # Remove env vars that are now inlined
+    if "env" in review_loop_step:
+        for key in ("CONTEXT_FILES", "REVIEW_MAX_ITERATIONS"):
+            review_loop_step["env"].pop(key, None)
+    steps.append(review_loop_step)
 
     # Post review comment (update token)
     post_step = find_step(review_steps, "Post review comment").copy()
     post_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(post_step)
 
-    # Upload artifact
-    steps.append(find_step(review_steps, "Upload output artifact").copy())
-
-    # Calculate and post cost (update token)
-    cost_step = find_step(review_steps, "Calculate and post cost").copy()
+    # Post cost comment (update token)
+    cost_step = find_step(review_steps, "Post cost comment").copy()
     cost_step["env"]["GH_TOKEN"] = "${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}"
     steps.append(cost_step)
 
