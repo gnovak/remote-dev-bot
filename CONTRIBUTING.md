@@ -272,10 +272,17 @@ before merging to `main`** — once something is on `main` it's live for users.
    ```
 
 4. **Update `CHANGELOG.md`** with a new version section summarizing new
-   features, improvements, and breaking changes. Commit directly to `main`:
+   features, improvements, and breaking changes. Open a release-prep PR and
+   merge it before tagging:
 
    ```bash
-   git add CHANGELOG.md && git commit -m "Update CHANGELOG for vX.Y.Z"
+   git checkout -b release/vX.Y.Z origin/main
+   # edit CHANGELOG.md
+   git add CHANGELOG.md && git commit -m "Release vX.Y.Z: update changelog"
+   git push -u origin release/vX.Y.Z
+   gh pr create --title "Release vX.Y.Z" --body "Changelog update for vX.Y.Z."
+   # merge the PR, then pull main before tagging
+   git checkout main && git pull origin main
    ```
 
 5. **Compile the release artifacts** (on `main`):
