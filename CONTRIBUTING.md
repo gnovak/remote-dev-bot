@@ -271,23 +271,30 @@ before merging to `main`** — once something is on `main` it's live for users.
    git checkout main && git merge --ff-only dev && git push
    ```
 
-4. **Compile the release artifacts** (on `main`):
+4. **Update `CHANGELOG.md`** with a new version section summarizing new
+   features, improvements, and breaking changes. Commit directly to `main`:
+
+   ```bash
+   git add CHANGELOG.md && git commit -m "Update CHANGELOG for vX.Y.Z"
+   ```
+
+5. **Compile the release artifacts** (on `main`):
 
    ```bash
    python scripts/compile.py
    ```
 
    This writes `dist/agent-resolve.yml`, `dist/agent-design.yml`, and
-   `dist/agent-review.yml`. Commit the updated dist files if they changed.
+   `dist/agent-review.yml`. Dist files are gitignored — no need to commit them.
 
-5. **Tag the release**:
+6. **Tag the release**:
 
    ```bash
    git tag -a vX.Y.Z -m "Release vX.Y.Z: summary of changes"
    git push origin vX.Y.Z
    ```
 
-6. **Create the GitHub release** with compiled workflows:
+7. **Create the GitHub release** with compiled workflows:
    ```bash
    gh release create vX.Y.Z dist/agent-resolve.yml dist/agent-design.yml dist/agent-review.yml \
      --title "vX.Y.Z" \
