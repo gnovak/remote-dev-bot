@@ -30,7 +30,11 @@ modes:
     #   When analyzing issues, always consider the impact on our deploy pipeline.
 
   review:
-    action: review            # Run OpenHands on the PR, post review as a PR comment (no code changes)
+    action: review            # Lightweight agentic loop: review the PR diff, post as a PR comment (no code changes)
+    max_iterations: 10        # Iteration limit for the review loop
+    context_files:
+      - AGENTS.md
+      - README.md
 
   explore:
     action: explore           # Multi-round agentic loop with tool calling for design analysis

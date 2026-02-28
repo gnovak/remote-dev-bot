@@ -424,9 +424,11 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             print(f"  {key}: {value}")
         print()
 
-    # Include explore_max_iterations if the mode defines it (for explore mode)
-    if "max_iterations" in mode_config:
+    # Include max_iterations for agentic loop modes (explore and review)
+    if action == "explore" and "max_iterations" in mode_config:
         result["explore_max_iterations"] = mode_config["max_iterations"]
+    if action == "review" and "max_iterations" in mode_config:
+        result["review_max_iterations"] = mode_config["max_iterations"]
 
     # Resolve commit_trailer template (for resolve mode) — lives under openhands:
     commit_trailer_template = config.get("openhands", {}).get("commit_trailer", "")
