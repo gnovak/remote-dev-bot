@@ -1049,6 +1049,27 @@ jobs:
           echo "$PR_BODY" > /tmp/pr_body.txt
           printf '%s -> %s' "$PR_HEAD" "$PR_BASE" > /tmp/pr_branches.txt
           echo "$COMMENTS" > /tmp/pr_comments.txt
+
+          # Fetch linked issue if referenced in PR body (Closes/Fixes/Resolves #N)
+          LINKED_ISSUE_NUM=$(echo "$PR_BODY" | python3 -c "
+          import sys, re
+          body = sys.stdin.read()
+          m = re.search(r'(?:Closes|Fixes|Resolves)\s+#(\d+)', body, re.IGNORECASE)
+          if m:
+              print(m.group(1))
+          " 2>/dev/null || true)
+          if [[ -n "$LINKED_ISSUE_NUM" ]]; then
+            ISSUE_JSON=$(gh api "repos/${{ github.repository }}/issues/${LINKED_ISSUE_NUM}" 2>/dev/null || echo "")
+            if [[ -n "$ISSUE_JSON" ]]; then
+              echo "$ISSUE_JSON" | python3 -c "
+          import sys, json
+          issue = json.load(sys.stdin)
+          print(f'Issue #{issue[\"number\"]}: {issue[\"title\"]}')
+          print()
+          print(issue.get('body', '') or '')
+              " > /tmp/linked_issue.txt
+            fi
+          fi
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
@@ -1071,6 +1092,13 @@ jobs:
           from litellm import completion
 
           model = "${{ needs.parse.outputs.model }}"
+
+          # Load additional_instructions from target repo's config (appended to canonical prompt)
+          additional_instructions = ""
+          if os.path.exists("remote-dev-bot.yaml"):
+              with open("remote-dev-bot.yaml") as f:
+                  cfg = yaml.safe_load(f) or {}
+              additional_instructions = cfg.get("modes", {}).get("review", {}).get("additional_instructions", "")
 
           # Get max iterations from config (default 10)
           max_iterations = int(os.environ.get("REVIEW_MAX_ITERATIONS", "10") or "10")
@@ -1104,6 +1132,12 @@ jobs:
           with open("/tmp/pr_comments.txt") as f:
               comments = f.read().strip()
 
+          # Read linked issue if available
+          linked_issue = ""
+          if os.path.exists("/tmp/linked_issue.txt"):
+              with open("/tmp/linked_issue.txt") as f:
+                  linked_issue = f.read().strip()
+
           # Limit diff size to avoid token explosion
           if len(diff) > 100000:
               diff = diff[:100000] + "\n\n... (diff truncated, showing first 100000 characters)"
@@ -1120,10 +1154,12 @@ jobs:
           ```diff
           {diff}
           ```
-
-          ## Discussion so far:
-          {comments}
           """
+
+          if linked_issue:
+              user_content += f"\n## Linked Issue:\n\n{linked_issue}\n"
+
+          user_content += f"\n## Discussion so far:\n{comments}\n"
 
           system_prompt = (
               "You are reviewing a GitHub pull request. "
@@ -1131,16 +1167,33 @@ jobs:
               "The PR diff is provided above — use tools to explore surrounding code, "
               "understand context, check tests, and verify conventions. "
               "When you have enough information, call submit_review with your complete review. "
-              "\n\nFocus your review on:\n"
+              "\n\nFirst, **check the PR discussion** (provided above) for any comments "
+              "specifying what kind of review is wanted, what to focus on, or particular "
+              "concerns to address. If the discussion includes such instructions, follow them. "
+              "\n\nIf no specific instructions are given, default to asking: "
+              "**Is this the right approach?** Focus on design soundness — whether the "
+              "solution addresses the real problem, whether there are simpler or better "
+              "alternatives, and whether the trade-offs are well-considered. Also cover:\n"
               "- **Correctness**: Bugs, logic errors, unhandled edge cases\n"
-              "- **Design**: Soundness of approach, simpler or more idiomatic patterns\n"
               "- **Tests**: Adequate test coverage, edge cases covered\n"
               "- **Style**: Project conventions (check AGENTS.md if present)\n"
               "- **Security**: Any security concerns\n"
+          )
+
+          if linked_issue:
+              system_prompt += (
+                  "\n\nA linked issue has been provided above. "
+                  "Assess whether the PR adequately addresses what the issue asked for.\n"
+              )
+
+          system_prompt += (
               "\n\nCRITICAL: Do NOT modify any files. Do NOT make git commits. "
               "Do NOT begin your response with a slash command like /agent. "
               "Your only output is the review submitted via submit_review."
           )
+
+          if additional_instructions:
+              system_prompt += "\n\n" + additional_instructions
 
           if repo_context:
               system_prompt = "# Repository Context\n" + repo_context + "\n\n# Instructions\n\n" + system_prompt
