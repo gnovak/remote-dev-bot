@@ -425,6 +425,44 @@ gh secret list --repo {owner}/{repo}
 # Should list the secrets you just set (values are hidden)
 ```
 
+### Step 2.3.1: Create remote-dev-bot.yaml
+
+**What this does:** Sets `default_model` in your repo's config file to match
+the API key you just added. Without this step, the bot defaults to a Claude
+model — which will fail on the first run if you added a Gemini or OpenAI key
+instead.
+
+Create a `remote-dev-bot.yaml` file in the root of your target repo:
+
+**If you added `ANTHROPIC_API_KEY`:**
+
+```yaml
+default_model: claude-small
+```
+
+**If you added `GEMINI_API_KEY`:**
+
+```yaml
+default_model: gemini-small
+```
+
+**If you added `OPENAI_API_KEY`:**
+
+```yaml
+default_model: gpt-small
+```
+
+```bash
+# Example for Anthropic (adjust the value for your provider):
+cat > remote-dev-bot.yaml << 'EOF'
+default_model: claude-small
+EOF
+```
+
+You can customize this file further later — see the Customization section in
+`README.md` for model aliases, iteration limits, and other options. This minimal
+one-liner is all you need to get started.
+
 ### Step 2.4: Bot Identity & CI Triggering
 
 **Choose your path:**
@@ -600,10 +638,16 @@ Push to your repo:
 git push
 ```
 
-> **If `git push` fails with a scope error:** Your `gh` credential helper needs
-> `workflow` scope. Run
-> `gh auth refresh --hostname github.com --scopes workflow` then retry.
-> Alternatively, push using SSH if you have SSH keys configured.
+> **Common gotcha — `workflow` scope:** Pushing `.github/workflows/` files
+> requires the `workflow` OAuth scope, which the GitHub CLI may not request by
+> default. If `git push` fails with a permission or scope error, you have two
+> options:
+>
+> - **Option 1 (recommended):** Run `gh auth refresh -s workflow` to add the
+>   scope to your existing credentials, then retry `git push`.
+> - **Option 2:** The file is already committed — just run
+>   `git push origin <branch>` directly with your regular git credentials
+>   (SSH key, credential manager, etc.) instead of going through `gh`.
 
 **Verify the workflow is recognized:**
 
