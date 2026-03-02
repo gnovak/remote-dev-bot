@@ -388,6 +388,18 @@ jobs:
                 --target-branch "$TARGET_BRANCH" \
                 --send-on-failure \
                 2>&1 | tee /tmp/spr_output.log
+              SPR_EXIT_CODE=${PIPESTATUS[0]}
+              if [[ $SPR_EXIT_CODE -ne 0 ]]; then
+                {
+                  echo "### ⚠️ Agent completed but draft PR creation failed"
+                  echo ""
+                  echo "The agent finished, but \`send_pull_request\` crashed (exit code ${SPR_EXIT_CODE}) before creating the draft PR."
+                  echo ""
+                  echo "See the [workflow run logs]($RUN_URL) for the full error output."
+                } | gh issue comment "$ISSUE_NUMBER" \
+                    --repo "${{ github.repository }}" \
+                    --body-file -
+              fi
             fi
           else
             # Normal success path
@@ -396,6 +408,18 @@ jobs:
               --pr-type ${{ needs.parse.outputs.pr_type }} \
               --target-branch "$TARGET_BRANCH" \
               2>&1 | tee /tmp/spr_output.log
+            SPR_EXIT_CODE=${PIPESTATUS[0]}
+            if [[ $SPR_EXIT_CODE -ne 0 ]]; then
+              {
+                echo "### ⚠️ Agent completed but PR creation failed"
+                echo ""
+                echo "The agent finished successfully, but \`send_pull_request\` crashed (exit code ${SPR_EXIT_CODE}) before creating the pull request."
+                echo ""
+                echo "See the [workflow run logs]($RUN_URL) for the full error output."
+              } | gh issue comment "$ISSUE_NUMBER" \
+                  --repo "${{ github.repository }}" \
+                  --body-file -
+            fi
           fi
 
       - name: Amend commit with model info
@@ -609,8 +633,13 @@ jobs:
             echo "| Metric | Value |"
             echo "|--------|-------|"
             echo "| Agent outcome | ${STATE_LABEL} |"
-            if [[ -n "$ITERATIONS" && "$ITERATIONS" != "0" ]]; then
+            # When SOURCE=="openhands", ITERATIONS is the agent iteration count — show with denominator.
+            # When SOURCE=="litellm", ITERATIONS is raw LiteLLM API call count (many per agent
+            # iteration) — show without denominator and labelled "API Calls" to convey scale.
+            if [[ "$SOURCE" == "openhands" && -n "$ITERATIONS" && "$ITERATIONS" != "0" ]]; then
               echo "| Iterations | ${ITERATIONS} / ${MAX_ITER} |"
+            elif [[ "$SOURCE" == "litellm" && -n "$ITERATIONS" && "$ITERATIONS" != "0" ]]; then
+              echo "| API Calls | ${ITERATIONS} |"
             fi
             echo "| Elapsed time | ${ELAPSED_FMT} |"
             echo "| Input tokens | ${INPUT_TOKENS} |"
