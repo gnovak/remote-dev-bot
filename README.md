@@ -7,6 +7,9 @@ valuable mode of collaboration, but sometimes you want something that feels more
 like delegating work to an experienced coworker. This system aims to provide
 that alternative.
 
+> **To install, say to your AI agent:**
+> "Follow the instructions at https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/install.md to install gnovak/remote-dev-bot for use in {your-username}/{your-repo}"
+
 There are already excellent vendor-specific implementations of this pattern
 (GitHub Copilot Workspace, Cursor, etc.), so this project isn't necessarily
 better than those. However, it's intentionally cross-platform and was built as a
