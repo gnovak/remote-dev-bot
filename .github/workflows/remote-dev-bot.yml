@@ -633,12 +633,13 @@ jobs:
             echo "| Metric | Value |"
             echo "|--------|-------|"
             echo "| Agent outcome | ${STATE_LABEL} |"
-            # Only show Iterations when SOURCE=="openhands" — the value is the
-            # number of agent iterations. When SOURCE=="litellm", ITERATIONS is
-            # the count of raw LiteLLM API calls (many per agent iteration) and
-            # displaying it as "Iterations" is wildly misleading (e.g. "190 / 100").
+            # When SOURCE=="openhands", ITERATIONS is the agent iteration count — show with denominator.
+            # When SOURCE=="litellm", ITERATIONS is raw LiteLLM API call count (many per agent
+            # iteration) — show without denominator and labelled "API Calls" to convey scale.
             if [[ "$SOURCE" == "openhands" && -n "$ITERATIONS" && "$ITERATIONS" != "0" ]]; then
               echo "| Iterations | ${ITERATIONS} / ${MAX_ITER} |"
+            elif [[ "$SOURCE" == "litellm" && -n "$ITERATIONS" && "$ITERATIONS" != "0" ]]; then
+              echo "| API Calls | ${ITERATIONS} |"
             fi
             echo "| Elapsed time | ${ELAPSED_FMT} |"
             echo "| Input tokens | ${INPUT_TOKENS} |"
