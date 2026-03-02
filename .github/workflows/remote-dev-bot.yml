@@ -160,6 +160,8 @@ jobs:
 
       - name: Determine API key
         id: apikey
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # Select the correct API key based on the model's provider prefix.
           # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
@@ -167,12 +169,52 @@ jobs:
           # NOT print the key. The key is consumed by the next step as
           # ${{ steps.apikey.outputs.key }} and never appears in plaintext output.
           MODEL="${{ needs.parse.outputs.model }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+
+          # Helper: post a friendly comment when the required API key secret is missing.
+          post_no_api_key_comment() {
+            local secret_name="$1"
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body "$(cat <<EOF
+          ⚠️ **No API key configured for this model.**
+
+          The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
+
+          **To fix:** Add your API key as a repository secret:
+          \`\`\`bash
+          gh secret set ${secret_name} --repo ${{ github.repository }}
+          \`\`\`
+          Then re-trigger the bot by commenting the same command again.
+          EOF
+          )"
+          }
+
           if [[ "$MODEL" == anthropic/* ]]; then
-            echo "key=${{ secrets.ANTHROPIC_API_KEY }}" >> "$GITHUB_OUTPUT"
+            API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "ANTHROPIC_API_KEY"
+              echo "::error::No ANTHROPIC_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           elif [[ "$MODEL" == openai/* ]]; then
-            echo "key=${{ secrets.OPENAI_API_KEY }}" >> "$GITHUB_OUTPUT"
+            API_KEY="${{ secrets.OPENAI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "OPENAI_API_KEY"
+              echo "::error::No OPENAI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           elif [[ "$MODEL" == gemini/* ]]; then
-            echo "key=${{ secrets.GEMINI_API_KEY }}" >> "$GITHUB_OUTPUT"
+            API_KEY="${{ secrets.GEMINI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "GEMINI_API_KEY"
+              echo "::error::No GEMINI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           else
             echo "::error::Unknown model provider for: $MODEL"
             exit 1
@@ -696,6 +738,8 @@ jobs:
 
       - name: Determine API key
         id: apikey
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # Select the correct API key based on the model's provider prefix.
           # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
@@ -703,12 +747,52 @@ jobs:
           # NOT print the key. The key is consumed by the next step as
           # ${{ steps.apikey.outputs.key }} and never appears in plaintext output.
           MODEL="${{ needs.parse.outputs.model }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+
+          # Helper: post a friendly comment when the required API key secret is missing.
+          post_no_api_key_comment() {
+            local secret_name="$1"
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body "$(cat <<EOF
+          ⚠️ **No API key configured for this model.**
+
+          The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
+
+          **To fix:** Add your API key as a repository secret:
+          \`\`\`bash
+          gh secret set ${secret_name} --repo ${{ github.repository }}
+          \`\`\`
+          Then re-trigger the bot by commenting the same command again.
+          EOF
+          )"
+          }
+
           if [[ "$MODEL" == anthropic/* ]]; then
-            echo "key=${{ secrets.ANTHROPIC_API_KEY }}" >> "$GITHUB_OUTPUT"
+            API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "ANTHROPIC_API_KEY"
+              echo "::error::No ANTHROPIC_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           elif [[ "$MODEL" == openai/* ]]; then
-            echo "key=${{ secrets.OPENAI_API_KEY }}" >> "$GITHUB_OUTPUT"
+            API_KEY="${{ secrets.OPENAI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "OPENAI_API_KEY"
+              echo "::error::No OPENAI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           elif [[ "$MODEL" == gemini/* ]]; then
-            echo "key=${{ secrets.GEMINI_API_KEY }}" >> "$GITHUB_OUTPUT"
+            API_KEY="${{ secrets.GEMINI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "GEMINI_API_KEY"
+              echo "::error::No GEMINI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           else
             echo "::error::Unknown model provider for: $MODEL"
             exit 1
@@ -1015,6 +1099,8 @@ jobs:
 
       - name: Determine API key
         id: apikey
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # Select the correct API key based on the model's provider prefix.
           # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
@@ -1022,12 +1108,52 @@ jobs:
           # NOT print the key. The key is consumed by the next step as
           # ${{ steps.apikey.outputs.key }} and never appears in plaintext output.
           MODEL="${{ needs.parse.outputs.model }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+
+          # Helper: post a friendly comment when the required API key secret is missing.
+          post_no_api_key_comment() {
+            local secret_name="$1"
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body "$(cat <<EOF
+          ⚠️ **No API key configured for this model.**
+
+          The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
+
+          **To fix:** Add your API key as a repository secret:
+          \`\`\`bash
+          gh secret set ${secret_name} --repo ${{ github.repository }}
+          \`\`\`
+          Then re-trigger the bot by commenting the same command again.
+          EOF
+          )"
+          }
+
           if [[ "$MODEL" == anthropic/* ]]; then
-            echo "key=${{ secrets.ANTHROPIC_API_KEY }}" >> "$GITHUB_OUTPUT"
+            API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "ANTHROPIC_API_KEY"
+              echo "::error::No ANTHROPIC_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           elif [[ "$MODEL" == openai/* ]]; then
-            echo "key=${{ secrets.OPENAI_API_KEY }}" >> "$GITHUB_OUTPUT"
+            API_KEY="${{ secrets.OPENAI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "OPENAI_API_KEY"
+              echo "::error::No OPENAI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           elif [[ "$MODEL" == gemini/* ]]; then
-            echo "key=${{ secrets.GEMINI_API_KEY }}" >> "$GITHUB_OUTPUT"
+            API_KEY="${{ secrets.GEMINI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "GEMINI_API_KEY"
+              echo "::error::No GEMINI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           else
             echo "::error::Unknown model provider for: $MODEL"
             exit 1
@@ -1561,6 +1687,8 @@ jobs:
 
       - name: Determine API key
         id: apikey
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # Select the correct API key based on the model's provider prefix.
           # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
@@ -1568,12 +1696,52 @@ jobs:
           # NOT print the key. The key is consumed by the next step as
           # ${{ steps.apikey.outputs.key }} and never appears in plaintext output.
           MODEL="${{ needs.parse.outputs.model }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+
+          # Helper: post a friendly comment when the required API key secret is missing.
+          post_no_api_key_comment() {
+            local secret_name="$1"
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body "$(cat <<EOF
+          ⚠️ **No API key configured for this model.**
+
+          The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
+
+          **To fix:** Add your API key as a repository secret:
+          \`\`\`bash
+          gh secret set ${secret_name} --repo ${{ github.repository }}
+          \`\`\`
+          Then re-trigger the bot by commenting the same command again.
+          EOF
+          )"
+          }
+
           if [[ "$MODEL" == anthropic/* ]]; then
-            echo "key=${{ secrets.ANTHROPIC_API_KEY }}" >> "$GITHUB_OUTPUT"
+            API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "ANTHROPIC_API_KEY"
+              echo "::error::No ANTHROPIC_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           elif [[ "$MODEL" == openai/* ]]; then
-            echo "key=${{ secrets.OPENAI_API_KEY }}" >> "$GITHUB_OUTPUT"
+            API_KEY="${{ secrets.OPENAI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "OPENAI_API_KEY"
+              echo "::error::No OPENAI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           elif [[ "$MODEL" == gemini/* ]]; then
-            echo "key=${{ secrets.GEMINI_API_KEY }}" >> "$GITHUB_OUTPUT"
+            API_KEY="${{ secrets.GEMINI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "GEMINI_API_KEY"
+              echo "::error::No GEMINI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           else
             echo "::error::Unknown model provider for: $MODEL"
             exit 1
