@@ -650,35 +650,6 @@ gh workflow list --repo {owner}/{repo}
 # Should show "Remote Dev Bot"
 ```
 
-<details>
-<summary><strong>Alternative: Compiled install (self-contained, pinned)</strong></summary>
-
-Instead of the shim, you can download self-contained workflow files that include
-all the logic inline. These don't auto-update — you control when to upgrade by
-downloading new releases. Useful if your organization restricts calling reusable
-workflows from external repos.
-
-```bash
-mkdir -p .github/workflows
-curl -o .github/workflows/agent-resolve.yml \
-  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent-resolve.yml
-curl -o .github/workflows/agent-design.yml \
-  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent-design.yml
-curl -o .github/workflows/agent-review.yml \
-  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent-review.yml
-```
-
-The files are configurable. Search for these markers to customize:
-
-- `MODEL_CONFIG` — change the default model or available aliases
-- `MAX_ITERATIONS` — adjust how many steps the agent can take
-- `PR_STYLE` — switch between draft and ready PRs
-- `SECURITY_GATE` — change who can trigger the agent
-
-Commit and push all three files the same way as the shim install above.
-
-</details>
-
 ---
 
 ## Phase 4: Test It
@@ -731,8 +702,7 @@ gh issue comment {issue-number} --repo {owner}/{repo} --body "/agent-resolve"
 
 ```bash
 # Check the Actions tab for runs:
-gh run list --repo {owner}/{repo} --workflow=agent-resolve.yml
-# If using the shim install, use --workflow=agent.yml instead
+gh run list --repo {owner}/{repo} --workflow=agent.yml
 
 # View logs for a specific run:
 gh run view {run-id} --repo {owner}/{repo} --log
