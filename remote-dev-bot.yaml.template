@@ -1,0 +1,82 @@
+# remote-dev-bot.yaml — per-repo configuration
+#
+# Copy this file to your repo root as remote-dev-bot.yaml and uncomment
+# the options you want to change. Everything is optional except default_model.
+# Defaults live in remote-dev-bot's own remote-dev-bot.yaml.
+#
+# Usage: /agent-<mode>[-<model>]
+#   /agent-resolve              — resolve issue, open PR
+#   /agent-resolve-claude-large — resolve issue with a specific model
+#   /agent-design               — design analysis posted as a comment
+#   /agent-review               — code review posted as a comment
+
+# ---------------------------------------------------------------------------
+# REQUIRED: set this to match the API key secret you configured.
+# ---------------------------------------------------------------------------
+# default_model: claude-small   # Anthropic (ANTHROPIC_API_KEY)
+# default_model: gemini-small   # Google Gemini (GEMINI_API_KEY)
+# default_model: gpt-small      # OpenAI (OPENAI_API_KEY)
+
+# ---------------------------------------------------------------------------
+# Custom model aliases (optional)
+# Add entries here to make short names available in /agent-resolve-<alias>.
+# ---------------------------------------------------------------------------
+# models:
+#   my-model:
+#     id: anthropic/claude-opus-4-6
+#     description: "Claude Opus 4.6 — for the hardest tasks"
+
+# ---------------------------------------------------------------------------
+# Per-mode settings (optional)
+# All modes support: default_model, extra_instructions, extra_files
+# resolve also supports: max_iterations, timeout_minutes, target_branch, on_failure
+# design and review also support: max_iterations
+# ---------------------------------------------------------------------------
+# modes:
+#   resolve:
+#     # Use a more capable model by default for complex resolutions
+#     # default_model: claude-large
+#
+#     # Guidance appended to the agent's system prompt for every resolve run
+#     # extra_instructions: |
+#     #   Always add tests for new behavior.
+#     #   Prefer small, focused commits over large sweeping changes.
+#
+#   design:
+#     # Files always injected into the design agent's context window.
+#     # Useful for architecture docs, style guides, or any file that
+#     # should always inform design analysis.
+#     # extra_files:
+#     #   - docs/architecture.md
+#     #   - docs/api-conventions.md
+#
+#     # Guidance appended to the design agent's system prompt
+#     # extra_instructions: |
+#     #   Always consider backward compatibility with our public API.
+#     #   Flag any changes that would require a major version bump.
+#
+#   review:
+#     # Files always injected into the review agent's context window
+#     # extra_files:
+#     #   - docs/review-checklist.md
+#
+#     # Guidance appended to the review agent's system prompt
+#     # extra_instructions: |
+#     #   Flag any security concerns as high priority.
+#     #   Check that error messages don't leak internal details.
+
+# ---------------------------------------------------------------------------
+# OpenHands settings (resolve mode) — all optional
+# ---------------------------------------------------------------------------
+# openhands:
+#   # Create draft PRs even for partial results, instead of just posting a comment
+#   # on_failure: draft
+#
+#   # Override the default target branch for PRs
+#   # target_branch: main
+#
+#   # Max agent iterations per run (controls cost ceiling; default: 50)
+#   # max_iterations: 30
+#
+#   # Watchdog timeout in minutes (default: 60; GitHub Actions hard cap: 360)
+#   # timeout_minutes: 90
