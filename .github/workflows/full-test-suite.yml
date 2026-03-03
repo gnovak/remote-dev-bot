@@ -14,11 +14,9 @@ on:
 #
 # Failure strategy:
 #   - unit-tests: fast-fail gate. If this fails, all e2e jobs are skipped.
-#   - e2e-shim, e2e-compiled, e2e-security: continue-on-failure. Each block
-#     runs regardless of whether the previous e2e block passed, so a single
-#     full-suite run gives a comprehensive failure picture across all blocks.
-#     This avoids the painful debug loop of: run → fail at block 1 → fix →
-#     run again → fail at block 2 → fix → run again → ...
+#   - e2e-shim, e2e-security: continue-on-failure. Each block runs regardless
+#     of whether the previous e2e block passed, so a single full-suite run
+#     gives a comprehensive failure picture across all blocks.
 #
 # Implementation: e2e jobs use `if: always() && needs.unit-tests.result == 'success'`
 # to skip on unit-test failure but continue past e2e failures.
@@ -66,115 +64,13 @@ jobs:
       - name: Install PyYAML
         run: pip install PyYAML
 
-      - name: Sanity check rdb-test shim
-        env:
-          GH_TOKEN: ${{ secrets.RDB_TESTER_PAT_TOKEN || github.token }}
-        run: |
-          # Verify that agent.yml in rdb-test is the shim (calls uses: gnovak/remote-dev-bot),
-          # not a compiled workflow. If it has been left in a compiled state (e.g., from a
-          # previous e2e-compiled run that was cancelled mid-cleanup), restore the shim now.
-          TEST_REPO="gnovak/remote-dev-bot-test"
-          echo "Checking rdb-test agent.yml..."
-          agent_content=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" --jq '.content' | base64 -d)
-          if echo "$agent_content" | grep -q "uses: gnovak/remote-dev-bot"; then
-            echo "OK: agent.yml is the shim."
-          else
-            echo "WARNING: agent.yml does not look like a shim — it may be a compiled workflow."
-            echo "Restoring shim from this repo's .github/workflows/agent.yml..."
-            shim_content=$(base64 < .github/workflows/agent.yml | tr -d '\n')
-            current_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" --jq '.sha')
-            gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
-              --method PUT \
-              -f message="E2E sanity: restore shim before e2e-shim run" \
-              -f content="$shim_content" \
-              -f sha="$current_sha" >/dev/null
-            echo "Shim restored. Waiting 10s for GitHub to register..."
-            sleep 10
-          fi
-
       - name: Run E2E tests (shim, all models)
         env:
           GH_TOKEN: ${{ secrets.RDB_TESTER_PAT_TOKEN || github.token }}
         run: ./tests/e2e.sh --branch ${{ inputs.branch }} --all-models
 
-  e2e-compiled:
-    needs: [unit-tests, e2e-shim]
-    if: always() && needs.unit-tests.result == 'success'
-    runs-on: ubuntu-latest
-    # Longer timeout than e2e-shim: this job installs the compiled workflow, runs all-models
-    # tests, then restores the shim. The compiled workflow swap adds overhead, and we need
-    # headroom for the always-run cleanup step to complete even if tests fill the window.
-    timeout-minutes: 60
-    steps:
-      - uses: actions/create-github-app-token@v1
-        id: app-token
-        if: ${{ vars.RDB_APP_ID != '' }}
-        with:
-          app-id: ${{ vars.RDB_APP_ID }}
-          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.branch }}
-          fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-
-      - name: Install PyYAML
-        run: pip install PyYAML
-
-      - name: Run E2E tests (compiled, all models)
-        # Note: install_compiled_workflow() in e2e.sh replaces rdb-test's agent.yml with
-        # the compiled workflow. The always-run "Restore shim after compiled e2e" step
-        # below handles cleanup even if this step is cancelled or the job times out.
-        env:
-          GH_TOKEN: ${{ secrets.RDB_TESTER_PAT_TOKEN || github.token }}
-        run: ./tests/e2e.sh --branch ${{ inputs.branch }} --compiled --all-models
-
-      - name: Restore shim after compiled e2e
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.RDB_TESTER_PAT_TOKEN || github.token }}
-        run: |
-          # Always restore rdb-test's agent.yml to the shim after a compiled e2e run,
-          # even if the run was cancelled or failed. This is a belt-and-suspenders guard
-          # on top of e2e.sh's trap (which can't survive SIGKILL from a job timeout).
-          TEST_REPO="gnovak/remote-dev-bot-test"
-          echo "Checking rdb-test agent.yml after compiled e2e..."
-          agent_content=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" --jq '.content' | base64 -d 2>/dev/null || echo "")
-          if echo "$agent_content" | grep -q "uses: gnovak/remote-dev-bot"; then
-            echo "agent.yml is already the shim — no restore needed."
-          else
-            echo "agent.yml is compiled workflow — restoring shim..."
-            shim_content=$(base64 < .github/workflows/agent.yml | tr -d '\n')
-            current_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" --jq '.sha' 2>/dev/null || echo "")
-            if [[ -z "$current_sha" ]]; then
-              echo "ERROR: Could not get current SHA of agent.yml — manual restore required!"
-              exit 1
-            fi
-            gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
-              --method PUT \
-              -f message="E2E cleanup: restore shim after compiled e2e run" \
-              -f content="$shim_content" \
-              -f sha="$current_sha" >/dev/null
-            echo "Shim restored."
-          fi
-          # Also remove agent-design.yml if it exists (installed by e2e.sh for compiled tests)
-          design_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-            --jq '.sha' 2>/dev/null || echo "")
-          if [[ -n "$design_sha" ]]; then
-            echo "Removing agent-design.yml..."
-            gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-              -X DELETE \
-              -f message="E2E cleanup: remove compiled design workflow after compiled e2e run" \
-              -f sha="$design_sha" >/dev/null 2>&1 || true
-            echo "agent-design.yml removed."
-          else
-            echo "agent-design.yml not present — nothing to remove."
-          fi
-
   e2e-security:
-    needs: [unit-tests, e2e-compiled]
+    needs: [unit-tests, e2e-shim]
     if: always() && needs.unit-tests.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30

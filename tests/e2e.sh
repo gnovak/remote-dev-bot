@@ -6,13 +6,12 @@
 #
 # Usage:
 #   ./tests/e2e.sh [--branch <branch>] [--test <name>] [--provider <name>]
-#                  [--all-models] [--compiled]
+#                  [--all-models]
 #
 #   --branch      Branch to test (default: main). Sets e2e-test pointer to this branch.
 #   --test        Run a specific test only (default: all)
 #   --provider    Run only tests for a specific model family (claude/gpt/gemini)
 #   --all-models  Test every model alias, not just one per provider
-#   --compiled    Test compiled workflows instead of shim (pre-release validation)
 
 set -euo pipefail
 
@@ -26,7 +25,6 @@ BRANCH="main"
 FILTER_TEST=""
 FILTER_PROVIDER=""
 ALL_MODELS=false
-USE_COMPILED=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -34,9 +32,8 @@ while [[ $# -gt 0 ]]; do
         --test) FILTER_TEST="$2"; shift 2 ;;
         --provider) FILTER_PROVIDER="$2"; shift 2 ;;
         --all-models) ALL_MODELS=true; shift ;;
-        --compiled) USE_COMPILED=true; shift ;;
         -h|--help)
-            head -17 "$0" | tail -13
+            head -16 "$0" | tail -12
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -185,136 +182,6 @@ parse_cost_from_comment() {
 cleanup_issues=()
 cleanup_branches=()
 
-# --- Compiled workflow swap ---
-# When --compiled is used, we replace the shim (agent.yml) in the test repo
-# with agent-resolve.yml, add agent-design.yml, run the full test suite, then
-# restore the original shim and remove agent-design.yml.
-
-ORIGINAL_SHIM_CONTENT=""  # base64-encoded original shim
-ORIGINAL_SHIM_SHA=""      # SHA for restoring
-DESIGN_WORKFLOW_SHA=""     # SHA for removing agent-design.yml on cleanup
-REVIEW_WORKFLOW_SHA=""     # SHA for removing agent-review.yml on cleanup
-
-install_compiled_workflow() {
-    log "Compiling workflows..."
-    python3 scripts/compile.py /tmp/compiled-workflows
-
-    log "Saving original shim from $TEST_REPO..."
-    local shim_response
-    shim_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml")
-    ORIGINAL_SHIM_CONTENT=$(echo "$shim_response" | jq -r '.content' | tr -d '\n')
-    ORIGINAL_SHIM_SHA=$(echo "$shim_response" | jq -r '.sha')
-
-    log "Replacing shim with compiled resolve workflow..."
-    local resolve_content
-    resolve_content=$(base64 < /tmp/compiled-workflows/agent-resolve.yml | tr -d '\n')
-
-    gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
-        --method PUT \
-        -f message="E2E: swap shim for compiled resolve workflow (pre-release test)" \
-        -f content="$resolve_content" \
-        -f sha="$ORIGINAL_SHIM_SHA" >/dev/null
-
-    log "Adding compiled design workflow..."
-    local design_content
-    design_content=$(base64 < /tmp/compiled-workflows/agent-design.yml | tr -d '\n')
-
-    local design_response
-    design_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-        --method PUT \
-        -f message="E2E: add compiled design workflow (pre-release test)" \
-        -f content="$design_content" 2>&1) || {
-        # File may already exist; get its SHA and update
-        local existing_sha
-        existing_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-            --jq '.sha' 2>/dev/null || echo "")
-        if [[ -n "$existing_sha" ]]; then
-            design_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-                --method PUT \
-                -f message="E2E: update compiled design workflow (pre-release test)" \
-                -f content="$design_content" \
-                -f sha="$existing_sha")
-        fi
-    }
-    DESIGN_WORKFLOW_SHA=$(echo "$design_response" | jq -r '.content.sha' 2>/dev/null || echo "")
-
-    log "Adding compiled review workflow..."
-    local review_content
-    review_content=$(base64 < /tmp/compiled-workflows/agent-review.yml | tr -d '\n')
-
-    local review_response
-    review_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
-        --method PUT \
-        -f message="E2E: add compiled review workflow (pre-release test)" \
-        -f content="$review_content" 2>&1) || {
-        # File may already exist; get its SHA and update
-        local existing_sha
-        existing_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
-            --jq '.sha' 2>/dev/null || echo "")
-        if [[ -n "$existing_sha" ]]; then
-            review_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
-                --method PUT \
-                -f message="E2E: update compiled review workflow (pre-release test)" \
-                -f content="$review_content" \
-                -f sha="$existing_sha")
-        fi
-    }
-    REVIEW_WORKFLOW_SHA=$(echo "$review_response" | jq -r '.content.sha' 2>/dev/null || echo "")
-
-    log "Compiled workflows installed. Waiting 10s for GitHub to register..."
-    sleep 10
-}
-
-restore_shim() {
-    if [[ -z "$ORIGINAL_SHIM_CONTENT" ]]; then return; fi
-    log "Restoring original shim in $TEST_REPO..."
-
-    # Get current SHA (it changed when we installed compiled)
-    local current_sha
-    current_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
-        --jq '.sha' 2>/dev/null || echo "")
-
-    if [[ -z "$current_sha" ]]; then
-        err "Could not find agent.yml to restore — manual fix needed!"
-        return
-    fi
-
-    if gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
-        --method PUT \
-        -f message="E2E: restore original shim after pre-release test" \
-        -f content="$ORIGINAL_SHIM_CONTENT" \
-        -f sha="$current_sha" >/dev/null 2>&1; then
-        log "  Original shim restored."
-    else
-        err "Failed to restore shim — manual fix needed!"
-        err "Original content saved in ORIGINAL_SHIM_CONTENT variable"
-    fi
-
-    # Remove agent-design.yml if we added it
-    local design_sha
-    design_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-        --jq '.sha' 2>/dev/null || echo "")
-    if [[ -n "$design_sha" ]]; then
-        gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-            -X DELETE \
-            -f message="E2E: remove compiled design workflow after pre-release test" \
-            -f sha="$design_sha" >/dev/null 2>&1 || true
-        log "  Compiled design workflow removed."
-    fi
-
-    # Remove agent-review.yml if we added it
-    local review_sha
-    review_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
-        --jq '.sha' 2>/dev/null || echo "")
-    if [[ -n "$review_sha" ]]; then
-        gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
-            -X DELETE \
-            -f message="E2E: remove compiled review workflow after pre-release test" \
-            -f sha="$review_sha" >/dev/null 2>&1 || true
-        log "  Compiled review workflow removed."
-    fi
-}
-
 cleanup() {
     log "Cleaning up..."
     for issue_num in "${cleanup_issues[@]+"${cleanup_issues[@]}"}"; do
@@ -323,9 +190,6 @@ cleanup() {
     for branch in "${cleanup_branches[@]+"${cleanup_branches[@]}"}"; do
         gh api "repos/$TEST_REPO/git/refs/heads/$branch" -X DELETE 2>/dev/null || true
     done
-    if $USE_COMPILED; then
-        restore_shim
-    fi
     log "Cleanup complete."
 }
 
@@ -354,16 +218,7 @@ fi
 
 mode="smoke"
 $ALL_MODELS && mode="all-models"
-if $USE_COMPILED; then
-    log "COMPILED MODE: testing compiled workflows (pre-release validation)"
-fi
 log "Running ${#active_indices[@]} test(s) against branch '$BRANCH' ($mode)"
-
-# --- Install compiled workflow if requested ---
-
-if $USE_COMPILED; then
-    install_compiled_workflow
-fi
 
 # --- Point e2e-test at target branch ---
 # Always reset e2e-test, even when testing main. e2e-test can drift (e.g. stuck at an old
@@ -717,11 +572,7 @@ fi
 
 log ""
 log "========================================="
-if $USE_COMPILED; then
-    log "  E2E Test Results (COMPILED)"
-else
-    log "  E2E Test Results"
-fi
+log "  E2E Test Results"
 log "========================================="
 
 pass=0

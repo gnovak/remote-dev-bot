@@ -427,11 +427,11 @@ Dashboard, billing, and API key management links for each supported provider.
 
 ## Current Status
 
-**v0.3.0** — Mode-based commands + compiled workflows (Feb 15, 2026). Three
-command modes: `/agent-resolve` (opens PR), `/agent-design` (posts analysis
-comment), and `/agent-review` (posts code review on a PR). Multi-provider
-support (Claude, GPT, Gemini). Two-file compiled install. Security guardrails
-and config layering. See [CHANGELOG.md](CHANGELOG.md) for details.
+**v0.3.0** — Mode-based commands (Feb 15, 2026). Three command modes:
+`/agent-resolve` (opens PR), `/agent-design` (posts analysis comment), and
+`/agent-review` (posts code review on a PR). Multi-provider support (Claude,
+GPT, Gemini). Security guardrails and config layering. See
+[CHANGELOG.md](CHANGELOG.md) for details.
 
 **v0.2.0** — Shim + reusable workflow (Feb 11, 2026). Refactored into a thin
 shim per target repo that calls a shared reusable workflow. Cross-repo support
