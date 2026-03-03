@@ -432,36 +432,25 @@ the API key you just added. Without this step, the bot defaults to a Claude
 model — which will fail on the first run if you added a Gemini or OpenAI key
 instead.
 
-Create a `remote-dev-bot.yaml` file in the root of your target repo:
-
-**If you added `ANTHROPIC_API_KEY`:**
-
-```yaml
-default_model: claude-small
-```
-
-**If you added `GEMINI_API_KEY`:**
-
-```yaml
-default_model: gemini-small
-```
-
-**If you added `OPENAI_API_KEY`:**
-
-```yaml
-default_model: gpt-small
-```
+Start from the provided template, which includes commented examples of the most
+useful options:
 
 ```bash
-# Example for Anthropic (adjust the value for your provider):
-cat > remote-dev-bot.yaml << 'EOF'
-default_model: claude-small
-EOF
+# From within the target repo:
+curl -o remote-dev-bot.yaml \
+  https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/remote-dev-bot.yaml.template
 ```
 
-You can customize this file further later — see the Customization section in
-`README.md` for model aliases, iteration limits, and other options. This minimal
-one-liner is all you need to get started.
+Then open the file and uncomment the `default_model` line that matches your API
+key:
+
+- `default_model: claude-small` — if you added `ANTHROPIC_API_KEY`
+- `default_model: gemini-small` — if you added `GEMINI_API_KEY`
+- `default_model: gpt-small` — if you added `OPENAI_API_KEY`
+
+The rest of the file shows available options with explanations — all commented
+out, so there are no active overrides until you choose to enable them. Browse
+it to see what's configurable; you can always come back and tweak later.
 
 ### Step 2.4: Bot Identity & CI Triggering
 
