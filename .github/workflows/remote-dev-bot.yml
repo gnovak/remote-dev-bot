@@ -1487,13 +1487,16 @@ jobs:
           {comments}
           """
 
-          system_prompt = extra_instructions or (
+          system_prompt = (
               "You are analyzing a GitHub issue for design discussion using an agentic exploration loop. "
               "You have access to tools to read files and search the codebase. "
               "Use these tools to gather the information you need before providing your analysis. "
               "When you have enough information, call submit_analysis with your final analysis. "
               "Never begin your response with a slash command like /agent."
           )
+
+          if extra_instructions:
+              system_prompt += "\n\n" + extra_instructions
 
           if repo_context:
               system_prompt = "# Repository Context\n" + repo_context + "\n\n# Instructions\n\n" + system_prompt
