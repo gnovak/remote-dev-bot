@@ -2,8 +2,8 @@
 # Usage: /agent-<mode>[-<model>]
 #   /agent-resolve              — resolve issue, open PR (default model)
 #   /agent-resolve-claude-large — resolve issue with specific model
-#   /agent-design               — design discussion, post comment
-#   /agent-design-claude-large  — design discussion with specific model
+#   /agent-design               — design analysis, post comment
+#   /agent-design-claude-large  — design analysis with specific model
 #   /agent-review               — code review on a PR, post comment
 #   /agent-review-claude-large  — code review with specific model
 
@@ -14,8 +14,10 @@ modes:
   resolve:
     action: pr               # Run OpenHands, open a draft PR
   design:
-    action: comment           # Post analysis as an issue comment (no code changes)
-    context_files:
+    action: design            # Multi-round agentic loop with tool calling for design analysis
+    default_model: claude-small
+    max_iterations: 10        # Iteration limit for the agentic loop (not OpenHands iterations)
+    extra_files:
       - README.md
       - CONTRIBUTING.md
       - AGENTS.md
@@ -23,44 +25,18 @@ modes:
       - .gemini/GEMINI.md
       - .openhands/microagents/repo.md
       - how-it-works.md
-    # Optional: additional_instructions appended to the canonical design prompt.
+    # Optional: extra_instructions appended to the canonical design prompt.
     # Use this to add project-specific guidance (e.g., preferred patterns,
     # areas to focus on, or terminology). Do not duplicate the base prompt.
-    # additional_instructions: |
+    # extra_instructions: |
     #   When analyzing issues, always consider the impact on our deploy pipeline.
 
   review:
     action: review            # Lightweight agentic loop: review the PR diff, post as a PR comment (no code changes)
     max_iterations: 10        # Iteration limit for the review loop
-    context_files:
+    extra_files:
       - AGENTS.md
       - README.md
-
-  explore:
-    action: explore           # Multi-round agentic loop with tool calling for design analysis
-    default_model: claude-small
-    max_iterations: 10        # Iteration limit for the agentic loop (not OpenHands iterations)
-    context_files:
-      - README.md
-      - CONTRIBUTING.md
-      - AGENTS.md
-      - CLAUDE.md
-      - .gemini/GEMINI.md
-      - .openhands/microagents/repo.md
-      - how-it-works.md
-    additional_instructions: >
-      You are analyzing this issue for design discussion using an agentic exploration loop.
-      You have access to tools to read files and search the codebase.
-      Use these tools to gather the information you need before providing your analysis.
-      When you have enough information, call submit_analysis with your final analysis.
-      Do NOT write code or open a PR. Instead, provide thoughtful
-      analysis, surface trade-offs, suggest approaches, and ask
-      clarifying questions.
-      IMPORTANT: Never begin your response with a slash command like /agent
-      or any text that could trigger another bot action.
-      Do NOT end your response with conversational invitations like
-      "Want me to elaborate?" or "Let me know if you have questions."
-      Your response is a design document, not a chat message.
 
 models:
   claude-small:

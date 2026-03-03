@@ -60,7 +60,7 @@ def test_default_model_exists_in_models(bot_config):
 def test_modes_have_action(bot_config):
     for name, mode in bot_config["modes"].items():
         assert "action" in mode, f"Mode '{name}' missing 'action' field"
-        assert mode["action"] in ("pr", "comment", "review", "explore"), (
+        assert mode["action"] in ("pr", "review", "design"), (
             f"Mode '{name}' has unknown action '{mode['action']}'"
         )
 
@@ -229,12 +229,12 @@ def test_agent_yml_has_author_association_gate():
 # --- Loop prevention checks ---
 
 
-def test_design_mode_has_context_files(bot_config):
-    """Design mode should have a context_files list."""
+def test_design_mode_has_extra_files(bot_config):
+    """Design mode should have an extra_files list."""
     design_mode = bot_config["modes"]["design"]
-    assert "context_files" in design_mode, "Design mode missing 'context_files'"
-    assert isinstance(design_mode["context_files"], list), "context_files should be a list"
-    assert len(design_mode["context_files"]) > 0, "context_files should not be empty"
+    assert "extra_files" in design_mode, "Design mode missing 'extra_files'"
+    assert isinstance(design_mode["extra_files"], list), "extra_files should be a list"
+    assert len(design_mode["extra_files"]) > 0, "extra_files should not be empty"
 
 
 def test_design_prompt_has_loop_prevention(resolve_yml):

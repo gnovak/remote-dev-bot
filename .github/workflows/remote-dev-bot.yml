@@ -15,7 +15,7 @@ name: Remote Dev Bot
 #   context = file1.txt file2.txt
 #
 # Argument names are normalized (spaces/dashes/underscores are equivalent).
-# Supported arguments: max_iterations, timeout_minutes, target_branch, context (alias for context_files).
+# Supported arguments: max_iterations, timeout_minutes, target_branch, extra_files.
 
 on:
   workflow_call:
@@ -59,11 +59,11 @@ jobs:
       pr_type: ${{ steps.parse.outputs.pr_type }}
       on_failure: ${{ steps.parse.outputs.on_failure }}
       target_branch: ${{ steps.parse.outputs.target_branch }}
-      context_files: ${{ steps.parse.outputs.context_files }}
+      extra_files: ${{ steps.parse.outputs.extra_files }}
       commit_trailer: ${{ steps.parse.outputs.commit_trailer }}
       assign_issue: ${{ steps.parse.outputs.assign_issue }}
       assign_pr: ${{ steps.parse.outputs.assign_pr }}
-      explore_max_iterations: ${{ steps.parse.outputs.explore_max_iterations }}
+      design_max_iterations: ${{ steps.parse.outputs.design_max_iterations }}
       review_max_iterations: ${{ steps.parse.outputs.review_max_iterations }}
       graceful_wrapup_enabled: ${{ steps.parse.outputs.graceful_wrapup_enabled }}
       graceful_wrapup_iteration: ${{ steps.parse.outputs.graceful_wrapup_iteration }}
@@ -697,365 +697,6 @@ jobs:
             --repo "${{ github.repository }}" \
             --body-file /tmp/cost_comment.md
 
-  # --- Mode: design (action=comment) — call LLM, post analysis as comment ---
-  design:
-    needs: parse
-    if: needs.parse.outputs.action == 'comment'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Generate app token
-        if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ vars.RDB_APP_ID }}
-          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
-
-      - name: Checkout target repository
-        uses: actions/checkout@v4
-
-      - name: Checkout remote-dev-bot config
-        uses: actions/checkout@v4
-        with:
-          repository: gnovak/remote-dev-bot
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ inputs.rdb_ref }}
-          path: .remote-dev-bot
-          sparse-checkout: |
-            /remote-dev-bot.yaml
-            /lib/
-          sparse-checkout-cone-mode: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: pip install PyYAML litellm
-
-      - name: Determine API key
-        id: apikey
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-        run: |
-          # Select the correct API key based on the model's provider prefix.
-          # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
-          # GitHub Actions automatically masks secret values in logs — this does
-          # NOT print the key. The key is consumed by the next step as
-          # ${{ steps.apikey.outputs.key }} and never appears in plaintext output.
-          MODEL="${{ needs.parse.outputs.model }}"
-          ALIAS="${{ needs.parse.outputs.alias }}"
-          ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
-
-          # Helper: post a friendly comment when the required API key secret is missing.
-          post_no_api_key_comment() {
-            local secret_name="$1"
-            gh issue comment "$ISSUE_NUMBER" \
-              --repo "${{ github.repository }}" \
-              --body "$(cat <<EOF
-          ⚠️ **No API key configured for this model.**
-
-          The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
-
-          **To fix:** Add your API key as a repository secret:
-          \`\`\`bash
-          gh secret set ${secret_name} --repo ${{ github.repository }}
-          \`\`\`
-          Then re-trigger the bot by commenting the same command again.
-          EOF
-          )"
-          }
-
-          if [[ "$MODEL" == anthropic/* ]]; then
-            API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
-            if [[ -z "$API_KEY" ]]; then
-              post_no_api_key_comment "ANTHROPIC_API_KEY"
-              echo "::error::No ANTHROPIC_API_KEY secret configured for model: $MODEL"
-              exit 1
-            fi
-            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
-          elif [[ "$MODEL" == openai/* ]]; then
-            API_KEY="${{ secrets.OPENAI_API_KEY }}"
-            if [[ -z "$API_KEY" ]]; then
-              post_no_api_key_comment "OPENAI_API_KEY"
-              echo "::error::No OPENAI_API_KEY secret configured for model: $MODEL"
-              exit 1
-            fi
-            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
-          elif [[ "$MODEL" == gemini/* ]]; then
-            API_KEY="${{ secrets.GEMINI_API_KEY }}"
-            if [[ -z "$API_KEY" ]]; then
-              post_no_api_key_comment "GEMINI_API_KEY"
-              echo "::error::No GEMINI_API_KEY secret configured for model: $MODEL"
-              exit 1
-            fi
-            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Unknown model provider for: $MODEL"
-            exit 1
-          fi
-
-      - name: Gather issue context
-        id: context
-        run: |
-          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-
-          # Fetch issue title and body
-          ISSUE_JSON=$(gh api repos/${{ github.repository }}/issues/${ISSUE_NUMBER})
-          ISSUE_TITLE=$(echo "$ISSUE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['title'])")
-          ISSUE_BODY=$(echo "$ISSUE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body','') or '')")
-
-          # Fetch all comments (up to 100 — GitHub API max per page)
-          COMMENTS_JSON=$(gh api "repos/${{ github.repository }}/issues/${ISSUE_NUMBER}/comments?per_page=100")
-          COMMENTS=$(echo "$COMMENTS_JSON" | python3 -c "
-          import sys, json
-          comments = json.load(sys.stdin)
-          for c in reversed(comments):
-              user = c['user']['login']
-              body = c.get('body','')
-              print(f'--- @{user} ---')
-              print(body)
-              print()
-          ")
-
-          # Write to files to avoid shell escaping issues
-          echo "$ISSUE_TITLE" > /tmp/issue_title.txt
-          echo "$ISSUE_BODY" > /tmp/issue_body.txt
-          echo "$COMMENTS" > /tmp/issue_comments.txt
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-
-      - name: Call LLM for design analysis
-        id: llm
-        env:
-          LLM_API_KEY: ${{ steps.apikey.outputs.key }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          CONTEXT_FILES: ${{ needs.parse.outputs.context_files }}
-        run: |
-          python3 << 'PYEOF'
-          import json
-          import os
-          import yaml
-
-          from litellm import completion
-
-          model = "${{ needs.parse.outputs.model }}"
-
-          # Load additional_instructions from target repo's config (appended to canonical prompt)
-          additional_instructions = ""
-          if os.path.exists("remote-dev-bot.yaml"):
-              with open("remote-dev-bot.yaml") as f:
-                  cfg = yaml.safe_load(f) or {}
-              additional_instructions = cfg.get("modes", {}).get("design", {}).get("additional_instructions", "")
-
-          # Generate repository file listing (tracked files only)
-          import subprocess
-          result = subprocess.run(
-              ["git", "ls-files"],
-              capture_output=True, text=True
-          )
-          file_listing = result.stdout.strip()
-          repo_context = f"## Repository File Listing\n\n```\n{file_listing}\n```"
-
-          # Read repo context files (missing files are skipped gracefully)
-          context_files = json.loads(os.environ.get("CONTEXT_FILES", "[]") or "[]")
-          for filepath in context_files:
-              if os.path.exists(filepath):
-                  with open(filepath) as f:
-                      content = f.read().strip()
-                  if content:
-                      repo_context += f"\n\n## File: {filepath}\n\n{content}"
-
-          # Read issue context
-          with open("/tmp/issue_title.txt") as f:
-              title = f.read().strip()
-          with open("/tmp/issue_body.txt") as f:
-              body = f.read().strip()
-          with open("/tmp/issue_comments.txt") as f:
-              comments = f.read().strip()
-
-          # Build the prompt
-          user_content = f"""## Issue: {title}
-
-          {body}
-
-          ## Discussion so far:
-          {comments}
-          """
-
-          system_prompt = (
-              "You are analyzing a GitHub issue for design discussion. "
-              "Do NOT write code or open a PR. Instead, provide thoughtful "
-              "analysis, surface trade-offs, suggest approaches, and ask "
-              "clarifying questions. Respond in a GitHub comment. "
-              "IMPORTANT: Never begin your response with a slash command like /agent "
-              "or any text that could trigger another bot action. "
-              "Do NOT end your response with conversational invitations like "
-              '"Want me to elaborate?" or "Let me know if you have questions." '
-              "Your response is a design document, not a chat message. "
-              "IMPORTANT: You have been given a limited set of context files. If the "
-              "issue touches code or behavior you cannot verify from those files, say "
-              "so explicitly. Do NOT invent function names, describe behavior you "
-              "haven't seen, or assume how unshared code works. Acknowledging what "
-              "you cannot see is more useful than a confident answer based on guesses."
-          )
-          if additional_instructions:
-              system_prompt += "\n\n" + additional_instructions
-
-          if repo_context:
-              system_prompt = "# Repository Context\n" + repo_context + "\n\n# Instructions\n\n" + system_prompt
-
-          response = completion(
-              model=model,
-              messages=[
-                  {"role": "system", "content": system_prompt},
-                  {"role": "user", "content": user_content},
-              ],
-              max_tokens=4096,
-          )
-
-          result = response.choices[0].message.content
-
-          # Extract token usage for cost tracking
-          usage = getattr(response, 'usage', None)
-          if usage:
-              input_tokens = getattr(usage, 'prompt_tokens', 0)
-              output_tokens = getattr(usage, 'completion_tokens', 0)
-              # litellm may provide cost directly
-              cost = getattr(response, '_hidden_params', {}).get('response_cost', None)
-              if cost is None:
-                  # Try to get from usage
-                  cost = getattr(usage, 'cost', None)
-          else:
-              input_tokens = 0
-              output_tokens = 0
-              cost = None
-
-          # Save usage info for cost comment
-          import json
-          usage_data = {
-              "input_tokens": input_tokens,
-              "output_tokens": output_tokens,
-              "cost": cost,
-              "model": model,
-          }
-          with open("/tmp/llm_usage.json", "w") as f:
-              json.dump(usage_data, f)
-          print(f"Token usage: input={input_tokens}, output={output_tokens}, cost={cost}")
-
-          # Loop prevention: detect /agent commands anywhere in the response
-          # If found, block the entire response to prevent recursive triggers
-          import re
-          agent_pattern = re.compile(r'^/agent', re.MULTILINE)
-          if agent_pattern.search(result):
-              print("=" * 60)
-              print("BLOCKED: Response contains /agent command(s)")
-              print("=" * 60)
-              print("Full response (for debugging):")
-              print(result)
-              print("=" * 60)
-              # Signal to the post step that this response should be blocked
-              with open("/tmp/llm_blocked", "w") as f:
-                  f.write("true")
-              with open("/tmp/llm_response.md", "w") as f:
-                  f.write("")  # Empty - won't be used
-          else:
-              # Write to file (avoid shell escaping)
-              with open("/tmp/llm_response.md", "w") as f:
-                  f.write(result)
-              print(f"Generated {len(result)} chars of design analysis")
-          PYEOF
-
-      - name: Post comment
-        run: |
-          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-          MODE="${{ needs.parse.outputs.mode }}"
-          ALIAS="${{ needs.parse.outputs.alias }}"
-          MODEL="${{ needs.parse.outputs.model }}"
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-          # Check if the response was blocked due to /agent command detection
-          if [ -f /tmp/llm_blocked ]; then
-            echo "⚠️ Response blocked due to /agent command detection"
-            {
-              echo "⚠️ **Agent loop blocked!**"
-              echo ""
-              echo "The design analysis response contained \`/agent\` command(s) which could trigger a recursive agent loop. The response has been blocked for safety."
-              echo ""
-              echo "See the [workflow run logs]($RUN_URL) for the full response content."
-              echo ""
-              echo "---"
-              echo "_Blocked by \`/agent-${MODE}-${ALIAS}\` (${MODEL}) safety check_"
-            } > /tmp/comment_body.md
-          else
-            # Add footer with metadata
-            {
-              cat /tmp/llm_response.md
-              echo ""
-              echo "---"
-              echo "_Design analysis by \`/agent-${MODE}-${ALIAS}\` (${MODEL})_"
-            } > /tmp/comment_body.md
-          fi
-
-          gh issue comment "$ISSUE_NUMBER" \
-            --repo "${{ github.repository }}" \
-            --body-file /tmp/comment_body.md
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-
-      - name: Post cost comment
-        if: always()
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-        run: |
-          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-          MODEL="${{ needs.parse.outputs.model }}"
-          ALIAS="${{ needs.parse.outputs.alias }}"
-          MODE="${{ needs.parse.outputs.mode }}"
-
-          # Read usage data — default to 0 if file missing (shows $0.00, signals no data)
-          read INPUT_TOKENS OUTPUT_TOKENS COST < <(python3 -c "
-          import json, os
-          if os.path.exists('/tmp/llm_usage.json'):
-              d = json.load(open('/tmp/llm_usage.json'))
-              print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0)
-          else:
-              print(0, 0, 0)
-          ")
-          TOTAL_TOKENS=$((INPUT_TOKENS + OUTPUT_TOKENS))
-
-          # Round UP to nearest penny — $0.00 means no cost data was available.
-          # Ceiling (not standard) rounding: sub-penny costs show as $0.01.
-          # Two decimal places only: pennies are the natural unit for LLM cost tracking.
-          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
-
-          # Format cost comment
-          {
-            echo "### 💰 Cost Summary"
-            echo ""
-            echo "**Model:** \`${ALIAS}\` (${MODEL})"
-            echo "**Mode:** ${MODE}"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| Input tokens | ${INPUT_TOKENS} |"
-            echo "| Output tokens | ${OUTPUT_TOKENS} |"
-            echo "| Total tokens | ${TOTAL_TOKENS} |"
-            printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
-            echo ""
-            echo "_Cost is estimated based on token usage and may vary from actual billing._"
-          } > /tmp/cost_comment.md
-
-          # Post comment
-          gh issue comment "$ISSUE_NUMBER" \
-            --repo "${{ github.repository }}" \
-            --body-file /tmp/cost_comment.md
-
   # --- Mode: review (action=review) — lightweight agentic loop to review a PR ---
   review:
     needs: parse
@@ -1235,7 +876,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          CONTEXT_FILES: ${{ needs.parse.outputs.context_files }}
+          EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
           REVIEW_MAX_ITERATIONS: ${{ needs.parse.outputs.review_max_iterations }}
         run: |
           python3 << 'PYEOF'
@@ -1248,12 +889,12 @@ jobs:
 
           model = "${{ needs.parse.outputs.model }}"
 
-          # Load additional_instructions from target repo's config (appended to canonical prompt)
-          additional_instructions = ""
+          # Load extra_instructions from target repo's config (appended to canonical prompt)
+          extra_instructions = ""
           if os.path.exists("remote-dev-bot.yaml"):
               with open("remote-dev-bot.yaml") as f:
                   cfg = yaml.safe_load(f) or {}
-              additional_instructions = cfg.get("modes", {}).get("review", {}).get("additional_instructions", "")
+              extra_instructions = cfg.get("modes", {}).get("review", {}).get("extra_instructions", "")
 
           # Get max iterations from config (default 10)
           max_iterations = int(os.environ.get("REVIEW_MAX_ITERATIONS", "10") or "10")
@@ -1267,7 +908,7 @@ jobs:
           repo_context = f"## Repository File Listing\n\n```\n{file_listing}\n```"
 
           # Read repo context files (missing files are skipped gracefully)
-          context_files = json.loads(os.environ.get("CONTEXT_FILES", "[]") or "[]")
+          context_files = json.loads(os.environ.get("EXTRA_FILES", "[]") or "[]")
           for filepath in context_files:
               if os.path.exists(filepath):
                   with open(filepath) as f:
@@ -1347,8 +988,8 @@ jobs:
               "Your only output is the review submitted via submit_review."
           )
 
-          if additional_instructions:
-              system_prompt += "\n\n" + additional_instructions
+          if extra_instructions:
+              system_prompt += "\n\n" + extra_instructions
 
           if repo_context:
               system_prompt = "# Repository Context\n" + repo_context + "\n\n# Instructions\n\n" + system_prompt
@@ -1646,10 +1287,10 @@ jobs:
             --repo "${{ github.repository }}" \
             --body-file /tmp/cost_comment.md
 
-  # --- Mode: explore (action=explore) — multi-round agentic loop with tool calling ---
-  explore:
+  # --- Mode: design (action=design) — multi-round agentic loop with tool calling ---
+  design:
     needs: parse
-    if: needs.parse.outputs.action == 'explore'
+    if: needs.parse.outputs.action == 'design'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -1777,15 +1418,15 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
-      - name: Run explore loop
-        id: explore
+      - name: Run design loop
+        id: design
         env:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          CONTEXT_FILES: ${{ needs.parse.outputs.context_files }}
-          EXPLORE_MAX_ITERATIONS: ${{ needs.parse.outputs.explore_max_iterations }}
+          EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
+          DESIGN_MAX_ITERATIONS: ${{ needs.parse.outputs.design_max_iterations }}
         run: |
           python3 << 'PYEOF'
           import json
@@ -1798,19 +1439,19 @@ jobs:
 
           model = "${{ needs.parse.outputs.model }}"
 
-          # Load prompt_prefix from config
-          prompt_prefix = ""
+          # Load extra_instructions from config
+          extra_instructions = ""
           for path in ["remote-dev-bot.yaml", ".remote-dev-bot/remote-dev-bot.yaml"]:
               if os.path.exists(path):
                   with open(path) as f:
                       cfg = yaml.safe_load(f) or {}
-                  mode_cfg = cfg.get("modes", {}).get("explore", {})
-                  if "prompt_prefix" in mode_cfg:
-                      prompt_prefix = mode_cfg["prompt_prefix"]
+                  mode_cfg = cfg.get("modes", {}).get("design", {})
+                  if "extra_instructions" in mode_cfg:
+                      extra_instructions = mode_cfg["extra_instructions"]
                       break
 
           # Get max iterations from config (default 10)
-          max_iterations = int(os.environ.get("EXPLORE_MAX_ITERATIONS", "10") or "10")
+          max_iterations = int(os.environ.get("DESIGN_MAX_ITERATIONS", "10") or "10")
 
           # Generate repository file listing (tracked files only)
           result = subprocess.run(
@@ -1821,7 +1462,7 @@ jobs:
           repo_context = f"## Repository File Listing\n\n```\n{file_listing}\n```"
 
           # Read repo context files (missing files are skipped gracefully)
-          context_files = json.loads(os.environ.get("CONTEXT_FILES", "[]") or "[]")
+          context_files = json.loads(os.environ.get("EXTRA_FILES", "[]") or "[]")
           for filepath in context_files:
               if os.path.exists(filepath):
                   with open(filepath) as f:
@@ -1846,11 +1487,12 @@ jobs:
           {comments}
           """
 
-          system_prompt = prompt_prefix or (
+          system_prompt = extra_instructions or (
               "You are analyzing a GitHub issue for design discussion using an agentic exploration loop. "
               "You have access to tools to read files and search the codebase. "
               "Use these tools to gather the information you need before providing your analysis. "
-              "When you have enough information, call submit_analysis with your final analysis."
+              "When you have enough information, call submit_analysis with your final analysis. "
+              "Never begin your response with a slash command like /agent."
           )
 
           if repo_context:
@@ -2077,8 +1719,15 @@ jobs:
           # Write analysis for the post-comment step (prefer submit_analysis, fall back to last response)
           analysis = final_analysis or last_response or ""
           if analysis:
-              with open("/tmp/explore_analysis.txt", "w") as f:
+              with open("/tmp/design_analysis.txt", "w") as f:
                   f.write(analysis)
+
+          # Loop prevention: detect /agent commands anywhere in the analysis
+          import re
+          agent_pattern = re.compile(r'^/agent', re.MULTILINE)
+          if analysis and agent_pattern.search(analysis):
+              with open("/tmp/llm_blocked", "w") as f:
+                  f.write("Loop blocked: /agent command detected in design analysis\n")
           PYEOF
 
       - name: Post analysis comment
@@ -2089,12 +1738,16 @@ jobs:
           ALIAS="${{ needs.parse.outputs.alias }}"
           MODEL="${{ needs.parse.outputs.model }}"
 
-          if [ -f /tmp/explore_analysis.txt ]; then
+          if [ -f /tmp/llm_blocked ]; then
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body "⚠️ **Agent loop blocked!** The design analysis response contained \`/agent\` command(s) which could trigger a recursive agent loop. The response has been blocked for safety."
+          elif [ -f /tmp/design_analysis.txt ]; then
             {
-              cat /tmp/explore_analysis.txt
+              cat /tmp/design_analysis.txt
               echo ""
               echo "---"
-              echo "_Exploration by \`/agent-explore-${ALIAS}\` (${MODEL})_"
+              echo "_Design analysis by \`/agent-design-${ALIAS}\` (${MODEL})_"
             } > /tmp/analysis_comment.md
 
             gh issue comment "$ISSUE_NUMBER" \
