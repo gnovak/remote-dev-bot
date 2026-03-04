@@ -59,6 +59,7 @@ jobs:
       pr_type: ${{ steps.parse.outputs.pr_type }}
       on_failure: ${{ steps.parse.outputs.on_failure }}
       target_branch: ${{ steps.parse.outputs.target_branch }}
+      target_branch_explicit: ${{ steps.parse.outputs.target_branch_explicit }}
       extra_files: ${{ steps.parse.outputs.extra_files }}
       commit_trailer: ${{ steps.parse.outputs.commit_trailer }}
       assign_issue: ${{ steps.parse.outputs.assign_issue }}
@@ -341,7 +342,15 @@ jobs:
           GIT_USERNAME: ${{ github.repository_owner }}
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-          TARGET_BRANCH=${{ github.event.pull_request.base.ref || needs.parse.outputs.target_branch || 'main' }}
+          ISSUE_TYPE=${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}
+          TARGET_BRANCH_EXPLICIT="${{ needs.parse.outputs.target_branch_explicit }}"
+          if [[ "$TARGET_BRANCH_EXPLICIT" == "true" ]]; then
+            TARGET_BRANCH="${{ needs.parse.outputs.target_branch }}"
+          elif [[ "$ISSUE_TYPE" == "pr" ]]; then
+            TARGET_BRANCH=$(gh pr view "$ISSUE_NUMBER" --json baseRefName --jq '.baseRefName')
+          else
+            TARGET_BRANCH="${{ needs.parse.outputs.target_branch || 'main' }}"
+          fi
           ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 

@@ -377,12 +377,14 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     action = mode_config.get("action", "pr")
 
     # Apply command-line arg overrides
+    target_branch_explicit = False  # True only when set via inline arg
     if "max_iterations" in args:
         max_iter = args["max_iterations"]
     if "timeout_minutes" in args:
         resolved_timeout = args["timeout_minutes"]
     if "target_branch" in args:
         target_branch = args["target_branch"]
+        target_branch_explicit = True
 
     # Calculate the iteration warning threshold (iteration number at which to warn)
     wrapup_iteration = int(max_iter * wrapup_threshold) if wrapup_enabled else 0
@@ -397,6 +399,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         "pr_type": pr_type,
         "on_failure": on_failure,
         "target_branch": target_branch,
+        "target_branch_explicit": target_branch_explicit,
         "assign_issue": assign_issue,
         "assign_pr": assign_pr,
         "has_override": bool(override_config),
@@ -536,6 +539,7 @@ def main():
             f.write(f"pr_type={result['pr_type']}\n")
             f.write(f"on_failure={result['on_failure']}\n")
             f.write(f"target_branch={result['target_branch']}\n")
+            f.write(f"target_branch_explicit={str(result['target_branch_explicit']).lower()}\n")
             f.write(f"assign_issue={str(result['assign_issue']).lower()}\n")
             f.write(f"assign_pr={str(result['assign_pr']).lower()}\n")
             if "extra_instructions" in result:
