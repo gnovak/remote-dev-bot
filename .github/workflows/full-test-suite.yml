@@ -1,13 +1,8 @@
 name: Full Test Suite
-run-name: "Full Test Suite: ${{ inputs.branch || 'main' }}"
+run-name: "Full Test Suite: ${{ github.ref_name }}"
 
 on:
   workflow_dispatch:
-    inputs:
-      branch:
-        description: "Branch to test (e2e-test pointer in remote-dev-bot will be reset to this branch)"
-        required: false
-        default: "main"
 
 # Sequential execution: all jobs use the same test repo, so they
 # cannot run in parallel (shared e2e-test pointer, workflow files, issues).
@@ -30,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ github.ref_name }}
 
       - uses: actions/setup-python@v5
         with:
@@ -59,7 +54,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
@@ -95,7 +90,7 @@ jobs:
       - name: Run E2E tests (shim, all models)
         env:
           GH_TOKEN: ${{ secrets.RDB_TESTER_PAT_TOKEN || github.token }}
-        run: ./tests/e2e.sh --branch ${{ inputs.branch }} --all-models
+        run: ./tests/e2e.sh --branch ${{ github.ref_name }} --all-models
 
   e2e-compiled:
     needs: [unit-tests, e2e-shim]
@@ -116,7 +111,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
@@ -129,7 +124,7 @@ jobs:
         # below handles cleanup even if this step is cancelled or the job times out.
         env:
           GH_TOKEN: ${{ secrets.RDB_TESTER_PAT_TOKEN || github.token }}
-        run: ./tests/e2e.sh --branch ${{ inputs.branch }} --compiled --all-models
+        run: ./tests/e2e.sh --branch ${{ github.ref_name }} --compiled --all-models
 
       - name: Restore shim after compiled e2e
         if: always()
@@ -189,7 +184,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
@@ -197,4 +192,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RDB_TESTER_PAT_TOKEN || github.token }}
           UNAUTHORIZED_PAT: ${{ secrets.RDB_TESTER_UNAUTHORIZED_PAT_TOKEN }}
-        run: ./tests/e2e-security.sh --branch ${{ inputs.branch }}
+        run: ./tests/e2e-security.sh --branch ${{ github.ref_name }}
