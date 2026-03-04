@@ -122,14 +122,15 @@ rdb uses a three-layer config merge plus optional per-invocation runtime args
 | Runtime args | Inline `name = value` lines in the trigger comment | Override for a single run; see `ALLOWED_ARGS` in `lib/config.py` |
 
 All merges are deep (leaf-level), so overriding `modes.design.max_iterations`
-does not clobber `modes.design.context_files`. Lists replace entirely (no
-concatenation).
+does not clobber `modes.design.extra_files`. **`extra_files` is the exception:
+it is additive across all layers** — base + override + local + runtime args are
+all concatenated (deduplicating). Other list-valued fields replace on override.
 
 ### Self-dev local config (`remote-dev-bot.local.yaml`)
 
 This file lives in the rdb repo root and applies when rdb is used to develop
 itself. It adds rdb implementation files (`lib/config.py`, etc.) to the design
-agent's `context_files` so the design agent can see actual code rather than
+agent's `extra_files` so the design agent can see actual code rather than
 guessing.
 
 It is **not** distributed to users: the sparse-checkout uses non-cone mode and

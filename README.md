@@ -84,7 +84,7 @@ the command:
 /agent resolve
 max iterations = 75
 target branch = feature/my-branch
-context = extra-context.md
+extra_files = extra-context.md
 ```
 
 | Argument          | Type    | Description                                                      |
@@ -92,7 +92,7 @@ context = extra-context.md
 | `max iterations`  | integer | Override the iteration limit for this run                        |
 | `timeout minutes` | integer | Override the watchdog timeout in minutes for this run            |
 | `target branch`   | string  | Target branch for the PR (default: `main`)                       |
-| `context`         | list    | Additional context files for the agent to read (space-separated) |
+| `extra files`     | list    | Additional context files for the agent to read (space-separated) |
 
 Argument names are flexible: `max iterations`, `max-iterations`, and
 `max_iterations` all work.

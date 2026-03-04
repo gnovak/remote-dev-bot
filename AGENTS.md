@@ -25,7 +25,7 @@ and `/agent-review` comments on GitHub issues and PRs.
 **Workflows** (`.github/workflows/`):
 
 - `remote-dev-bot.yml` — the reusable workflow; all real logic; jobs: `parse`,
-  `resolve`, `design`, `review`, `explore` (`explore` is dev-only, not yet released to `main`)
+  `resolve`, `design`, `review`
 - `agent.yml` — thin shim users copy into their repos; calls
   `remote-dev-bot.yml@main`
 - `dogfood.yml` — internal shim for rdb self-dev; fires on `/dogfood` comments;
@@ -124,8 +124,8 @@ pytest --doctest-modules lib/config.py
 1. Add the provider prefix to `KNOWN_PROVIDERS` in `lib/config.py` (e.g.,
    `"newvendor/"`)
 2. Add an API key check in the "Determine API key" step of
-   `.github/workflows/remote-dev-bot.yml` — there are four copies (resolve,
-   design, review, explore); update all of them
+   `.github/workflows/remote-dev-bot.yml` — there are three copies (resolve,
+   design, review); update all of them
 3. Add model aliases under `models:` in `remote-dev-bot.yaml` with IDs using the
    new prefix
 4. Add the API key secret (`NEWVENDOR_API_KEY`) to the secrets passed through in
@@ -146,7 +146,7 @@ Users can pass per-invocation arguments on lines after the command:
 ```
 /agent resolve
 max iterations = 75
-context_files = extra-file.md
+extra_files = extra-file.md
 target branch = design/gemini
 ```
 
@@ -160,18 +160,9 @@ target branch = design/gemini
 - `ALLOWED_ARGS` in `lib/config.py` defines accepted names and types; unknown
   names are rejected with an error
 - `resolve_config(..., args=...)` applies parsed args on top of YAML config
-- `context_files` **appends** to the mode's existing list (does not replace)
-
-## compile.py: Three-File Output
-
-`scripts/compile.py` inlines config parsing and selected steps from
-`remote-dev-bot.yml` into three standalone files: `dist/agent-resolve.yml`,
-`dist/agent-design.yml`, and `dist/agent-review.yml`. It finds steps by **name**
-(not index), so reordering steps is safe as long as step names don't change.
-
-**Rule: if you add, remove, or rename a step in remote-dev-bot.yml, update
-compile.py to match**, then run `pytest tests/test_compile.py -v`. The
-step-count tripwire tests will catch mismatches.
+- `extra_files` **is additive across all layers** — base + override + local +
+  runtime args are all concatenated (deduped); user-provided files extend the
+  base list, never replace it
 
 ## Branch Model
 
