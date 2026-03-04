@@ -29,8 +29,8 @@ to design agents that can autonomously handle real development tasks.
 4. Review the PR. If changes are needed, comment `/agent-resolve` on the PR with
    feedback for another pass.
 
-Or use `/agent-design` to get AI design analysis posted as a comment (no code
-changes).
+Or use `/agent-design` to explore the codebase and get a design analysis posted
+as a comment (no code changes).
 
 Or use `/agent-review` on a pull request to get an AI code review posted as a
 comment (no code changes).
@@ -64,7 +64,7 @@ comment (no code changes).
 | ----------------------------- | ---------------------------------------------------- |
 | `/agent-resolve`              | Resolve the issue and open a PR (default model)      |
 | `/agent-resolve-claude-large` | Resolve with a specific model                        |
-| `/agent-design`               | Post design analysis as a comment (no code changes)  |
+| `/agent-design`               | Explore codebase and post a design analysis comment  |
 | `/agent-design-claude-large`  | Design analysis with a specific model                |
 | `/agent-review`               | Post a code review comment on a PR (no code changes) |
 | `/agent-review-claude-large`  | Code review with a specific model                    |

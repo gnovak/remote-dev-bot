@@ -12,7 +12,7 @@ Commands follow the pattern: /agent-<verb>[-<model>]
 Arguments can be passed on subsequent lines:
   /agent resolve
   max_iterations = 75
-  context_files = file1.txt file2.txt
+  extra_files = file1.txt file2.txt
   timeout_minutes = 60
 
 Argument names are normalized (spaces/dashes/underscores are equivalent).
@@ -49,7 +49,7 @@ DEFAULT_TIMEOUT_MINUTES = 120
 ALLOWED_ARGS = {
     "max_iterations": int,  # openhands.max_iterations
     "timeout_minutes": int,  # openhands.timeout_minutes
-    "context_files": list,  # mode's context_files
+    "extra_files": list,  # mode's extra_files
     "target_branch": str,  # openhands.target_branch
 }
 
@@ -63,8 +63,8 @@ def normalize_arg_name(name):
     'max_iterations'
     >>> normalize_arg_name("Max_Iterations")
     'max_iterations'
-    >>> normalize_arg_name("context files")
-    'context_files'
+    >>> normalize_arg_name("extra files")
+    'extra_files'
     """
     return re.sub(r"[\s-]+", "_", name.strip().lower())
 
@@ -80,10 +80,10 @@ def parse_args(lines):
     {'max_iterations': 75}
     >>> parse_args(["max-iterations = 100"])
     {'max_iterations': 100}
-    >>> parse_args(["context_files = file1.txt file2.txt"])
-    {'context_files': ['file1.txt', 'file2.txt']}
-    >>> parse_args(["context files = README.md"])
-    {'context_files': ['README.md']}
+    >>> parse_args(["extra_files = file1.txt file2.txt"])
+    {'extra_files': ['file1.txt', 'file2.txt']}
+    >>> parse_args(["extra files = README.md"])
+    {'extra_files': ['README.md']}
     >>> parse_args([])
     {}
     """
@@ -139,8 +139,8 @@ def parse_invocation(comment_body, known_modes, command_prefix="agent"):
     ('resolve', 'claude-large', {})
     >>> parse_invocation("/agent resolve\\nmax iterations = 75", {"resolve", "design"})
     ('resolve', '', {'max_iterations': 75})
-    >>> parse_invocation("/agent-design-claude-small\\ncontext_files = a.txt b.txt", {"resolve", "design"})
-    ('design', 'claude-small', {'context_files': ['a.txt', 'b.txt']})
+    >>> parse_invocation("/agent-design-claude-small\\nextra_files = a.txt b.txt", {"resolve", "design"})
+    ('design', 'claude-small', {'extra_files': ['a.txt', 'b.txt']})
     >>> parse_invocation("/dogfood resolve", {"resolve", "design"}, command_prefix="dogfood")
     ('resolve', '', {})
     """
@@ -406,16 +406,25 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         "timeout_minutes": resolved_timeout,
     }
 
-    # Include additional_instructions if the mode defines one (appended to canonical prompt)
-    if "additional_instructions" in mode_config:
-        result["additional_instructions"] = mode_config["additional_instructions"]
+    # Include extra_instructions if the mode defines one (appended to canonical prompt)
+    if "extra_instructions" in mode_config:
+        result["extra_instructions"] = mode_config["extra_instructions"]
 
-    # Include context_files: command-line args append to mode config
-    # (replace semantics would force users to re-type all existing files)
-    if "context_files" in mode_config:
-        result["context_files"] = mode_config["context_files"] + args.get("context_files", [])
-    elif "context_files" in args:
-        result["context_files"] = args["context_files"]
+    # Include extra_files: all layers are additive (base + override + local + runtime args).
+    # Using pre-merge configs here instead of mode_config (post-merge) so that user-provided
+    # extra_files always extend the base list rather than silently replacing it.
+    base_mode_extra = base_config.get("modes", {}).get(mode, {}).get("extra_files", [])
+    override_mode_extra = override_config.get("modes", {}).get(mode, {}).get("extra_files", [])
+    local_mode_extra = local_config.get("modes", {}).get(mode, {}).get("extra_files", [])
+    arg_extra = args.get("extra_files", [])
+    seen = set()
+    combined_extra_files = []
+    for f in base_mode_extra + override_mode_extra + local_mode_extra + arg_extra:
+        if f not in seen:
+            seen.add(f)
+            combined_extra_files.append(f)
+    if combined_extra_files:
+        result["extra_files"] = combined_extra_files
 
     # Log command-line args if any were provided
     if args:
@@ -424,9 +433,9 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             print(f"  {key}: {value}")
         print()
 
-    # Include max_iterations for agentic loop modes (explore and review)
-    if action == "explore" and "max_iterations" in mode_config:
-        result["explore_max_iterations"] = mode_config["max_iterations"]
+    # Include max_iterations for agentic loop modes (design and review)
+    if action == "design" and "max_iterations" in mode_config:
+        result["design_max_iterations"] = mode_config["max_iterations"]
     if action == "review" and "max_iterations" in mode_config:
         result["review_max_iterations"] = mode_config["max_iterations"]
 
@@ -529,10 +538,14 @@ def main():
             f.write(f"target_branch={result['target_branch']}\n")
             f.write(f"assign_issue={str(result['assign_issue']).lower()}\n")
             f.write(f"assign_pr={str(result['assign_pr']).lower()}\n")
-            if "context_files" in result:
-                f.write(f"context_files={json.dumps(result['context_files'])}\n")
-            if "explore_max_iterations" in result:
-                f.write(f"explore_max_iterations={result['explore_max_iterations']}\n")
+            if "extra_instructions" in result:
+                f.write(f"extra_instructions={result['extra_instructions']}\n")
+            if "extra_files" in result:
+                f.write(f"extra_files={json.dumps(result['extra_files'])}\n")
+            if "design_max_iterations" in result:
+                f.write(f"design_max_iterations={result['design_max_iterations']}\n")
+            if "review_max_iterations" in result:
+                f.write(f"review_max_iterations={result['review_max_iterations']}\n")
             f.write(f"commit_trailer={result['commit_trailer']}\n")
             f.write(f"graceful_wrapup_enabled={str(result['graceful_wrapup_enabled']).lower()}\n")
             f.write(f"graceful_wrapup_iteration={result['graceful_wrapup_iteration']}\n")
