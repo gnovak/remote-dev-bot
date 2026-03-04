@@ -410,12 +410,21 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     if "extra_instructions" in mode_config:
         result["extra_instructions"] = mode_config["extra_instructions"]
 
-    # Include extra_files: command-line args append to mode config
-    # (replace semantics would force users to re-type all existing files)
-    if "extra_files" in mode_config:
-        result["extra_files"] = mode_config["extra_files"] + args.get("extra_files", [])
-    elif "extra_files" in args:
-        result["extra_files"] = args["extra_files"]
+    # Include extra_files: all layers are additive (base + override + local + runtime args).
+    # Using pre-merge configs here instead of mode_config (post-merge) so that user-provided
+    # extra_files always extend the base list rather than silently replacing it.
+    base_mode_extra = base_config.get("modes", {}).get(mode, {}).get("extra_files", [])
+    override_mode_extra = override_config.get("modes", {}).get(mode, {}).get("extra_files", [])
+    local_mode_extra = local_config.get("modes", {}).get(mode, {}).get("extra_files", [])
+    arg_extra = args.get("extra_files", [])
+    seen = set()
+    combined_extra_files = []
+    for f in base_mode_extra + override_mode_extra + local_mode_extra + arg_extra:
+        if f not in seen:
+            seen.add(f)
+            combined_extra_files.append(f)
+    if combined_extra_files:
+        result["extra_files"] = combined_extra_files
 
     # Log command-line args if any were provided
     if args:

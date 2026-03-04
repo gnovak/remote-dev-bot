@@ -961,8 +961,8 @@ def test_resolve_config_local_none_is_noop(config_dir):
     assert result["mode"] == "resolve"
 
 
-def test_resolve_config_local_overrides_extra_files(config_dir):
-    """local_path can replace design mode extra_files (list replacement)."""
+def test_resolve_config_local_extra_files_appends_to_base(config_dir):
+    """local_path extra_files are appended to base extra_files, not replacing them."""
     tmp_path, base_path = config_dir
     # Add extra_files to base
     with open(base_path) as f:
@@ -976,7 +976,8 @@ def test_resolve_config_local_overrides_extra_files(config_dir):
         yaml.dump({"modes": {"design": {"extra_files": ["README.md", "lib/config.py"]}}}, f)
 
     result = resolve_config(base_path, "nonexistent.yaml", "design", local_path=local_path)
-    assert result["extra_files"] == ["README.md", "lib/config.py"]
+    # README.md deduplicated, AGENTS.md from base preserved, lib/config.py added
+    assert result["extra_files"] == ["README.md", "AGENTS.md", "lib/config.py"]
 
 
 # --- resolve_config: timeout_minutes ---
