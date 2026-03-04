@@ -1142,7 +1142,7 @@ jobs:
                   model=model,
                   messages=messages,
                   tools=tools,
-                  max_tokens=4096,
+                  max_tokens=16384,
               )
 
               # Track token usage
@@ -1654,7 +1654,7 @@ jobs:
                   model=model,
                   messages=messages,
                   tools=tools,
-                  max_tokens=4096,
+                  max_tokens=16384,
               )
 
               # Track token usage
