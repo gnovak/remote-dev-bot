@@ -310,6 +310,24 @@ gh issue comment "$timeout_issue_num" --repo "$TEST_REPO" \
 TIMEOUT_RUN_ID=""
 TIMEOUT_RESULT=""
 
+# --- Trigger wrapup test ---
+# Verifies that approaching max_iterations triggers graceful wrapup instructions.
+log "Creating wrapup test issue..."
+wrapup_ts=$(date +%s)
+wrapup_title="Test: graceful wrapup (e2e-wrapup-$wrapup_ts)"
+wrapup_issue_url=$(gh issue create --repo "$TEST_REPO" \
+    --title "$wrapup_title" \
+    --body "Implement a comprehensive test suite with 20+ test cases for all Python files in this repository. Include edge cases, error paths, and integration tests.")
+wrapup_issue_num="${wrapup_issue_url##*/}"
+cleanup_issues+=("$wrapup_issue_num")
+
+log "  Issue #$wrapup_issue_num. Posting /agent-resolve with max_iterations = 4..."
+gh issue comment "$wrapup_issue_num" --repo "$TEST_REPO" \
+    --body $'/agent-resolve\nmax_iterations = 4'
+
+WRAPUP_RUN_ID=""
+WRAPUP_RESULT=""
+
 # Give all workflows a moment to start before polling
 log "Waiting 15s for all workflows to start..."
 sleep 15
@@ -443,6 +461,33 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
                     log "  timeout-test: $conclusion (run $run_id)"
                 else
                     log "  timeout-test: $status (run $run_id)"
+                fi
+                break
+            fi
+        done <<< "$(echo "$run_json" | jq -c '.[]')"
+    fi
+
+    # --- Poll wrapup test ---
+    if [[ -z "$WRAPUP_RESULT" ]]; then
+        all_done=false
+
+        while IFS= read -r row; do
+            [[ -z "$row" ]] && continue
+            display_title=$(echo "$row" | jq -r '.displayTitle')
+            status=$(echo "$row" | jq -r '.status')
+            conclusion=$(echo "$row" | jq -r '.conclusion')
+            run_id=$(echo "$row" | jq -r '.databaseId')
+
+            [[ "$conclusion" == "skipped" ]] && continue
+            is_baseline_id "$run_id" && continue
+
+            if [[ "$display_title" == *"e2e-wrapup-$wrapup_ts"* ]]; then
+                WRAPUP_RUN_ID="$run_id"
+                if [[ "$status" == "completed" ]]; then
+                    WRAPUP_RESULT="$conclusion"
+                    log "  wrapup-test: $conclusion (run $run_id)"
+                else
+                    log "  wrapup-test: $status (run $run_id)"
                 fi
                 break
             fi
@@ -733,73 +778,12 @@ fi
 
 printf "  %-25s %-30s issue #%-5s %s\n" "timeout" "$timeout_status" "$timeout_issue_num" "$timeout_log_url"
 
-# --- Phase 4: Graceful wrapup test ---
-# Verifies that approaching max_iterations triggers wrapup instructions.
-# Uses a low max_iterations that the agent is unlikely to complete in — the
-# workflow should still complete cleanly and post a failure comment.
-# Uses the inline max_iterations arg — this phase is dev-only.
+# --- Graceful wrapup test result ---
+log ""
+log "--- Graceful Wrapup Test ---"
 
 WRAPUP_PHASE_PASS=0
 WRAPUP_PHASE_FAIL=0
-
-log ""
-log "Phase 4: Graceful wrapup test — verifying wrapup at iteration budget"
-
-wrapup_ts=$(date +%s)
-wrapup_title="Test: graceful wrapup (e2e-wrapup-$wrapup_ts)"
-wrapup_issue_url=$(gh issue create --repo "$TEST_REPO" \
-    --title "$wrapup_title" \
-    --body "Implement a comprehensive test suite with 20+ test cases for all Python files in this repository. Include edge cases, error paths, and integration tests.")
-wrapup_issue_num="${wrapup_issue_url##*/}"
-cleanup_issues+=("$wrapup_issue_num")
-
-log "  Issue #$wrapup_issue_num. Posting /agent-resolve with max_iterations = 4..."
-gh issue comment "$wrapup_issue_num" --repo "$TEST_REPO" \
-    --body $'/agent-resolve\nmax_iterations = 4'
-
-log "  Waiting 15s for workflow to start..."
-sleep 15
-
-WRAPUP_RUN_ID=""
-WRAPUP_RESULT=""
-WRAPUP_WAIT=1200  # 20 minutes
-wrapup_elapsed=0
-
-while [[ $wrapup_elapsed -lt $WRAPUP_WAIT ]]; do
-    run_json=$(gh run list --repo "$TEST_REPO" \
-        --limit 50 \
-        --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
-
-    while IFS= read -r row; do
-        [[ -z "$row" ]] && continue
-        display_title=$(echo "$row" | jq -r '.displayTitle')
-        status=$(echo "$row" | jq -r '.status')
-        conclusion=$(echo "$row" | jq -r '.conclusion')
-        run_id=$(echo "$row" | jq -r '.databaseId')
-        [[ "$conclusion" == "skipped" ]] && continue
-
-        if [[ "$display_title" == *"e2e-wrapup-$wrapup_ts"* ]]; then
-            WRAPUP_RUN_ID="$run_id"
-            if [[ "$status" == "completed" ]]; then
-                WRAPUP_RESULT="$conclusion"
-                log "  wrapup-test: $conclusion (run $run_id)"
-            else
-                log "  wrapup-test: $status (run $run_id)"
-            fi
-            break
-        fi
-    done <<< "$(echo "$run_json" | jq -c '.[]')"
-
-    [[ -n "$WRAPUP_RESULT" ]] && break
-    log "  Waiting... (${wrapup_elapsed}s elapsed)"
-    sleep 60
-    wrapup_elapsed=$((wrapup_elapsed + 60))
-done
-
-log ""
-log "========================================="
-log "  Phase 4: Graceful Wrapup Test"
-log "========================================="
 
 wrapup_log_url=""
 [[ -n "$WRAPUP_RUN_ID" ]] && wrapup_log_url="https://github.com/$TEST_REPO/actions/runs/$WRAPUP_RUN_ID"
