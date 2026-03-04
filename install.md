@@ -425,6 +425,33 @@ gh secret list --repo {owner}/{repo}
 # Should list the secrets you just set (values are hidden)
 ```
 
+### Step 2.3.1: Create remote-dev-bot.yaml
+
+**What this does:** Sets `default_model` in your repo's config file to match
+the API key you just added. Without this step, the bot defaults to a Claude
+model — which will fail on the first run if you added a Gemini or OpenAI key
+instead.
+
+Start from the provided template, which includes commented examples of the most
+useful options:
+
+```bash
+# From within the target repo:
+curl -o remote-dev-bot.yaml \
+  https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/remote-dev-bot.yaml.template
+```
+
+Then open the file and uncomment the `default_model` line that matches your API
+key:
+
+- `default_model: claude-small` — if you added `ANTHROPIC_API_KEY`
+- `default_model: gemini-small` — if you added `GEMINI_API_KEY`
+- `default_model: gpt-small` — if you added `OPENAI_API_KEY`
+
+The rest of the file shows available options with explanations — all commented
+out, so there are no active overrides until you choose to enable them. Browse
+it to see what's configurable; you can always come back and tweak later.
+
 ### Step 2.4: Bot Identity & CI Triggering
 
 **Choose your path:**
@@ -600,10 +627,16 @@ Push to your repo:
 git push
 ```
 
-> **If `git push` fails with a scope error:** Your `gh` credential helper needs
-> `workflow` scope. Run
-> `gh auth refresh --hostname github.com --scopes workflow` then retry.
-> Alternatively, push using SSH if you have SSH keys configured.
+> **Common gotcha — `workflow` scope:** Pushing `.github/workflows/` files
+> requires the `workflow` OAuth scope, which the GitHub CLI may not request by
+> default. If `git push` fails with a permission or scope error, you have two
+> options:
+>
+> - **Option 1 (recommended):** Run `gh auth refresh -s workflow` to add the
+>   scope to your existing credentials, then retry `git push`.
+> - **Option 2:** The file is already committed — just run
+>   `git push origin <branch>` directly with your regular git credentials
+>   (SSH key, credential manager, etc.) instead of going through `gh`.
 
 **Verify the workflow is recognized:**
 
@@ -616,35 +649,6 @@ _Via command line:_
 gh workflow list --repo {owner}/{repo}
 # Should show "Remote Dev Bot"
 ```
-
-<details>
-<summary><strong>Alternative: Compiled install (self-contained, pinned)</strong></summary>
-
-Instead of the shim, you can download self-contained workflow files that include
-all the logic inline. These don't auto-update — you control when to upgrade by
-downloading new releases. Useful if your organization restricts calling reusable
-workflows from external repos.
-
-```bash
-mkdir -p .github/workflows
-curl -o .github/workflows/agent-resolve.yml \
-  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent-resolve.yml
-curl -o .github/workflows/agent-design.yml \
-  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent-design.yml
-curl -o .github/workflows/agent-review.yml \
-  https://github.com/gnovak/remote-dev-bot/releases/latest/download/agent-review.yml
-```
-
-The files are configurable. Search for these markers to customize:
-
-- `MODEL_CONFIG` — change the default model or available aliases
-- `MAX_ITERATIONS` — adjust how many steps the agent can take
-- `PR_STYLE` — switch between draft and ready PRs
-- `SECURITY_GATE` — change who can trigger the agent
-
-Commit and push all three files the same way as the shim install above.
-
-</details>
 
 ---
 
@@ -698,8 +702,7 @@ gh issue comment {issue-number} --repo {owner}/{repo} --body "/agent-resolve"
 
 ```bash
 # Check the Actions tab for runs:
-gh run list --repo {owner}/{repo} --workflow=agent-resolve.yml
-# If using the shim install, use --workflow=agent.yml instead
+gh run list --repo {owner}/{repo} --workflow=agent.yml
 
 # View logs for a specific run:
 gh run view {run-id} --repo {owner}/{repo} --log

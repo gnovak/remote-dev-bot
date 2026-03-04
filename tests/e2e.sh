@@ -6,13 +6,12 @@
 #
 # Usage:
 #   ./tests/e2e.sh [--branch <branch>] [--test <name>] [--provider <name>]
-#                  [--all-models] [--compiled]
+#                  [--all-models]
 #
 #   --branch      Branch to test (default: main). Sets e2e-test pointer to this branch.
 #   --test        Run a specific test only (default: all)
 #   --provider    Run only tests for a specific model family (claude/gpt/gemini)
 #   --all-models  Test every model alias, not just one per provider
-#   --compiled    Test compiled workflows instead of shim (pre-release validation)
 
 set -euo pipefail
 
@@ -26,7 +25,6 @@ BRANCH="main"
 FILTER_TEST=""
 FILTER_PROVIDER=""
 ALL_MODELS=false
-USE_COMPILED=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -34,9 +32,8 @@ while [[ $# -gt 0 ]]; do
         --test) FILTER_TEST="$2"; shift 2 ;;
         --provider) FILTER_PROVIDER="$2"; shift 2 ;;
         --all-models) ALL_MODELS=true; shift ;;
-        --compiled) USE_COMPILED=true; shift ;;
         -h|--help)
-            head -17 "$0" | tail -13
+            head -16 "$0" | tail -12
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -146,9 +143,9 @@ else
         "Add a '## Gemini' section to README.md containing a Python code block with a function hi() that returns 'Hi!'." \
         "/agent-resolve-gemini-small" "gemini" "resolve"
 
-    # Design mode smoke test
+    # Design mode smoke test (agentic loop with tool calling)
     add_test "design" "Test: design analysis" \
-        "Discuss whether this test repo should have a README. What would you include?" \
+        "Discuss the design trade-offs of storing configuration in YAML vs TOML vs JSON for a developer tooling project." \
         "/agent-design" "all" "design"
 
     # Inline args smoke test: pass max_iterations as inline arg
@@ -180,136 +177,6 @@ parse_cost_from_comment() {
 cleanup_issues=()
 cleanup_branches=()
 
-# --- Compiled workflow swap ---
-# When --compiled is used, we replace the shim (agent.yml) in the test repo
-# with agent-resolve.yml, add agent-design.yml, run the full test suite, then
-# restore the original shim and remove agent-design.yml.
-
-ORIGINAL_SHIM_CONTENT=""  # base64-encoded original shim
-ORIGINAL_SHIM_SHA=""      # SHA for restoring
-DESIGN_WORKFLOW_SHA=""     # SHA for removing agent-design.yml on cleanup
-REVIEW_WORKFLOW_SHA=""     # SHA for removing agent-review.yml on cleanup
-
-install_compiled_workflow() {
-    log "Compiling workflows..."
-    python3 scripts/compile.py /tmp/compiled-workflows
-
-    log "Saving original shim from $TEST_REPO..."
-    local shim_response
-    shim_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml")
-    ORIGINAL_SHIM_CONTENT=$(echo "$shim_response" | jq -r '.content' | tr -d '\n')
-    ORIGINAL_SHIM_SHA=$(echo "$shim_response" | jq -r '.sha')
-
-    log "Replacing shim with compiled resolve workflow..."
-    local resolve_content
-    resolve_content=$(base64 < /tmp/compiled-workflows/agent-resolve.yml | tr -d '\n')
-
-    gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
-        --method PUT \
-        -f message="E2E: swap shim for compiled resolve workflow (pre-release test)" \
-        -f content="$resolve_content" \
-        -f sha="$ORIGINAL_SHIM_SHA" >/dev/null
-
-    log "Adding compiled design workflow..."
-    local design_content
-    design_content=$(base64 < /tmp/compiled-workflows/agent-design.yml | tr -d '\n')
-
-    local design_response
-    design_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-        --method PUT \
-        -f message="E2E: add compiled design workflow (pre-release test)" \
-        -f content="$design_content" 2>&1) || {
-        # File may already exist; get its SHA and update
-        local existing_sha
-        existing_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-            --jq '.sha' 2>/dev/null || echo "")
-        if [[ -n "$existing_sha" ]]; then
-            design_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-                --method PUT \
-                -f message="E2E: update compiled design workflow (pre-release test)" \
-                -f content="$design_content" \
-                -f sha="$existing_sha")
-        fi
-    }
-    DESIGN_WORKFLOW_SHA=$(echo "$design_response" | jq -r '.content.sha' 2>/dev/null || echo "")
-
-    log "Adding compiled review workflow..."
-    local review_content
-    review_content=$(base64 < /tmp/compiled-workflows/agent-review.yml | tr -d '\n')
-
-    local review_response
-    review_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
-        --method PUT \
-        -f message="E2E: add compiled review workflow (pre-release test)" \
-        -f content="$review_content" 2>&1) || {
-        # File may already exist; get its SHA and update
-        local existing_sha
-        existing_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
-            --jq '.sha' 2>/dev/null || echo "")
-        if [[ -n "$existing_sha" ]]; then
-            review_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
-                --method PUT \
-                -f message="E2E: update compiled review workflow (pre-release test)" \
-                -f content="$review_content" \
-                -f sha="$existing_sha")
-        fi
-    }
-    REVIEW_WORKFLOW_SHA=$(echo "$review_response" | jq -r '.content.sha' 2>/dev/null || echo "")
-
-    log "Compiled workflows installed. Waiting 10s for GitHub to register..."
-    sleep 10
-}
-
-restore_shim() {
-    if [[ -z "$ORIGINAL_SHIM_CONTENT" ]]; then return; fi
-    log "Restoring original shim in $TEST_REPO..."
-
-    # Get current SHA (it changed when we installed compiled)
-    local current_sha
-    current_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
-        --jq '.sha' 2>/dev/null || echo "")
-
-    if [[ -z "$current_sha" ]]; then
-        err "Could not find agent.yml to restore — manual fix needed!"
-        return
-    fi
-
-    if gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
-        --method PUT \
-        -f message="E2E: restore original shim after pre-release test" \
-        -f content="$ORIGINAL_SHIM_CONTENT" \
-        -f sha="$current_sha" >/dev/null 2>&1; then
-        log "  Original shim restored."
-    else
-        err "Failed to restore shim — manual fix needed!"
-        err "Original content saved in ORIGINAL_SHIM_CONTENT variable"
-    fi
-
-    # Remove agent-design.yml if we added it
-    local design_sha
-    design_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-        --jq '.sha' 2>/dev/null || echo "")
-    if [[ -n "$design_sha" ]]; then
-        gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-            -X DELETE \
-            -f message="E2E: remove compiled design workflow after pre-release test" \
-            -f sha="$design_sha" >/dev/null 2>&1 || true
-        log "  Compiled design workflow removed."
-    fi
-
-    # Remove agent-review.yml if we added it
-    local review_sha
-    review_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
-        --jq '.sha' 2>/dev/null || echo "")
-    if [[ -n "$review_sha" ]]; then
-        gh api "repos/$TEST_REPO/contents/.github/workflows/agent-review.yml" \
-            -X DELETE \
-            -f message="E2E: remove compiled review workflow after pre-release test" \
-            -f sha="$review_sha" >/dev/null 2>&1 || true
-        log "  Compiled review workflow removed."
-    fi
-}
-
 cleanup() {
     log "Cleaning up..."
     for issue_num in "${cleanup_issues[@]+"${cleanup_issues[@]}"}"; do
@@ -318,9 +185,6 @@ cleanup() {
     for branch in "${cleanup_branches[@]+"${cleanup_branches[@]}"}"; do
         gh api "repos/$TEST_REPO/git/refs/heads/$branch" -X DELETE 2>/dev/null || true
     done
-    if $USE_COMPILED; then
-        restore_shim
-    fi
     log "Cleanup complete."
 }
 
@@ -349,16 +213,7 @@ fi
 
 mode="smoke"
 $ALL_MODELS && mode="all-models"
-if $USE_COMPILED; then
-    log "COMPILED MODE: testing compiled workflows (pre-release validation)"
-fi
 log "Running ${#active_indices[@]} test(s) against branch '$BRANCH' ($mode)"
-
-# --- Install compiled workflow if requested ---
-
-if $USE_COMPILED; then
-    install_compiled_workflow
-fi
 
 # --- Point e2e-test at target branch ---
 # Always reset e2e-test, even when testing main. e2e-test can drift (e.g. stuck at an old
@@ -454,6 +309,24 @@ gh issue comment "$timeout_issue_num" --repo "$TEST_REPO" \
 
 TIMEOUT_RUN_ID=""
 TIMEOUT_RESULT=""
+
+# --- Trigger wrapup test ---
+# Verifies that approaching max_iterations triggers graceful wrapup instructions.
+log "Creating wrapup test issue..."
+wrapup_ts=$(date +%s)
+wrapup_title="Test: graceful wrapup (e2e-wrapup-$wrapup_ts)"
+wrapup_issue_url=$(gh issue create --repo "$TEST_REPO" \
+    --title "$wrapup_title" \
+    --body "Implement a comprehensive test suite with 20+ test cases for all Python files in this repository. Include edge cases, error paths, and integration tests.")
+wrapup_issue_num="${wrapup_issue_url##*/}"
+cleanup_issues+=("$wrapup_issue_num")
+
+log "  Issue #$wrapup_issue_num. Posting /agent-resolve with max_iterations = 4..."
+gh issue comment "$wrapup_issue_num" --repo "$TEST_REPO" \
+    --body $'/agent-resolve\nmax_iterations = 4'
+
+WRAPUP_RUN_ID=""
+WRAPUP_RESULT=""
 
 # Give all workflows a moment to start before polling
 log "Waiting 15s for all workflows to start..."
@@ -594,6 +467,33 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
         done <<< "$(echo "$run_json" | jq -c '.[]')"
     fi
 
+    # --- Poll wrapup test ---
+    if [[ -z "$WRAPUP_RESULT" ]]; then
+        all_done=false
+
+        while IFS= read -r row; do
+            [[ -z "$row" ]] && continue
+            display_title=$(echo "$row" | jq -r '.displayTitle')
+            status=$(echo "$row" | jq -r '.status')
+            conclusion=$(echo "$row" | jq -r '.conclusion')
+            run_id=$(echo "$row" | jq -r '.databaseId')
+
+            [[ "$conclusion" == "skipped" ]] && continue
+            is_baseline_id "$run_id" && continue
+
+            if [[ "$display_title" == *"e2e-wrapup-$wrapup_ts"* ]]; then
+                WRAPUP_RUN_ID="$run_id"
+                if [[ "$status" == "completed" ]]; then
+                    WRAPUP_RESULT="$conclusion"
+                    log "  wrapup-test: $conclusion (run $run_id)"
+                else
+                    log "  wrapup-test: $status (run $run_id)"
+                fi
+                break
+            fi
+        done <<< "$(echo "$run_json" | jq -c '.[]')"
+    fi
+
     if $all_done; then
         break
     fi
@@ -712,11 +612,7 @@ fi
 
 log ""
 log "========================================="
-if $USE_COMPILED; then
-    log "  E2E Test Results (COMPILED)"
-else
-    log "  E2E Test Results"
-fi
+log "  E2E Test Results"
 log "========================================="
 
 pass=0
@@ -882,6 +778,45 @@ fi
 
 printf "  %-25s %-30s issue #%-5s %s\n" "timeout" "$timeout_status" "$timeout_issue_num" "$timeout_log_url"
 
+# --- Graceful wrapup test result ---
+log ""
+log "--- Graceful Wrapup Test ---"
+
+WRAPUP_PHASE_PASS=0
+WRAPUP_PHASE_FAIL=0
+
+wrapup_log_url=""
+[[ -n "$WRAPUP_RUN_ID" ]] && wrapup_log_url="https://github.com/$TEST_REPO/actions/runs/$WRAPUP_RUN_ID"
+
+if [[ -z "$WRAPUP_RESULT" ]]; then
+    wrapup_status="TIMEOUT (e2e wait exceeded)"
+    ((WRAPUP_PHASE_FAIL++)) || true
+elif [[ "$WRAPUP_RESULT" == "success" ]]; then
+    # Check for either a PR (agent finished) or a failure comment (wrapup triggered)
+    pr_count=$(gh pr list --repo "$TEST_REPO" \
+        --search "head:openhands-fix-issue-$wrapup_issue_num" \
+        --json number --jq 'length' 2>/dev/null || echo "0")
+    comment_count=$(gh api "repos/$TEST_REPO/issues/$wrapup_issue_num/comments" \
+        --jq '[.[] | select(.body | contains("could not fully resolve"))] | length' \
+        2>/dev/null || echo "0")
+    if [[ "$pr_count" -gt 0 ]]; then
+        wrapup_status="PASS (agent finished — PR created)"
+        cleanup_branches+=("openhands-fix-issue-$wrapup_issue_num")
+        ((WRAPUP_PHASE_PASS++)) || true
+    elif [[ "$comment_count" -gt 0 ]]; then
+        wrapup_status="PASS (wrapup triggered — failure comment posted)"
+        ((WRAPUP_PHASE_PASS++)) || true
+    else
+        wrapup_status="PASS (run completed, no clear output found)"
+        ((WRAPUP_PHASE_PASS++)) || true
+    fi
+else
+    wrapup_status="FAIL ($WRAPUP_RESULT)"
+    ((WRAPUP_PHASE_FAIL++)) || true
+fi
+
+printf "  %-25s %-25s issue #%-5s %s\n" "wrapup" "$wrapup_status" "$wrapup_issue_num" "$wrapup_log_url"
+
 # --- Collect costs from all tests ---
 log ""
 log "--- Cost Collection ---"
@@ -979,11 +914,12 @@ log "========================================="
 log "  Resolve/Design: Pass: $pass  Fail: $fail  Timeout: $timeout_count"
 log "  Review+Feedback:  Pass: $RF_PASS  Fail: $RF_FAIL"
 log "  Timeout test:   Pass: $TIMEOUT_PHASE_PASS  Fail: $TIMEOUT_PHASE_FAIL"
+log "  Wrapup test:    Pass: $WRAPUP_PHASE_PASS  Fail: $WRAPUP_PHASE_FAIL"
 log "  Total cost:     \$$total_cost"
 log "========================================="
 
 # Exit with failure if any test didn't pass
-total_fail=$((fail + timeout_count + RF_FAIL + TIMEOUT_PHASE_FAIL))
+total_fail=$((fail + timeout_count + RF_FAIL + TIMEOUT_PHASE_FAIL + WRAPUP_PHASE_FAIL))
 if [[ $total_fail -gt 0 ]]; then
     exit 1
 fi

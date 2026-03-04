@@ -67,7 +67,7 @@ This is where you want the AI agent to help with development.
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `.github/workflows/agent.yml`    | **Required.** The shim workflow. Triggers on `/agent-resolve`, `/agent-design`, and `/agent-review` comments and calls `remote-dev-bot.yml` from remote-dev-bot. This is the only workflow file you need.                                                    |
 | `remote-dev-bot.yaml`            | **Optional.** Override config. Add model aliases, change settings, or override defaults for this specific repo. Merged on top of the base config.                                                                                                            |
-| `.openhands/microagents/repo.md` | **Optional.** Context for the AI agent. Describe your codebase, coding conventions, test commands, architecture — anything the agent should know. You can also use `AGENTS.md` or `CLAUDE.md` and add them to `context_files` in your `remote-dev-bot.yaml`. |
+| `.openhands/microagents/repo.md` | **Optional.** Context for the AI agent. Describe your codebase, coding conventions, test commands, architecture — anything the agent should know. You can also use `AGENTS.md` or `CLAUDE.md` and add them to `extra_files` in your `remote-dev-bot.yaml`. |
 
 **Repository Secrets (required):**
 
@@ -127,12 +127,13 @@ User comments /agent-resolve-claude-large
 
 ## Config Layering
 
-Configuration is merged across two layers (each is optional, deeper layers win):
+Configuration is merged across three layers (each is optional, deeper layers win):
 
-| Layer    | File                  | Where it lives                                    |
-| -------- | --------------------- | ------------------------------------------------- |
-| Base     | `remote-dev-bot.yaml` | remote-dev-bot repo (fetched via sparse-checkout) |
-| Override | `remote-dev-bot.yaml` | target repo root                                  |
+| Layer    | File                          | Where it lives                                    |
+| -------- | ----------------------------- | ------------------------------------------------- |
+| Base     | `remote-dev-bot.yaml`         | remote-dev-bot repo (fetched via sparse-checkout) |
+| Override | `remote-dev-bot.yaml`         | target repo root                                  |
+| Local    | `remote-dev-bot.local.yaml`   | target repo root (gitignored, for local overrides)|
 
 Example:
 
@@ -154,6 +155,11 @@ Result: `default_model: claude-large`, `max_iterations: 30`, `pr_type: ready`
 
 Merges are deep (leaf-level): overriding `openhands.max_iterations` does not
 clobber other `openhands` fields.
+
+**`extra_files` is additive across all layers**, not last-wins. Files from
+the base config are always included; each deeper layer appends to that list
+(duplicates are dropped). This prevents accidentally losing system-default
+context files when a user adds their own entries.
 
 This lets you:
 
@@ -178,7 +184,7 @@ the command in their GitHub comment:
 /agent-resolve
 max iterations = 75
 target branch = my-feature
-context_files = docs/architecture.md extra-context.md
+extra_files = docs/architecture.md extra-context.md
 ```
 
 **How it works:**
@@ -196,7 +202,7 @@ context_files = docs/architecture.md extra-context.md
 | `max_iterations`  | `openhands.max_iterations`  | Override iteration limit for this run                                 |
 | `target_branch`   | `openhands.target_branch`   | Override target branch for this run                                   |
 | `timeout_minutes` | `openhands.timeout_minutes` | Override watchdog timeout for this run                                |
-| `context_files`   | the mode's `context_files`  | Append extra files (space-separated) — does not replace existing list |
+| `extra_files`     | the mode's `extra_files`    | Add files (space-separated) — appended to base and config-layer lists |
 
 Unknown argument names are rejected with an error comment.
 

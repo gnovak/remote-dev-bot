@@ -25,7 +25,7 @@ and `/agent-review` comments on GitHub issues and PRs.
 **Workflows** (`.github/workflows/`):
 
 - `remote-dev-bot.yml` — the reusable workflow; all real logic; jobs: `parse`,
-  `resolve`, `design`, `review`
+  `resolve`, `design`, `review`, `explore` (`explore` is dev-only, not yet released to `main`)
 - `agent.yml` — thin shim users copy into their repos; calls
   `remote-dev-bot.yml@main`
 - `dogfood.yml` — internal shim for rdb self-dev; fires on `/dogfood` comments;

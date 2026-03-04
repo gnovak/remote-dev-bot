@@ -158,13 +158,13 @@ def test_parse_command_case_insensitive_mixed():
 def test_normalize_arg_name_spaces():
     """Spaces should be converted to underscores."""
     assert normalize_arg_name("max iterations") == "max_iterations"
-    assert normalize_arg_name("context files") == "context_files"
+    assert normalize_arg_name("extra files") == "extra_files"
 
 
 def test_normalize_arg_name_dashes():
     """Dashes should be converted to underscores."""
     assert normalize_arg_name("max-iterations") == "max_iterations"
-    assert normalize_arg_name("context-files") == "context_files"
+    assert normalize_arg_name("extra-files") == "extra_files"
 
 
 def test_normalize_arg_name_mixed():
@@ -204,22 +204,22 @@ def test_parse_args_target_branch():
     assert parse_args(["target branch = my-feature"]) == {"target_branch": "my-feature"}
 
 
-def test_parse_args_context_files():
-    """context_files should be parsed as list (various normalized name forms)."""
-    assert parse_args(["context_files = file1.txt file2.txt"]) == {"context_files": ["file1.txt", "file2.txt"]}
-    assert parse_args(["context files = README.md"]) == {"context_files": ["README.md"]}
-    assert parse_args(["context-files = a.txt b.txt c.txt"]) == {"context_files": ["a.txt", "b.txt", "c.txt"]}
+def test_parse_args_extra_files():
+    """extra_files should be parsed as list (various normalized name forms)."""
+    assert parse_args(["extra_files = file1.txt file2.txt"]) == {"extra_files": ["file1.txt", "file2.txt"]}
+    assert parse_args(["extra files = README.md"]) == {"extra_files": ["README.md"]}
+    assert parse_args(["extra-files = a.txt b.txt c.txt"]) == {"extra_files": ["a.txt", "b.txt", "c.txt"]}
 
 
 def test_parse_args_multiple():
     """Multiple args should all be parsed."""
     result = parse_args([
         "max iterations = 75",
-        "context_files = file1.txt file2.txt",
+        "extra_files = file1.txt file2.txt",
     ])
     assert result == {
         "max_iterations": 75,
-        "context_files": ["file1.txt", "file2.txt"],
+        "extra_files": ["file1.txt", "file2.txt"],
     }
 
 
@@ -229,12 +229,12 @@ def test_parse_args_skip_empty_lines():
         "",
         "max iterations = 75",
         "",
-        "context_files = file.txt",
+        "extra_files = file.txt",
         "",
     ])
     assert result == {
         "max_iterations": 75,
-        "context_files": ["file.txt"],
+        "extra_files": ["file.txt"],
     }
 
 
@@ -253,11 +253,11 @@ def test_parse_args_skip_lines_without_equals():
     result = parse_args([
         "max iterations = 75",
         "some random text",
-        "context_files = file.txt",
+        "extra_files = file.txt",
     ])
     assert result == {
         "max_iterations": 75,
-        "context_files": ["file.txt"],
+        "extra_files": ["file.txt"],
     }
 
 
@@ -281,8 +281,8 @@ def test_parse_args_empty_name():
 
 def test_parse_args_empty_value():
     """Lines with empty value after = should be skipped."""
-    result = parse_args(["max iterations =", "context_files = file.txt"])
-    assert result == {"context_files": ["file.txt"]}
+    result = parse_args(["max iterations =", "extra_files = file.txt"])
+    assert result == {"extra_files": ["file.txt"]}
 
 
 def test_parse_args_whitespace_only_name():
@@ -293,8 +293,8 @@ def test_parse_args_whitespace_only_name():
 
 def test_parse_args_whitespace_only_value():
     """Lines with whitespace-only value should be skipped."""
-    result = parse_args(["max iterations =   ", "context_files = file.txt"])
-    assert result == {"context_files": ["file.txt"]}
+    result = parse_args(["max iterations =   ", "extra_files = file.txt"])
+    assert result == {"extra_files": ["file.txt"]}
 
 
 
@@ -330,20 +330,20 @@ def test_parse_invocation_with_args():
 
 def test_parse_invocation_with_model_and_args():
     """Command with model and args."""
-    comment = "/agent resolve claude-large\nmax iterations = 100\ncontext_files = file.txt"
+    comment = "/agent resolve claude-large\nmax iterations = 100\nextra_files = file.txt"
     mode, alias, args = parse_invocation(comment, KNOWN_MODES)
     assert mode == "resolve"
     assert alias == "claude-large"
-    assert args == {"max_iterations": 100, "context_files": ["file.txt"]}
+    assert args == {"max_iterations": 100, "extra_files": ["file.txt"]}
 
 
 def test_parse_invocation_dash_syntax():
     """Dash syntax should work with args."""
-    comment = "/agent-design-claude-small\ncontext_files = a.txt b.txt"
+    comment = "/agent-design-claude-small\nextra_files = a.txt b.txt"
     mode, alias, args = parse_invocation(comment, KNOWN_MODES)
     assert mode == "design"
     assert alias == "claude-small"
-    assert args == {"context_files": ["a.txt", "b.txt"]}
+    assert args == {"extra_files": ["a.txt", "b.txt"]}
 
 
 def test_parse_invocation_space_syntax():
@@ -423,18 +423,18 @@ def config_dir(tmp_path):
             "design": {
                 "action": "comment",
                 "default_model": "claude-small",
-                "additional_instructions": "Focus on scalability.",
+                "extra_instructions": "Focus on scalability.",
             },
             "review": {
                 "action": "review",
                 "default_model": "claude-small",
             },
-            "explore": {
-                "action": "explore",
+            "design_agentic": {
+                "action": "design",
                 "default_model": "claude-small",
                 "max_iterations": 10,
-                "additional_instructions": "You are exploring this issue.",
-                "context_files": ["README.md", "AGENTS.md"],
+                "extra_instructions": "You are exploring this issue.",
+                "extra_files": ["README.md", "AGENTS.md"],
             },
         },
         "openhands": {
@@ -470,8 +470,8 @@ def test_resolve_config_design_mode(config_dir):
     assert result["mode"] == "design"
     assert result["action"] == "comment"
     assert result["alias"] == "claude-small"
-    assert "additional_instructions" in result
-    assert "scalability" in result["additional_instructions"]
+    assert "extra_instructions" in result
+    assert "scalability" in result["extra_instructions"]
 
 
 def test_resolve_config_design_with_model(config_dir):
@@ -498,25 +498,25 @@ def test_resolve_config_review_with_model(config_dir):
     assert result["alias"] == "claude-large"
 
 
-def test_resolve_config_explore_mode(config_dir):
+def test_resolve_config_design_agentic_mode(config_dir):
     tmp_path, base_path = config_dir
-    result = resolve_config(base_path, "nonexistent.yaml", "explore")
-    assert result["mode"] == "explore"
-    assert result["action"] == "explore"
+    result = resolve_config(base_path, "nonexistent.yaml", "design_agentic")
+    assert result["mode"] == "design_agentic"
+    assert result["action"] == "design"
     assert result["alias"] == "claude-small"
     assert result["model"] == "anthropic/claude-sonnet-4-5"
-    assert "additional_instructions" in result
-    assert "exploring" in result["additional_instructions"]
-    assert "context_files" in result
-    assert result["context_files"] == ["README.md", "AGENTS.md"]
-    assert "explore_max_iterations" in result
-    assert result["explore_max_iterations"] == 10
+    assert "extra_instructions" in result
+    assert "exploring" in result["extra_instructions"]
+    assert "extra_files" in result
+    assert result["extra_files"] == ["README.md", "AGENTS.md"]
+    assert "design_max_iterations" in result
+    assert result["design_max_iterations"] == 10
 
 
-def test_resolve_config_explore_with_model(config_dir):
+def test_resolve_config_design_agentic_with_model(config_dir):
     tmp_path, base_path = config_dir
-    result = resolve_config(base_path, "nonexistent.yaml", "explore-claude-large")
-    assert result["mode"] == "explore"
+    result = resolve_config(base_path, "nonexistent.yaml", "design_agentic-claude-large")
+    assert result["mode"] == "design_agentic"
     assert result["alias"] == "claude-large"
     assert result["model"] == "anthropic/claude-opus-4-5"
 
@@ -588,33 +588,33 @@ def test_resolve_config_mode_default_model_differs():
         os.unlink(path)
 
 
-def test_resolve_config_context_files_for_design(config_dir):
-    """Design mode should include context_files when configured."""
+def test_resolve_config_extra_files_for_design(config_dir):
+    """Design mode should include extra_files when configured."""
     tmp_path, base_path = config_dir
-    # Add context_files to the config
+    # Add extra_files to the config
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["modes"]["design"]["context_files"] = ["README.md", "AGENTS.md"]
+    config["modes"]["design"]["extra_files"] = ["README.md", "AGENTS.md"]
     with open(base_path, "w") as f:
         yaml.dump(config, f)
 
     result = resolve_config(base_path, "nonexistent.yaml", "design")
-    assert "context_files" in result
-    assert result["context_files"] == ["README.md", "AGENTS.md"]
+    assert "extra_files" in result
+    assert result["extra_files"] == ["README.md", "AGENTS.md"]
 
 
-def test_resolve_config_no_context_files_for_resolve(config_dir):
-    """Resolve mode should not have context_files."""
+def test_resolve_config_no_extra_files_for_resolve(config_dir):
+    """Resolve mode should not have extra_files."""
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
-    assert "context_files" not in result
+    assert "extra_files" not in result
 
 
-def test_resolve_config_no_additional_instructions_for_resolve(config_dir):
-    """Resolve mode should not have additional_instructions."""
+def test_resolve_config_no_extra_instructions_for_resolve(config_dir):
+    """Resolve mode should not have extra_instructions."""
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
-    assert "additional_instructions" not in result
+    assert "extra_instructions" not in result
 
 
 def test_resolve_config_openhands_defaults():
@@ -961,22 +961,23 @@ def test_resolve_config_local_none_is_noop(config_dir):
     assert result["mode"] == "resolve"
 
 
-def test_resolve_config_local_overrides_context_files(config_dir):
-    """local_path can replace design mode context_files (list replacement)."""
+def test_resolve_config_local_extra_files_appends_to_base(config_dir):
+    """local_path extra_files are appended to base extra_files, not replacing them."""
     tmp_path, base_path = config_dir
-    # Add context_files to base
+    # Add extra_files to base
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["modes"]["design"]["context_files"] = ["README.md", "AGENTS.md"]
+    config["modes"]["design"]["extra_files"] = ["README.md", "AGENTS.md"]
     with open(base_path, "w") as f:
         yaml.dump(config, f)
 
     local_path = str(tmp_path / "local.yaml")
     with open(local_path, "w") as f:
-        yaml.dump({"modes": {"design": {"context_files": ["README.md", "lib/config.py"]}}}, f)
+        yaml.dump({"modes": {"design": {"extra_files": ["README.md", "lib/config.py"]}}}, f)
 
     result = resolve_config(base_path, "nonexistent.yaml", "design", local_path=local_path)
-    assert result["context_files"] == ["README.md", "lib/config.py"]
+    # README.md deduplicated, AGENTS.md from base preserved, lib/config.py added
+    assert result["extra_files"] == ["README.md", "AGENTS.md", "lib/config.py"]
 
 
 # --- resolve_config: timeout_minutes ---
@@ -1038,25 +1039,25 @@ def test_resolve_config_args_max_iterations(config_dir):
     assert result["max_iterations"] == 75
 
 
-def test_resolve_config_args_context_files_no_mode_config(config_dir):
-    """args context_files used as-is when mode has no context_files."""
+def test_resolve_config_args_extra_files_no_mode_config(config_dir):
+    """args extra_files used as-is when mode has no extra_files."""
     tmp_path, base_path = config_dir
-    result = resolve_config(base_path, "nonexistent.yaml", "design", args={"context_files": ["custom.txt"]})
-    assert result["context_files"] == ["custom.txt"]
+    result = resolve_config(base_path, "nonexistent.yaml", "design", args={"extra_files": ["custom.txt"]})
+    assert result["extra_files"] == ["custom.txt"]
 
 
-def test_resolve_config_args_context_files_appends_to_mode_config(config_dir):
-    """args context_files should append to mode's context_files, not replace."""
+def test_resolve_config_args_extra_files_appends_to_mode_config(config_dir):
+    """args extra_files should append to mode's extra_files, not replace."""
     tmp_path, base_path = config_dir
-    # Add context_files to design mode
+    # Add extra_files to design mode
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["modes"]["design"]["context_files"] = ["README.md", "AGENTS.md"]
+    config["modes"]["design"]["extra_files"] = ["README.md", "AGENTS.md"]
     with open(base_path, "w") as f:
         yaml.dump(config, f)
 
-    result = resolve_config(base_path, "nonexistent.yaml", "design", args={"context_files": ["custom.txt"]})
-    assert result["context_files"] == ["README.md", "AGENTS.md", "custom.txt"]
+    result = resolve_config(base_path, "nonexistent.yaml", "design", args={"extra_files": ["custom.txt"]})
+    assert result["extra_files"] == ["README.md", "AGENTS.md", "custom.txt"]
 
 
 def test_resolve_config_args_target_branch(config_dir):
@@ -1125,17 +1126,17 @@ class TestConfigMain:
         assert "assign_issue=true\n" in content
         assert "assign_pr=true\n" in content
 
-    def test_resolve_omits_context_files(self, tmp_path):
-        """context_files is design-only and must not appear in resolve output."""
+    def test_resolve_omits_extra_files(self, tmp_path):
+        """extra_files is design-only and must not appear in resolve output."""
         content = self._call_main("resolve", tmp_path)
-        assert "context_files=" not in content
+        assert "extra_files=" not in content
 
-    def test_design_includes_context_files_as_json(self, tmp_path):
-        """Design mode writes context_files as a non-empty JSON array."""
+    def test_design_includes_extra_files_as_json(self, tmp_path):
+        """Design mode writes extra_files as a non-empty JSON array."""
         content = self._call_main("design", tmp_path)
-        assert "context_files=" in content
+        assert "extra_files=" in content
         for line in content.splitlines():
-            if line.startswith("context_files="):
+            if line.startswith("extra_files="):
                 files = json.loads(line.split("=", 1)[1])
                 assert isinstance(files, list) and len(files) > 0
                 break
@@ -1143,7 +1144,7 @@ class TestConfigMain:
     def test_design_mode_and_action_values(self, tmp_path):
         content = self._call_main("design", tmp_path)
         assert "mode=design\n" in content
-        assert "action=comment\n" in content
+        assert "action=design\n" in content
 
     def test_review_mode_and_action_values(self, tmp_path):
         content = self._call_main("review", tmp_path)
@@ -1226,8 +1227,8 @@ class TestConfigMain:
         assert "max_iterations=100\n" in content
 
     def test_comment_body_design_with_context_append(self, tmp_path):
-        """COMMENT_BODY appends context_files to mode's existing list."""
-        comment = "/agent design\ncontext_files = custom.txt"
+        """COMMENT_BODY appends extra_files to mode's existing list."""
+        comment = "/agent design\nextra_files = custom.txt"
         content = self._call_main_with_comment(comment, tmp_path)
         assert "mode=design\n" in content
         assert "custom.txt" in content

@@ -7,6 +7,9 @@ valuable mode of collaboration, but sometimes you want something that feels more
 like delegating work to an experienced coworker. This system aims to provide
 that alternative.
 
+> **To install, say to your AI agent:**
+> "Follow the instructions at https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/install.md to install gnovak/remote-dev-bot for use in {your-username}/{your-repo}"
+
 There are already excellent vendor-specific implementations of this pattern
 (GitHub Copilot Workspace, Cursor, etc.), so this project isn't necessarily
 better than those. However, it's intentionally cross-platform and was built as a
@@ -26,8 +29,8 @@ to design agents that can autonomously handle real development tasks.
 4. Review the PR. If changes are needed, comment `/agent-resolve` on the PR with
    feedback for another pass.
 
-Or use `/agent-design` to get AI design analysis posted as a comment (no code
-changes).
+Or use `/agent-design` to explore the codebase and get a design analysis posted
+as a comment (no code changes).
 
 Or use `/agent-review` on a pull request to get an AI code review posted as a
 comment (no code changes).
@@ -61,7 +64,7 @@ comment (no code changes).
 | ----------------------------- | ---------------------------------------------------- |
 | `/agent-resolve`              | Resolve the issue and open a PR (default model)      |
 | `/agent-resolve-claude-large` | Resolve with a specific model                        |
-| `/agent-design`               | Post design analysis as a comment (no code changes)  |
+| `/agent-design`               | Explore codebase and post a design analysis comment  |
 | `/agent-design-claude-large`  | Design analysis with a specific model                |
 | `/agent-review`               | Post a code review comment on a PR (no code changes) |
 | `/agent-review-claude-large`  | Code review with a specific model                    |
@@ -422,18 +425,3 @@ Dashboard, billing, and API key management links for each supported provider.
 - Google AI Studio is the simplest way to manage Gemini API keys. It's a
   lightweight frontend to the same API available through Google Cloud Console.
 
-## Current Status
-
-**v0.3.0** — Mode-based commands + compiled workflows (Feb 15, 2026). Three
-command modes: `/agent-resolve` (opens PR), `/agent-design` (posts analysis
-comment), and `/agent-review` (posts code review on a PR). Multi-provider
-support (Claude, GPT, Gemini). Two-file compiled install. Security guardrails
-and config layering. See [CHANGELOG.md](CHANGELOG.md) for details.
-
-**v0.2.0** — Shim + reusable workflow (Feb 11, 2026). Refactored into a thin
-shim per target repo that calls a shared reusable workflow. Cross-repo support
-tested with separate test repo.
-
-**v0.1.0** — First working version (Feb 9, 2026). End-to-end pipeline
-operational: `/agent` comment on an issue triggers OpenHands, which resolves the
-issue and opens a draft PR.
