@@ -59,6 +59,7 @@ jobs:
       pr_type: ${{ steps.parse.outputs.pr_type }}
       on_failure: ${{ steps.parse.outputs.on_failure }}
       target_branch: ${{ steps.parse.outputs.target_branch }}
+      target_branch_explicit: ${{ steps.parse.outputs.target_branch_explicit }}
       extra_files: ${{ steps.parse.outputs.extra_files }}
       commit_trailer: ${{ steps.parse.outputs.commit_trailer }}
       assign_issue: ${{ steps.parse.outputs.assign_issue }}
@@ -304,6 +305,17 @@ jobs:
           # doesn't exist at all.
           ISSUE_TYPE=${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}
 
+          # For PR triggers: record the head branch SHA before the resolver runs.
+          # Used by the "Create pull request" step to detect whether the agent
+          # pushed its own commits (and skip send_pull_request if it did).
+          if [[ "$ISSUE_TYPE" == "pr" ]]; then
+            PR_HEAD_BRANCH=$(gh pr view "$ISSUE_NUMBER" --json headRefName --jq '.headRefName')
+            SHA_BEFORE=$(gh api "repos/${{ github.repository }}/git/ref/heads/$PR_HEAD_BRANCH" \
+              --jq '.object.sha' 2>/dev/null || echo "none")
+            echo "$PR_HEAD_BRANCH" > /tmp/pr_head_branch
+            echo "$SHA_BEFORE" > /tmp/sha_before
+          fi
+
           TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
           TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
           echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
@@ -341,9 +353,36 @@ jobs:
           GIT_USERNAME: ${{ github.repository_owner }}
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-          TARGET_BRANCH=${{ github.event.pull_request.base.ref || needs.parse.outputs.target_branch || 'main' }}
+          ISSUE_TYPE=${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}
+          TARGET_BRANCH_EXPLICIT="${{ needs.parse.outputs.target_branch_explicit }}"
+          if [[ "$TARGET_BRANCH_EXPLICIT" == "true" ]]; then
+            TARGET_BRANCH="${{ needs.parse.outputs.target_branch }}"
+          elif [[ "$ISSUE_TYPE" == "pr" ]]; then
+            TARGET_BRANCH=$(gh pr view "$ISSUE_NUMBER" --json baseRefName --jq '.baseRefName')
+          else
+            TARGET_BRANCH="${{ needs.parse.outputs.target_branch || 'main' }}"
+          fi
           ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          # For PR triggers: detect whether the agent pushed its own commits.
+          # If it did, send_pull_request would fail (non-fast-forward) since the
+          # fresh clone it uses won't have those commits. Instead, write the PR URL
+          # to /tmp/spr_output.log so downstream steps (amend, model info, assign)
+          # work normally, then skip send_pull_request.
+          AGENT_PUSHED=false
+          if [[ "$ISSUE_TYPE" == "pr" ]] && [[ -f /tmp/sha_before ]]; then
+            PR_HEAD_BRANCH=$(cat /tmp/pr_head_branch)
+            SHA_BEFORE=$(cat /tmp/sha_before)
+            SHA_AFTER=$(gh api "repos/${{ github.repository }}/git/ref/heads/$PR_HEAD_BRANCH" \
+              --jq '.object.sha' 2>/dev/null || echo "none")
+            if [[ "$SHA_AFTER" != "$SHA_BEFORE" && "$SHA_BEFORE" != "none" ]]; then
+              AGENT_PUSHED=true
+              echo "https://github.com/${{ github.repository }}/pull/$ISSUE_NUMBER" \
+                > /tmp/spr_output.log
+              echo "Agent pushed to $PR_HEAD_BRANCH ($SHA_BEFORE -> $SHA_AFTER) — skipping send_pull_request"
+            fi
+          fi
 
           # Check whether the agent considered itself successful.
           # Override success=false if the agent hit max iterations (error field
@@ -422,8 +461,9 @@ jobs:
               --repo "${{ github.repository }}" \
               --body-file /tmp/failure_comment.md
 
-            # If configured, also create a draft PR with whatever the agent did
-            if [[ "$ON_FAILURE" == "draft" ]]; then
+            # If configured, also create a draft PR with whatever the agent did.
+            # Skip if the agent already pushed to the branch (work is there).
+            if [[ "$ON_FAILURE" == "draft" && "$AGENT_PUSHED" != "true" ]]; then
               python -m openhands.resolver.send_pull_request \
                 --issue-number "$ISSUE_NUMBER" \
                 --pr-type draft \
@@ -444,23 +484,27 @@ jobs:
               fi
             fi
           else
-            # Normal success path
-            python -m openhands.resolver.send_pull_request \
-              --issue-number "$ISSUE_NUMBER" \
-              --pr-type ${{ needs.parse.outputs.pr_type }} \
-              --target-branch "$TARGET_BRANCH" \
-              2>&1 | tee /tmp/spr_output.log
-            SPR_EXIT_CODE=${PIPESTATUS[0]}
-            if [[ $SPR_EXIT_CODE -ne 0 ]]; then
-              {
-                echo "### ⚠️ Agent completed but PR creation failed"
-                echo ""
-                echo "The agent finished successfully, but \`send_pull_request\` crashed (exit code ${SPR_EXIT_CODE}) before creating the pull request."
-                echo ""
-                echo "See the [workflow run logs]($RUN_URL) for the full error output."
-              } | gh issue comment "$ISSUE_NUMBER" \
-                  --repo "${{ github.repository }}" \
-                  --body-file -
+            # Normal success path — skip if the agent already pushed to the branch.
+            if [[ "$AGENT_PUSHED" == "true" ]]; then
+              echo "Agent self-pushed to PR branch — send_pull_request skipped"
+            else
+              python -m openhands.resolver.send_pull_request \
+                --issue-number "$ISSUE_NUMBER" \
+                --pr-type ${{ needs.parse.outputs.pr_type }} \
+                --target-branch "$TARGET_BRANCH" \
+                2>&1 | tee /tmp/spr_output.log
+              SPR_EXIT_CODE=${PIPESTATUS[0]}
+              if [[ $SPR_EXIT_CODE -ne 0 ]]; then
+                {
+                  echo "### ⚠️ Agent completed but PR creation failed"
+                  echo ""
+                  echo "The agent finished successfully, but \`send_pull_request\` crashed (exit code ${SPR_EXIT_CODE}) before creating the pull request."
+                  echo ""
+                  echo "See the [workflow run logs]($RUN_URL) for the full error output."
+                } | gh issue comment "$ISSUE_NUMBER" \
+                    --repo "${{ github.repository }}" \
+                    --body-file -
+              fi
             fi
           fi
 
@@ -1145,7 +1189,7 @@ jobs:
                   model=model,
                   messages=messages,
                   tools=tools,
-                  max_tokens=4096,
+                  max_tokens=16384,
               )
 
               # Track token usage
@@ -1660,7 +1704,7 @@ jobs:
                   model=model,
                   messages=messages,
                   tools=tools,
-                  max_tokens=4096,
+                  max_tokens=16384,
               )
 
               # Track token usage
