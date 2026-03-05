@@ -148,9 +148,29 @@ config layer, but there is no documented use case for this —
 | `dev`      | Long-lived integration branch, accumulates work ahead of `main`   | `dogfood.yml@dev` (rdb self-dev)         |
 | `e2e-test` | Ephemeral test pointer, reset by e2e scripts before each test run | `remote-dev-bot-test` shim               |
 
-**PRs go to `dev`, not `main`**, unless the change is a hotfix to something
-already released. When `dev` is ready to release: run the full test suite (with
-`e2e-test` pointing at `dev`), then merge `dev` → `main` and tag.
+**Pre-1.0 (current):** Two branches — `dev` and `main`. Small stable changes
+can PR directly to `main`; after merging, do a `git merge origin/main` on `dev`
+(trivial fast-forward since `dev` is a superset of `main`). Larger or
+experimental changes PR to `dev` and promote to `main` when baked. Accept
+occasional breakage on `main` — the cost of a broken main is low before there
+are real users, and the cost of extra process is paid every day.
+
+**Post-1.0:** Graduate to three branches:
+
+| Branch     | Role                                                               |
+| ---------- | ------------------------------------------------------------------ |
+| `dev`      | Experimental / long-baking features                                |
+| `staging`  | Release candidates — batches from `dev` ready for a QA pass       |
+| `main`     | Live, protected — only ever receives merges from `staging`         |
+
+The QA gate lives between `staging` and `main`. `dev` → `staging` is
+free-flowing; `staging` → `main` is the deliberate go/no-go moment. For this
+project "QA" means running `e2e.sh` and spot-checking a couple live triggers —
+roughly 20 minutes per release.
+
+Until then: **PRs go to `dev`** (or directly to `main` for small, ready
+changes). When `dev` is ready to release: run the full test suite, then merge
+`dev` → `main` and tag.
 
 ### Dogfood shim (`dogfood.yml`)
 

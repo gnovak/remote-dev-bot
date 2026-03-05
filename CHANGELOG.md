@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.5.0 — Better design and review, additive config (Mar 3, 2026)
+
+### Improvements
+
+- **`/agent-design` now uses a multi-iteration agentic loop**: Previously
+  design analysis was a single LLM call with a static repo listing. Now the
+  agent can read files and explore the codebase across multiple iterations
+  before posting its analysis — the same capability as `/agent-resolve`, but
+  read-only. Expect noticeably richer, more grounded design comments.
+- **`/agent-review` replaced with a direct LiteLLM loop**: The previous
+  implementation ran OpenHands to perform code review, which was slow and
+  unreliable. The new implementation drives the review directly via LiteLLM
+  with the same multi-iteration agentic loop, making review faster and more
+  consistent.
+- **`extra_files` is additive across all config layers**: Files listed in the
+  base config (e.g., `AGENTS.md`, `CLAUDE.md`) are always included; each
+  deeper config layer appends rather than replaces. You can add your own
+  `extra_files` entries without losing system defaults.
+- **`extra_instructions` appends, not replaces**: Per-mode `extra_instructions`
+  in your `remote-dev-bot.yaml` are appended to the canonical system prompt
+  rather than replacing it. The agent's core instructions are always preserved.
+- **Graceful wrapup**: The agent receives an iteration budget hint and is
+  prompted to commit partial work and call `finish()` before hitting the limit,
+  rather than stopping mid-task with nothing committed.
+- **Helpful API key error**: When a required API key secret is missing, the bot
+  posts a comment explaining which secret to add and how.
+- `install.md` updated with a cleaner install flow and a
+  `remote-dev-bot.yaml.template` starter config.
+- Cost summary shows "API Calls" (not "Iterations") when metrics come from
+  LiteLLM rather than OpenHands, to reflect the data source accurately.
+- Agent process crashes (e.g., `send_pull_request` failure) are now detected
+  and reported distinctly from normal agent failure.
+
+### Breaking changes
+
+- **`context_files` renamed to `extra_files`**: Update your
+  `remote-dev-bot.yaml` if you used `context_files` under `modes.resolve` or
+  `modes.design`. The old key is no longer recognized.
+- **`additional_instructions` renamed to `extra_instructions`**: Update your
+  config if you used `additional_instructions`. The old key is no longer
+  recognized.
+- **Compiled workflows removed**: The `dist/` compiled workflows are no longer
+  built or distributed. All users should use the shim install (see
+  `install.md`).
+
 ## v0.4.0 — Review mode, inline args, and reliability (Feb 28, 2026)
 
 ### New features

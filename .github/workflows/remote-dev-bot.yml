@@ -1030,6 +1030,9 @@ jobs:
               "\n\nCRITICAL: Do NOT modify any files. Do NOT make git commits. "
               "Do NOT begin your response with a slash command like /agent. "
               "Your only output is the review submitted via submit_review."
+              "\n\nLength: your review will be posted as a GitHub comment. "
+              "Write a complete, self-contained review — do not truncate or trail off mid-sentence. "
+              "If you need to be selective, prioritize the most important points over exhaustive coverage."
           )
 
           if extra_instructions:
@@ -1537,6 +1540,9 @@ jobs:
               "Use these tools to gather the information you need before providing your analysis. "
               "When you have enough information, call submit_analysis with your final analysis. "
               "Never begin your response with a slash command like /agent."
+              "\n\nLength: your analysis will be posted as a GitHub comment. "
+              "Write a complete, self-contained analysis — do not truncate or trail off mid-sentence. "
+              "If you need to be selective, prioritize the most important points over exhaustive coverage."
           )
 
           if extra_instructions:
