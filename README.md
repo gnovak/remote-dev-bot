@@ -21,8 +21,8 @@ to design agents that can autonomously handle real development tasks.
 1. Create a GitHub issue describing a feature or bug
 2. Comment `/agent-resolve` (or `/agent-resolve-claude-large`, etc.) to trigger
    implementation
-3. A GitHub Action spins up an AI agent (powered by
-   [OpenHands](https://github.com/OpenHands/OpenHands)) that:
+3. A GitHub Action spins up an AI agent that runs a custom LiteLLM agent loop
+   that:
    - Reads the issue and codebase
    - Implements the requested changes
    - Opens a draft PR
@@ -83,7 +83,7 @@ the command:
 ```
 /agent resolve
 max iterations = 75
-target branch = feature/my-branch
+branch = feature/my-branch
 context = extra-context.md
 ```
 
@@ -91,7 +91,7 @@ context = extra-context.md
 | ----------------- | ------- | ---------------------------------------------------------------- |
 | `max iterations`  | integer | Override the iteration limit for this run                        |
 | `timeout minutes` | integer | Override the watchdog timeout in minutes for this run            |
-| `target branch`   | string  | Target branch for the PR (default: `main`)                       |
+| `branch`          | string  | Target branch for the PR (default: `main`)                       |
 | `context`         | list    | Additional context files for the agent to read (space-separated) |
 
 Argument names are flexible: `max iterations`, `max-iterations`, and
@@ -100,8 +100,8 @@ Argument names are flexible: `max iterations`, `max-iterations`, and
 ### Understanding Model Names
 
 Model aliases (like `claude-small`) map to **LiteLLM model identifiers** in
-`remote-dev-bot.yaml`. LiteLLM is the library OpenHands uses to talk to
-different LLM providers through a unified interface.
+`remote-dev-bot.yaml`. Remote Dev Bot uses LiteLLM to talk to different LLM
+providers through a unified interface.
 
 **Model ID format:** `provider/model-name`
 
@@ -139,7 +139,7 @@ the full list of supported providers and their model prefixes.
 
 ### Finding Valid Model Names
 
-OpenHands uses LiteLLM, so the model strings must be valid LiteLLM identifiers.
+The model strings must be valid LiteLLM identifiers.
 Browse available models at **[models.litellm.ai](https://models.litellm.ai)** —
 search by name, filter by provider, and see context windows and pricing.
 
@@ -161,20 +161,23 @@ perform better on implementation tasks.
 
 ### Commit Trailers
 
-By default, each OpenHands commit includes a trailer identifying the model used:
+By default, each agent commit includes a trailer identifying the model used:
 
 ```
-Model: claude-large (anthropic/claude-opus-4-5), openhands-ai v1.4.0
+Model: claude-large (anthropic/claude-opus-4-5)
 ```
 
-This is appended by amending the commit after `send_pull_request` pushes it,
-which causes a force-push event visible in the PR timeline. To disable this (no
+This is appended by amending the commit after the PR branch is pushed, which
+causes a force-push event visible in the PR timeline. To disable this (no
 trailer, no force push), set `commit_trailer` to empty in your
 `remote-dev-bot.yaml`:
 
 ```yaml
 commit_trailer: ""
 ```
+
+Supported variables in the `commit_trailer` template: `{model_alias}` and
+`{model_id}`.
 
 ## Architecture
 
@@ -186,10 +189,10 @@ The system has two parts:
 - **Reusable workflow** (`.github/workflows/remote-dev-bot.yml`) — all the
   logic: parses commands, dispatches to resolve, design, or review mode, runs
   the agent. Lives in this repo and is called by shims in target repos.
-- **OpenHands** — the AI agent framework that does the actual code exploration
-  and editing
-- **`remote-dev-bot.yaml`** — model aliases and OpenHands settings (version, max
-  iterations, PR type)
+- **LiteLLM agent loop** (`lib/resolve.py`) — the custom agent that does the
+  actual code exploration and editing
+- **`remote-dev-bot.yaml`** — model aliases and agent settings (max iterations,
+  PR type)
 - **`install.md`** — step-by-step setup instructions, designed to be followed by
   a human or by an AI assistant (like Claude Code)
 
@@ -211,13 +214,14 @@ bot identity (e.g., `your-app[bot]`), see the advanced auth section in
 
 ### Add Repo Context for the Agent
 
-Create `.openhands/microagents/repo.md` in your target repo with anything the
+Create an `AGENTS.md` or `CLAUDE.md` in your target repo with anything the
 agent should know about your codebase: coding conventions, architecture
-overview, how to run tests, directories to avoid, etc. The agent reads this file
-before starting work.
+overview, how to run tests, directories to avoid, etc. Add the file to
+`extra_files` in your `remote-dev-bot.yaml` so the agent reads it before
+starting work.
 
 An AI assistant can write this for you — just ask it to read your codebase and
-generate a `repo.md` describing the architecture and conventions.
+generate an `AGENTS.md` describing the architecture and conventions.
 
 ### Model Aliases
 
@@ -241,7 +245,7 @@ The agent runs for up to 50 iterations by default. Lower this for simpler repos
 (less cost, faster results) or raise it for complex tasks:
 
 ```yaml
-openhands:
+agent:
   max_iterations: 30
 ```
 
@@ -257,7 +261,7 @@ happens next:
 | `draft`             | Posts the same comment **and** opens a draft PR with whatever changes the agent made. Draft PRs cannot be merged until explicitly converted to "ready for review". |
 
 ```yaml
-openhands:
+agent:
   on_failure: draft # create a draft PR with partial changes
 ```
 
@@ -268,9 +272,9 @@ that might be accidentally merged.
 ### Other Configuration Options
 
 ```yaml
-openhands:
+agent:
   # Target branch for PRs (default: main)
-  target_branch: main
+  branch: main
 
   # Assign the triggering user to the issue when the agent starts (default: true)
   assign_issue: true
@@ -278,12 +282,12 @@ openhands:
   # Assign the triggering user to the resulting PR (default: true)
   assign_pr: true
 
-  # Watchdog timeout in minutes — kills OpenHands after this many minutes
+  # Watchdog timeout in minutes — kills the agent after this many minutes
   # so cost report and artifact upload steps still run (default: 120)
   timeout_minutes: 120
 ```
 
-You can also override `max_iterations`, `target_branch`, and `context` on a
+You can also override `max_iterations`, `branch`, and `context` on a
 per-invocation basis without editing the config file — see
 [Per-Invocation Arguments](#per-invocation-arguments).
 
@@ -329,8 +333,7 @@ Built-in mitigations:
   instructions (visible at the `SECURITY_GATE` marker) that tell the agent to
   refuse requests to exfiltrate secrets, modify CI pipelines, or take other
   unauthorized actions.
-- **OpenHands sandboxing**: The agent runs inside a container with limited
-  access to the GitHub Actions runner environment.
+- **Runner isolation**: The agent runs bash directly on the GitHub Actions runner VM. GitHub-hosted runners are ephemeral (discarded after each run) and isolated per-job. The runner environment does not persist between runs. The LLM API key is the main piece of value visible to the agent — the same would be true of any approach that must pass the key to make API calls.
 
 ### Recommendations
 
@@ -373,7 +376,7 @@ the issue description. The agent's evaluation comment will say what it attempted
 and why it stopped.
 
 To receive a draft PR with whatever partial changes the agent made, set
-`openhands.on_failure: draft` in your `remote-dev-bot.yaml` (see
+`agent.on_failure: draft` in your `remote-dev-bot.yaml` (see
 [When the Agent Can't Fully Resolve an Issue](#when-the-agent-cant-fully-resolve-an-issue)).
 
 **Diagnosing failures with an interactive agent:** The fastest way to understand

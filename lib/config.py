@@ -18,6 +18,11 @@ Arguments can be passed on subsequent lines:
 Argument names are normalized (spaces/dashes/underscores are equivalent).
 Values after = can be single values or space-separated lists.
 
+Config key notes:
+  - 'agent:' is the current config section for agent settings (formerly 'openhands:')
+  - 'branch' is the current key for target branch (formerly 'target_branch')
+  Both old keys are accepted as aliases for backward compatibility.
+
 Called by remote-dev-bot.yml at runtime and imported directly by unit tests.
 """
 
@@ -47,10 +52,12 @@ DEFAULT_TIMEOUT_MINUTES = 120
 
 # Arguments that can be overridden via inline args (lines after the command)
 ALLOWED_ARGS = {
-    "max_iterations": int,  # openhands.max_iterations
-    "timeout_minutes": int,  # openhands.timeout_minutes
-    "extra_files": list,  # mode's extra_files
-    "target_branch": str,  # openhands.target_branch
+    "max_iterations": int,   # agent.max_iterations
+    "timeout_minutes": int,  # agent.timeout_minutes
+    "extra_files": list,     # mode's extra_files
+    "branch": str,           # agent.branch (target branch for PRs)
+    # BACKCOMPAT(v0→v1, 2026-03-05): target_branch accepted as alias for branch
+    "target_branch": str,
 }
 
 
@@ -240,10 +247,10 @@ def parse_command(command_string, known_modes):
     return verb, model_alias
 
 
-def resolve_commit_trailer(template, alias, model_id, oh_version):
+def resolve_commit_trailer(template, alias, model_id):
     """Resolve template variables in commit_trailer.
 
-    Supported variables: {model_alias}, {model_id}, {oh_version}
+    Supported variables: {model_alias}, {model_id}
     Returns empty string if template is empty/None.
     """
     if not template:
@@ -251,7 +258,6 @@ def resolve_commit_trailer(template, alias, model_id, oh_version):
     return template.format(
         model_alias=alias,
         model_id=model_id,
-        oh_version=oh_version,
     )
 
 
@@ -267,7 +273,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     timeout_minutes is the per-invocation override (from --timeout-minutes argparse flag).
     args is an optional dict of command-line argument overrides (e.g. {'max_iterations': 75}).
 
-    Returns a dict with keys: mode, model, alias, max_iterations, oh_version,
+    Returns a dict with keys: mode, model, alias, max_iterations,
     pr_type, has_override, timeout_minutes, plus any mode-specific settings.
     """
     if args is None:
@@ -337,19 +343,19 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
 
     model_id = models[alias]["id"]
 
-    # Read OpenHands settings
-    oh = config.get("openhands", {})
+    # Read agent settings (formerly openhands:)
+    # BACKCOMPAT(v0→v1, 2026-03-05): accept openhands: as alias for agent:
+    oh = config.get("agent", config.get("openhands", {}))
     max_iter = oh.get("max_iterations", 50)
-    # NOTE: keep this default in sync with scripts/compile.py inline_config_parsing()
-    oh_version = oh.get("version", "1.4.0")
     pr_type = oh.get("pr_type", "ready")
     on_failure = oh.get("on_failure", "comment")
-    target_branch = oh.get("target_branch", "main")
+    # BACKCOMPAT(v0→v1, 2026-03-05): accept target_branch as alias for branch
+    target_branch = oh.get("branch", oh.get("target_branch", "main"))
     assign_issue = oh.get("assign_issue", True)
     assign_pr = oh.get("assign_pr", True)
     if on_failure not in ("comment", "draft"):
         raise ValueError(
-            f"openhands.on_failure must be 'comment' or 'draft', got: {on_failure!r}"
+            f"agent.on_failure must be 'comment' or 'draft', got: {on_failure!r}"
         )
 
     # Graceful wrap-up settings
@@ -358,7 +364,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     wrapup_threshold = graceful_wrapup.get("threshold", 0.8)
     if not (0 < wrapup_threshold <= 1):
         raise ValueError(
-            f"openhands.graceful_wrapup.threshold must be between 0 and 1, got: {wrapup_threshold}"
+            f"agent.graceful_wrapup.threshold must be between 0 and 1, got: {wrapup_threshold}"
         )
 
     # Resolve timeout: per-invocation > yaml config > hardcoded default
@@ -382,7 +388,11 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         max_iter = args["max_iterations"]
     if "timeout_minutes" in args:
         resolved_timeout = args["timeout_minutes"]
-    if "target_branch" in args:
+    if "branch" in args:
+        target_branch = args["branch"]
+        target_branch_explicit = True
+    # BACKCOMPAT(v0→v1, 2026-03-05): target_branch inline arg accepted as alias for branch
+    elif "target_branch" in args:
         target_branch = args["target_branch"]
         target_branch_explicit = True
 
@@ -395,7 +405,6 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         "model": model_id,
         "alias": alias,
         "max_iterations": max_iter,
-        "oh_version": oh_version,
         "pr_type": pr_type,
         "on_failure": on_failure,
         "target_branch": target_branch,
@@ -442,10 +451,12 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     if action == "review" and "max_iterations" in mode_config:
         result["review_max_iterations"] = mode_config["max_iterations"]
 
-    # Resolve commit_trailer template (for resolve mode) — lives under openhands:
-    commit_trailer_template = config.get("openhands", {}).get("commit_trailer", "")
+    # Resolve commit_trailer template (for resolve mode) — lives under agent:
+    # BACKCOMPAT(v0→v1, 2026-03-05): accept openhands: as alias for agent:
+    agent_cfg = config.get("agent", config.get("openhands", {}))
+    commit_trailer_template = agent_cfg.get("commit_trailer", "")
     result["commit_trailer"] = resolve_commit_trailer(
-        commit_trailer_template, alias, model_id, oh_version
+        commit_trailer_template, alias, model_id
     )
 
     return result
@@ -535,7 +546,6 @@ def main():
             f.write(f"model={result['model']}\n")
             f.write(f"alias={result['alias']}\n")
             f.write(f"max_iterations={result['max_iterations']}\n")
-            f.write(f"oh_version={result['oh_version']}\n")
             f.write(f"pr_type={result['pr_type']}\n")
             f.write(f"on_failure={result['on_failure']}\n")
             f.write(f"target_branch={result['target_branch']}\n")

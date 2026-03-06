@@ -198,8 +198,14 @@ def test_parse_args_max_iterations():
     assert parse_args(["max_iterations=50"]) == {"max_iterations": 50}
 
 
-def test_parse_args_target_branch():
-    """target_branch should be parsed as str."""
+def test_parse_args_branch():
+    """branch should be parsed as str."""
+    assert parse_args(["branch = design/gemini"]) == {"branch": "design/gemini"}
+    assert parse_args(["branch = my-feature"]) == {"branch": "my-feature"}
+
+
+def test_parse_args_target_branch_backcompat():
+    """target_branch is still accepted as a BACKCOMPAT alias for branch."""
     assert parse_args(["target_branch = design/gemini"]) == {"target_branch": "design/gemini"}
     assert parse_args(["target branch = my-feature"]) == {"target_branch": "my-feature"}
 
@@ -437,8 +443,7 @@ def config_dir(tmp_path):
                 "extra_files": ["README.md", "AGENTS.md"],
             },
         },
-        "openhands": {
-            "version": "1.4.0",
+        "agent": {
             "max_iterations": 50,
             "pr_type": "ready",
         },
@@ -547,7 +552,7 @@ def test_resolve_config_override_wins(config_dir):
         "modes": {
             "resolve": {"default_model": "gpt-small"},
         },
-        "openhands": {"max_iterations": 10},
+        "agent": {"max_iterations": 10},
     }
     with open(override_path, "w") as f:
         yaml.dump(override, f)
@@ -556,8 +561,6 @@ def test_resolve_config_override_wins(config_dir):
     assert result["alias"] == "gpt-small"
     assert result["model"] == "openai/gpt-5.1-codex-mini"
     assert result["max_iterations"] == 10
-    # Version should come from base (not overridden)
-    assert result["oh_version"] == "1.4.0"
     assert result["has_override"] is True
 
 
@@ -617,8 +620,8 @@ def test_resolve_config_no_extra_instructions_for_resolve(config_dir):
     assert "extra_instructions" not in result
 
 
-def test_resolve_config_openhands_defaults():
-    """When base config has no openhands section, defaults kick in."""
+def test_resolve_config_agent_defaults():
+    """When base config has no agent section, defaults kick in."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         yaml.dump(
             {
@@ -632,12 +635,33 @@ def test_resolve_config_openhands_defaults():
     try:
         result = resolve_config(path, "nonexistent.yaml", "resolve")
         assert result["max_iterations"] == 50
-        assert result["oh_version"] == "1.4.0"
         assert result["pr_type"] == "ready"
         assert result["on_failure"] == "comment"
         assert result["target_branch"] == "main"
         assert result["assign_issue"] is True
         assert result["assign_pr"] is True
+        assert "oh_version" not in result
+    finally:
+        os.unlink(path)
+
+
+def test_resolve_config_openhands_key_backcompat():
+    """Config using openhands: key (old name) still works — BACKCOMPAT."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(
+            {
+                "default_model": "m",
+                "models": {"m": {"id": "anthropic/test"}},
+                "modes": {"resolve": {"action": "pr"}},
+                "openhands": {"max_iterations": 42, "pr_type": "draft"},
+            },
+            f,
+        )
+        path = f.name
+    try:
+        result = resolve_config(path, "nonexistent.yaml", "resolve")
+        assert result["max_iterations"] == 42
+        assert result["pr_type"] == "draft"
     finally:
         os.unlink(path)
 
@@ -654,7 +678,7 @@ def test_resolve_config_on_failure_draft(config_dir):
     tmp_path, base_path = config_dir
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["openhands"]["on_failure"] = "draft"
+    config["agent"]["on_failure"] = "draft"
     with open(base_path, "w") as f:
         yaml.dump(config, f)
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
@@ -666,7 +690,7 @@ def test_resolve_config_on_failure_invalid(config_dir):
     tmp_path, base_path = config_dir
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["openhands"]["on_failure"] = "silently_explode"
+    config["agent"]["on_failure"] = "silently_explode"
     with open(base_path, "w") as f:
         yaml.dump(config, f)
     with pytest.raises(ValueError, match="on_failure"):
@@ -678,7 +702,7 @@ def test_resolve_config_on_failure_via_override(config_dir):
     tmp_path, base_path = config_dir
     override_path = str(tmp_path / "override.yaml")
     with open(override_path, "w") as f:
-        yaml.dump({"openhands": {"on_failure": "draft"}}, f)
+        yaml.dump({"agent": {"on_failure": "draft"}}, f)
     result = resolve_config(base_path, override_path, "resolve")
     assert result["on_failure"] == "draft"
 
@@ -690,12 +714,22 @@ def test_resolve_config_target_branch_default(config_dir):
     assert result["target_branch"] == "main"
 
 
-def test_resolve_config_target_branch_override(config_dir):
-    """target_branch can be overridden."""
+def test_resolve_config_branch_key(config_dir):
+    """branch key in agent: sets target_branch."""
     tmp_path, base_path = config_dir
     override_path = str(tmp_path / "override.yaml")
     with open(override_path, "w") as f:
-        yaml.dump({"openhands": {"target_branch": "master"}}, f)
+        yaml.dump({"agent": {"branch": "dev"}}, f)
+    result = resolve_config(base_path, override_path, "resolve")
+    assert result["target_branch"] == "dev"
+
+
+def test_resolve_config_target_branch_override_backcompat(config_dir):
+    """target_branch key in agent: still works — BACKCOMPAT."""
+    tmp_path, base_path = config_dir
+    override_path = str(tmp_path / "override.yaml")
+    with open(override_path, "w") as f:
+        yaml.dump({"agent": {"target_branch": "master"}}, f)
     result = resolve_config(base_path, override_path, "resolve")
     assert result["target_branch"] == "master"
 
@@ -712,7 +746,7 @@ def test_resolve_config_assign_issue_false(config_dir):
     tmp_path, base_path = config_dir
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["openhands"]["assign_issue"] = False
+    config["agent"]["assign_issue"] = False
     with open(base_path, "w") as f:
         yaml.dump(config, f)
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
@@ -724,7 +758,7 @@ def test_resolve_config_assign_issue_via_override(config_dir):
     tmp_path, base_path = config_dir
     override_path = str(tmp_path / "override.yaml")
     with open(override_path, "w") as f:
-        yaml.dump({"openhands": {"assign_issue": False}}, f)
+        yaml.dump({"agent": {"assign_issue": False}}, f)
     result = resolve_config(base_path, override_path, "resolve")
     assert result["assign_issue"] is False
 
@@ -741,7 +775,7 @@ def test_resolve_config_assign_pr_false(config_dir):
     tmp_path, base_path = config_dir
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["openhands"]["assign_pr"] = False
+    config["agent"]["assign_pr"] = False
     with open(base_path, "w") as f:
         yaml.dump(config, f)
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
@@ -753,7 +787,7 @@ def test_resolve_config_assign_pr_via_override(config_dir):
     tmp_path, base_path = config_dir
     override_path = str(tmp_path / "override.yaml")
     with open(override_path, "w") as f:
-        yaml.dump({"openhands": {"assign_pr": False}}, f)
+        yaml.dump({"agent": {"assign_pr": False}}, f)
     result = resolve_config(base_path, override_path, "resolve")
     assert result["assign_pr"] is False
 
@@ -792,29 +826,28 @@ def test_resolve_config_case_insensitive(config_dir):
 def test_resolve_commit_trailer_basic():
     """Basic template substitution."""
     result = resolve_commit_trailer(
-        "Model: {model_alias} ({model_id}), openhands-ai v{oh_version}",
+        "Model: {model_alias} ({model_id})",
         "claude-large",
         "anthropic/claude-opus-4-5",
-        "1.3.0",
     )
-    assert result == "Model: claude-large (anthropic/claude-opus-4-5), openhands-ai v1.3.0"
+    assert result == "Model: claude-large (anthropic/claude-opus-4-5)"
 
 
 def test_resolve_commit_trailer_empty_template():
     """Empty template returns empty string."""
-    assert resolve_commit_trailer("", "alias", "model", "1.0") == ""
-    assert resolve_commit_trailer(None, "alias", "model", "1.0") == ""
+    assert resolve_commit_trailer("", "alias", "model") == ""
+    assert resolve_commit_trailer(None, "alias", "model") == ""
 
 
 def test_resolve_commit_trailer_partial_template():
     """Template with only some variables."""
-    result = resolve_commit_trailer("Model: {model_alias}", "claude-small", "anthropic/claude-sonnet-4-5", "1.3.0")
+    result = resolve_commit_trailer("Model: {model_alias}", "claude-small", "anthropic/claude-sonnet-4-5")
     assert result == "Model: claude-small"
 
 
 def test_resolve_commit_trailer_no_variables():
     """Template with no variables."""
-    result = resolve_commit_trailer("Static trailer", "alias", "model", "1.0")
+    result = resolve_commit_trailer("Static trailer", "alias", "model")
     assert result == "Static trailer"
 
 
@@ -837,14 +870,14 @@ def test_resolve_config_commit_trailer_with_template():
                 "default_model": "m1",
                 "models": {"m1": {"id": "anthropic/test-model"}},
                 "modes": {"resolve": {"action": "pr"}},
-                "openhands": {"version": "1.3.0", "commit_trailer": "Model: {model_alias} ({model_id}), v{oh_version}"},
+                "agent": {"commit_trailer": "Model: {model_alias} ({model_id})"},
             },
             f,
         )
         path = f.name
     try:
         result = resolve_config(path, "nonexistent.yaml", "resolve")
-        assert result["commit_trailer"] == "Model: m1 (anthropic/test-model), v1.3.0"
+        assert result["commit_trailer"] == "Model: m1 (anthropic/test-model)"
     finally:
         os.unlink(path)
 
@@ -857,7 +890,7 @@ def test_resolve_config_commit_trailer_override():
                 "default_model": "m1",
                 "models": {"m1": {"id": "anthropic/test-model"}},
                 "modes": {"resolve": {"action": "pr"}},
-                "openhands": {"version": "1.3.0", "commit_trailer": "Base trailer: {model_alias}"},
+                "agent": {"commit_trailer": "Base trailer: {model_alias}"},
             },
             base_f,
         )
@@ -866,7 +899,7 @@ def test_resolve_config_commit_trailer_override():
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as override_f:
         yaml.dump(
             {
-                "openhands": {"commit_trailer": "Override trailer: {model_id}"},
+                "agent": {"commit_trailer": "Override trailer: {model_id}"},
             },
             override_f,
         )
@@ -888,7 +921,7 @@ def test_resolve_config_commit_trailer_disable_via_override():
                 "default_model": "m1",
                 "models": {"m1": {"id": "anthropic/test-model"}},
                 "modes": {"resolve": {"action": "pr"}},
-                "openhands": {"commit_trailer": "Base trailer: {model_alias}"},
+                "agent": {"commit_trailer": "Base trailer: {model_alias}"},
             },
             base_f,
         )
@@ -897,7 +930,7 @@ def test_resolve_config_commit_trailer_disable_via_override():
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as override_f:
         yaml.dump(
             {
-                "openhands": {"commit_trailer": ""},
+                "agent": {"commit_trailer": ""},
             },
             override_f,
         )
@@ -911,6 +944,26 @@ def test_resolve_config_commit_trailer_disable_via_override():
         os.unlink(override_path)
 
 
+def test_resolve_config_commit_trailer_openhands_key_backcompat():
+    """Commit trailer can still be set under openhands: key — BACKCOMPAT."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(
+            {
+                "default_model": "m1",
+                "models": {"m1": {"id": "anthropic/test-model"}},
+                "modes": {"resolve": {"action": "pr"}},
+                "openhands": {"commit_trailer": "Old key: {model_alias}"},
+            },
+            f,
+        )
+        path = f.name
+    try:
+        result = resolve_config(path, "nonexistent.yaml", "resolve")
+        assert result["commit_trailer"] == "Old key: m1"
+    finally:
+        os.unlink(path)
+
+
 # --- three-layer config (local_path) ---
 
 
@@ -921,9 +974,9 @@ def test_resolve_config_local_wins_over_override(config_dir):
     local_path = str(tmp_path / "local.yaml")
 
     with open(override_path, "w") as f:
-        yaml.dump({"openhands": {"max_iterations": 10}}, f)
+        yaml.dump({"agent": {"max_iterations": 10}}, f)
     with open(local_path, "w") as f:
-        yaml.dump({"openhands": {"max_iterations": 99}}, f)
+        yaml.dump({"agent": {"max_iterations": 99}}, f)
 
     result = resolve_config(base_path, override_path, "resolve", local_path=local_path)
     assert result["max_iterations"] == 99
@@ -935,11 +988,10 @@ def test_resolve_config_local_preserves_base_and_override(config_dir):
     local_path = str(tmp_path / "local.yaml")
 
     with open(local_path, "w") as f:
-        yaml.dump({"openhands": {"max_iterations": 5}}, f)
+        yaml.dump({"agent": {"max_iterations": 5}}, f)
 
     result = resolve_config(base_path, "nonexistent.yaml", "resolve", local_path=local_path)
     assert result["max_iterations"] == 5
-    assert result["oh_version"] == "1.4.0"   # preserved from base
     assert result["pr_type"] == "ready"       # preserved from base
 
 
@@ -952,6 +1004,7 @@ def test_resolve_config_local_missing_is_noop(config_dir):
     )
     assert result_without["max_iterations"] == result_with["max_iterations"]
     assert result_without["model"] == result_with["model"]
+    assert "oh_version" not in result_with
 
 
 def test_resolve_config_local_none_is_noop(config_dir):
@@ -995,7 +1048,7 @@ def test_resolve_config_timeout_yaml_default(config_dir):
     tmp_path, base_path = config_dir
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["openhands"]["timeout_minutes"] = 90
+    config["agent"]["timeout_minutes"] = 90
     with open(base_path, "w") as f:
         yaml.dump(config, f)
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
@@ -1007,7 +1060,7 @@ def test_resolve_config_timeout_per_invocation_overrides_yaml(config_dir):
     tmp_path, base_path = config_dir
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["openhands"]["timeout_minutes"] = 90
+    config["agent"]["timeout_minutes"] = 90
     with open(base_path, "w") as f:
         yaml.dump(config, f)
     result = resolve_config(base_path, "nonexistent.yaml", "resolve", timeout_minutes=240)
@@ -1060,11 +1113,20 @@ def test_resolve_config_args_extra_files_appends_to_mode_config(config_dir):
     assert result["extra_files"] == ["README.md", "AGENTS.md", "custom.txt"]
 
 
-def test_resolve_config_args_target_branch(config_dir):
-    """args can override target_branch."""
+def test_resolve_config_args_branch(config_dir):
+    """args can override branch (target branch)."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={"branch": "design/gemini"})
+    assert result["target_branch"] == "design/gemini"
+    assert result["target_branch_explicit"] is True
+
+
+def test_resolve_config_args_target_branch_backcompat(config_dir):
+    """args target_branch is accepted as BACKCOMPAT alias for branch."""
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={"target_branch": "design/gemini"})
     assert result["target_branch"] == "design/gemini"
+    assert result["target_branch_explicit"] is True
 
 
 def test_resolve_config_args_empty_dict(config_dir):
@@ -1110,10 +1172,12 @@ class TestConfigMain:
         content = self._call_main("resolve", tmp_path)
         for key in (
             "mode", "action", "model", "alias",
-            "max_iterations", "oh_version", "pr_type", "on_failure", "commit_trailer",
+            "max_iterations", "pr_type", "on_failure", "commit_trailer",
             "assign_issue", "assign_pr", "target_branch", "timeout_minutes",
         ):
             assert f"{key}=" in content, f"Missing key in GITHUB_OUTPUT: {key}"
+        # oh_version must NOT be written — it's been removed
+        assert "oh_version=" not in content
 
     def test_resolve_mode_and_action_values(self, tmp_path):
         content = self._call_main("resolve", tmp_path)
@@ -1267,7 +1331,7 @@ class TestConfigMain:
             "default_model": "m1",
             "models": {"m1": {"id": "anthropic/test-model"}},
             "modes": {"resolve": {"action": "pr"}},
-            "openhands": {"version": "9.9.9", "max_iterations": 7, "pr_type": "ready"},
+            "agent": {"max_iterations": 7, "pr_type": "ready"},
         }
         (base_dir / "remote-dev-bot.yaml").write_text(yaml.dump(base_config))
 
@@ -1292,5 +1356,6 @@ class TestConfigMain:
 
         content = output_file.read_text()
         assert "mode=resolve\n" in content
-        # Config was read from our custom base; version should reflect it
-        assert "oh_version=9.9.9\n" in content
+        # Config was read from our custom base; max_iterations should reflect it
+        assert "max_iterations=7\n" in content
+        assert "oh_version=" not in content
