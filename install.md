@@ -10,6 +10,15 @@ comment.
 The easiest way to install is to tell your favorite AI agent "Follow the
 runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}."
 
+> **First time?** If you'd like to see remote-dev-bot in action before
+> installing, check out [demo.md](demo.md) for annotated examples showing the
+> resolve, design, and review workflows. Then come back here to set it up on
+> your own repo.
+>
+> **For AI agents:** Before starting Phase 1, ask the user if they'd like to see
+> examples of remote-dev-bot in action. If yes, guide them through
+> [demo.md](demo.md) first, then return here to continue with installation.
+
 ---
 
 ## Overview
@@ -220,6 +229,20 @@ If all these commands succeed, your GitHub CLI is properly configured!
 ---
 
 ## Phase 2: GitHub Repository Settings
+
+> **Clarification: Claude subscription vs. API key**
+>
+> If you already use Claude (the chatbot at claude.ai) or have Claude Code
+> installed, you still need a separate API key for remote-dev-bot. Here's why:
+>
+> | What you might have             | What it gives you           | Works with remote-dev-bot? |
+> | ------------------------------- | --------------------------- | -------------------------- |
+> | Claude.ai subscription ($20/mo) | Chatbot access              | ❌ No — consumer product    |
+> | Claude Code / GitHub App        | AI coding assistant         | ❌ No — runs locally/in IDE |
+> | Anthropic API key               | Pay-per-token API access    | ✅ Yes — this is what you need |
+>
+> The API is billed separately through console.anthropic.com. New accounts
+> typically receive free credits for testing.
 
 ### Step 2.1: Enable Actions Permissions
 
@@ -740,6 +763,22 @@ gh pr list --repo {owner}/{repo}
 | `Missing Anthropic API Key` or `x-api-key header is required` | API key not reaching the workflow         | Re-check the secret value via web (`https://github.com/{owner}/{repo}/settings/secrets/actions`) |
 | `Agent reached maximum iteration`                             | Agent may be looping instead of finishing | Try a more capable model                                                                         |
 | Workflow file issue (instant failure, 0s)                     | Reusable workflow not accessible          | If using a private fork of `gnovak/remote-dev-bot` set Actions access to `user` level            |
+
+---
+
+## Next Steps
+
+Congratulations! You have a working remote-dev-bot installation.
+
+**Want guided practice?** See [onboarding.md](onboarding.md) for hands-on
+exercises that walk you through resolve, design, review, and iteration
+workflows on your own repo.
+
+**Ready to dive in?** See the [Customization section in README.md](README.md#customization)
+for adding repo context, adjusting models, and tuning settings.
+
+> **For AI agents:** Ask the user if they'd like help learning to use
+> remote-dev-bot. If yes, guide them through [onboarding.md](onboarding.md).
 
 ---
 
