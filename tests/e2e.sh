@@ -160,6 +160,35 @@ fi
 log() { echo "==> $*"; }
 err() { echo "ERROR: $*" >&2; }
 
+# Post a comment on an issue, retrying on GraphQL "Could not resolve" errors.
+# GitHub's GraphQL API can return this transiently for newly created issues due
+# to eventual consistency. Retries up to 5 times with 3-second backoff.
+post_issue_comment() {
+    local issue_num="$1"
+    local repo="$2"
+    local body="$3"
+    local max_retries=5
+    local retry_delay=3
+    local attempt=1
+    while [[ $attempt -le $max_retries ]]; do
+        if gh issue comment "$issue_num" --repo "$repo" --body "$body" 2>/tmp/e2e_comment_err; then
+            return 0
+        fi
+        if grep -q "Could not resolve" /tmp/e2e_comment_err 2>/dev/null; then
+            log "  Warning: issue #$issue_num not yet visible via GraphQL (attempt $attempt/$max_retries), retrying in ${retry_delay}s..."
+            sleep "$retry_delay"
+            attempt=$((attempt + 1))
+        else
+            # Non-transient error: propagate it
+            cat /tmp/e2e_comment_err >&2
+            return 1
+        fi
+    done
+    err "Failed to comment on issue #$issue_num after $max_retries attempts"
+    cat /tmp/e2e_comment_err >&2
+    return 1
+}
+
 # Extract cost from a Cost Summary comment body.
 # Returns the cost as a decimal string (e.g., "1.23") or "0.00" if not found.
 parse_cost_from_comment() {
@@ -279,7 +308,7 @@ for idx in "${active_indices[@]}"; do
     cleanup_issues+=("$issue_num")
 
     log "  Issue #$issue_num created. Triggering: $cmd"
-    gh issue comment "$issue_num" --repo "$TEST_REPO" --body "$cmd"
+    post_issue_comment "$issue_num" "$TEST_REPO" "$cmd"
 done
 
 # --- Create review+feedback issue and trigger resolve ---
@@ -291,7 +320,7 @@ rf_issue_url=$(gh issue create --repo "$TEST_REPO" \
 RF_ISSUE_NUM="${rf_issue_url##*/}"
 cleanup_issues+=("$RF_ISSUE_NUM")
 log "  Issue #$RF_ISSUE_NUM created. Triggering /agent-resolve..."
-gh issue comment "$RF_ISSUE_NUM" --repo "$TEST_REPO" --body "/agent-resolve"
+post_issue_comment "$RF_ISSUE_NUM" "$TEST_REPO" "/agent-resolve"
 
 # --- Trigger timeout test ---
 log "Creating timeout test issue..."
@@ -304,8 +333,7 @@ timeout_issue_num="${timeout_issue_url##*/}"
 cleanup_issues+=("$timeout_issue_num")
 
 log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout_minutes = 5..."
-gh issue comment "$timeout_issue_num" --repo "$TEST_REPO" \
-    --body $'/agent-resolve\ntimeout_minutes = 5'
+post_issue_comment "$timeout_issue_num" "$TEST_REPO" $'/agent-resolve\ntimeout_minutes = 5'
 
 TIMEOUT_RUN_ID=""
 TIMEOUT_RESULT=""
@@ -322,8 +350,7 @@ wrapup_issue_num="${wrapup_issue_url##*/}"
 cleanup_issues+=("$wrapup_issue_num")
 
 log "  Issue #$wrapup_issue_num. Posting /agent-resolve with max_iterations = 4..."
-gh issue comment "$wrapup_issue_num" --repo "$TEST_REPO" \
-    --body $'/agent-resolve\nmax_iterations = 4'
+post_issue_comment "$wrapup_issue_num" "$TEST_REPO" $'/agent-resolve\nmax_iterations = 4'
 
 WRAPUP_RUN_ID=""
 WRAPUP_RESULT=""
