@@ -102,6 +102,7 @@ class InstallReport:
     shell: str = field(default_factory=_get_default_shell)
     python_version: str = field(default_factory=_get_default_python_version)
     problems: list[InstallProblem] = field(default_factory=list)
+    conversation_summary: Optional[str] = field(default=None)
 
     def add_problem(
         self,
@@ -125,6 +126,10 @@ class InstallReport:
                 suggested_fix=suggested_fix,
             )
         )
+
+    def set_conversation_summary(self, summary: str) -> None:
+        """Attach a narrative summary of the install conversation."""
+        self.conversation_summary = summary
 
     def has_problems(self) -> bool:
         """Return True if any problems were recorded."""
@@ -223,6 +228,13 @@ def format_metoo_comment(problem: InstallProblem, env_info: dict) -> str:
     return comment
 
 
+def _append_conversation_summary(body: str, report: InstallReport) -> str:
+    """Append conversation summary to an issue body if one was recorded."""
+    if report.conversation_summary:
+        body += f"\n## Install session summary\n\n{report.conversation_summary}\n"
+    return body
+
+
 def format_summary_issue_body(report: InstallReport) -> str:
     """Format a summary issue body when too many problems occurred."""
     env_info = get_environment_info()
@@ -249,7 +261,7 @@ This install encountered {len(report.problems)} problems, suggesting a fundament
         if problem.suggested_fix:
             body += f"- **Suggested fix:** {problem.suggested_fix}\n"
 
-    return body
+    return _append_conversation_summary(body, report)
 
 
 def search_existing_issues(
@@ -426,7 +438,9 @@ def report_problems(
         else:
             # File a new issue
             title = format_issue_title(problem)
-            body = format_issue_body(problem, env_info)
+            body = _append_conversation_summary(
+                format_issue_body(problem, env_info), report
+            )
 
             if dry_run:
                 result["filed"].append({"title": title, "body": body, "dry_run": True})
