@@ -61,6 +61,28 @@ def run(cmd, *, check=True, timeout=60):
 
 # --- Branch setup ---
 
+def _find_available_branch(issue_number):
+    """Return a branch name that does not yet exist on the remote.
+
+    Starts with rdb-fix-issue-{N}; if that exists, tries -2, -3, ...
+    Checks remote via git ls-remote so we don't miss branches that were
+    created by a previous run or by a parallel agent.
+    """
+    base = f"rdb-fix-issue-{issue_number}"
+    candidate = base
+    suffix = 1
+    while True:
+        out = run(
+            f"git ls-remote --heads origin {candidate}",
+            check=False,
+            timeout=30,
+        )
+        if not out.strip():
+            return candidate
+        suffix += 1
+        candidate = f"{base}-{suffix}"
+
+
 def setup_branch():
     """Configure git and check out the working branch. Returns branch name."""
     run(f'git config user.name "{GIT_USERNAME}"')
@@ -73,10 +95,12 @@ def setup_branch():
             f"gh pr view {ISSUE_NUMBER} --json headRefName --jq '.headRefName'"
         ).strip()
     else:
-        # For issue triggers: create a new branch from TARGET_BRANCH
+        # For issue triggers: create a new branch from TARGET_BRANCH.
+        # If the base name already exists (e.g. from a previous run or a
+        # parallel agent), append -2, -3, ... until we find one that's free.
         run(f"git fetch origin {TARGET_BRANCH}", timeout=60)
         run(f"git checkout {TARGET_BRANCH}")
-        branch = f"rdb-fix-issue-{ISSUE_NUMBER}"
+        branch = _find_available_branch(ISSUE_NUMBER)
         run(f"git checkout -b {branch}")
 
     return branch
@@ -209,7 +233,7 @@ def get_issue_context():
 
 
 def get_pr_context():
-    """Fetch PR title, body, comments, and diff from GitHub API."""
+    """Fetch PR title, body, comments, reviews, inline comments, and diff."""
     pr_json = run(
         f"gh api repos/{GITHUB_REPO}/pulls/{ISSUE_NUMBER}", timeout=30
     )
@@ -219,16 +243,77 @@ def get_pr_context():
     head = data["head"]["ref"]
     base = data["base"]["ref"]
 
-    comments_json = run(
+    # Regular PR conversation comments (/issues/{N}/comments)
+    conv_json = run(
         f"gh api 'repos/{GITHUB_REPO}/issues/{ISSUE_NUMBER}/comments?per_page=100'",
         timeout=30,
     )
-    comments_data = json.loads(comments_json)
+    conv_data = json.loads(conv_json)
+
+    # Formal review submissions (/pulls/{N}/reviews) — includes APPROVE,
+    # REQUEST_CHANGES, and COMMENT reviews that may have top-level body text.
+    reviews_json = run(
+        f"gh api 'repos/{GITHUB_REPO}/pulls/{ISSUE_NUMBER}/reviews?per_page=100'",
+        timeout=30,
+    )
+    reviews_data = json.loads(reviews_json)
+
+    # Inline review comments (/pulls/{N}/comments) — comments on specific
+    # diff lines, posted as part of a review.
+    inline_json = run(
+        f"gh api 'repos/{GITHUB_REPO}/pulls/{ISSUE_NUMBER}/comments?per_page=100'",
+        timeout=30,
+    )
+    inline_data = json.loads(inline_json)
+
     comments = ""
-    for c in comments_data:
-        user = c["user"]["login"]
-        comment_body = c.get("body", "")
-        comments += f"--- @{user} ---\n{comment_body}\n\n"
+
+    # Conversation comments
+    if conv_data:
+        comments += "### Conversation Comments\n\n"
+        for c in conv_data:
+            user = c["user"]["login"]
+            comment_body = c.get("body", "")
+            comments += f"--- @{user} ---\n{comment_body}\n\n"
+
+    # Formal reviews (skip ones with no body and state COMMENTED — those are
+    # just containers for inline comments which appear separately)
+    meaningful_reviews = [
+        r for r in reviews_data
+        if r.get("body", "").strip() or r.get("state", "") in ("APPROVED", "CHANGES_REQUESTED")
+    ]
+    if meaningful_reviews:
+        comments += "### Reviews\n\n"
+        for r in meaningful_reviews:
+            user = r["user"]["login"]
+            state = r.get("state", "")
+            review_body = r.get("body", "").strip()
+            state_label = {
+                "APPROVED": "✅ Approved",
+                "CHANGES_REQUESTED": "❌ Changes requested",
+                "COMMENTED": "💬 Commented",
+                "DISMISSED": "↩️ Dismissed",
+            }.get(state, state)
+            comments += f"--- @{user} ({state_label}) ---\n"
+            if review_body:
+                comments += f"{review_body}\n"
+            comments += "\n"
+
+    # Inline review comments — group by file for readability
+    if inline_data:
+        comments += "### Inline Review Comments\n\n"
+        by_file = {}
+        for c in inline_data:
+            path = c.get("path", "(unknown file)")
+            by_file.setdefault(path, []).append(c)
+        for path, file_comments in sorted(by_file.items()):
+            comments += f"**{path}**\n"
+            for c in file_comments:
+                user = c["user"]["login"]
+                line = c.get("line") or c.get("original_line") or "?"
+                comment_body = c.get("body", "")
+                comments += f"  Line {line} — @{user}: {comment_body}\n"
+            comments += "\n"
 
     try:
         diff = run(
