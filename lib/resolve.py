@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 
+import litellm
 from litellm import completion
 
 # --- Environment ---
@@ -672,12 +673,43 @@ def main():
         last_iteration = iteration
         print(f"=== Iteration {iteration + 1}/{MAX_ITERATIONS} ===")
 
-        response = completion(
-            model=LLM_MODEL,
-            messages=messages,
-            tools=TOOLS,
-            max_tokens=16384,
-        )
+        try:
+            response = completion(
+                model=LLM_MODEL,
+                messages=messages,
+                tools=TOOLS,
+                max_tokens=16384,
+            )
+        except litellm.exceptions.APIConnectionError as exc:
+            err_msg = str(exc)
+            if "max_output_tokens" in err_msg:
+                print(f"LiteLLM APIConnectionError (max_output_tokens): {exc}")
+                write_status(
+                    False,
+                    f"Model hit output token limit at iteration {iteration + 1} — context too large",
+                )
+            else:
+                print(f"LiteLLM APIConnectionError: {exc}")
+                write_status(
+                    False,
+                    f"API connection error at iteration {iteration + 1}: {exc}",
+                )
+            break
+        except litellm.exceptions.APIError as exc:
+            err_msg = str(exc)
+            if "max_output_tokens" in err_msg:
+                print(f"LiteLLM APIError (max_output_tokens): {exc}")
+                write_status(
+                    False,
+                    f"Model hit output token limit at iteration {iteration + 1} — context too large",
+                )
+            else:
+                print(f"LiteLLM APIError: {exc}")
+                write_status(
+                    False,
+                    f"API error at iteration {iteration + 1}: {exc}",
+                )
+            break
 
         # Track token usage
         usage = getattr(response, "usage", None)

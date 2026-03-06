@@ -332,8 +332,8 @@ timeout_issue_url=$(gh issue create --repo "$TEST_REPO" \
 timeout_issue_num="${timeout_issue_url##*/}"
 cleanup_issues+=("$timeout_issue_num")
 
-log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout_minutes = 5..."
-post_issue_comment "$timeout_issue_num" "$TEST_REPO" $'/agent-resolve\ntimeout_minutes = 5'
+log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout_minutes = 1..."
+post_issue_comment "$timeout_issue_num" "$TEST_REPO" $'/agent-resolve\ntimeout_minutes = 1'
 
 TIMEOUT_RUN_ID=""
 TIMEOUT_RESULT=""
@@ -537,7 +537,11 @@ done
 if [[ "$RF_RESOLVE_RESULT" == "success" && -n "$RF_PR_NUM" ]]; then
     log ""
     log "rf-review: Posting /agent-review on PR #$RF_PR_NUM..."
-    RF_REVIEW_BASELINE=$(gh run list --repo "$TEST_REPO" --limit 50 --json databaseId \
+    # Capture baseline of existing run IDs before posting the comment, so we can
+    # identify the new run by exclusion rather than by displayTitle (which for a
+    # PR comment trigger equals the PR title, not the tagged issue title).
+    RF_REVIEW_BASELINE=$(gh run list --repo "$TEST_REPO" --limit 50 \
+        --event issue_comment --json databaseId \
         --jq '.[].databaseId' 2>/dev/null || echo "")
 
     gh pr comment "$RF_PR_NUM" --repo "$TEST_REPO" --body "/agent-review"
@@ -547,28 +551,28 @@ if [[ "$RF_RESOLVE_RESULT" == "success" && -n "$RF_PR_NUM" ]]; then
 
     while [[ $rf_review_elapsed -lt $RF_REVIEW_TIMEOUT && -z "$RF_REVIEW_RESULT" ]]; do
         rf_review_json=$(gh run list --repo "$TEST_REPO" --limit 50 \
+            --event issue_comment \
             --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
 
         while IFS= read -r row; do
             [[ -z "$row" ]] && continue
-            display_title=$(echo "$row" | jq -r '.displayTitle')
             status=$(echo "$row" | jq -r '.status')
             conclusion=$(echo "$row" | jq -r '.conclusion')
             run_id=$(echo "$row" | jq -r '.databaseId')
 
             [[ "$conclusion" == "skipped" ]] && continue
+            # Skip any run that existed before we posted /agent-review
             echo "$RF_REVIEW_BASELINE" | grep -qx "$run_id" && continue
 
-            if [[ "$display_title" == *"e2e-rv-$RF_TS"* ]]; then
-                RF_REVIEW_RUN_ID="$run_id"
-                if [[ "$status" == "completed" ]]; then
-                    RF_REVIEW_RESULT="$conclusion"
-                    log "  rf-review: $conclusion (run $run_id)"
-                else
-                    log "  rf-review: $status (run $run_id)"
-                fi
-                break
+            # This is a new issue_comment-triggered run — it must be ours
+            RF_REVIEW_RUN_ID="$run_id"
+            if [[ "$status" == "completed" ]]; then
+                RF_REVIEW_RESULT="$conclusion"
+                log "  rf-review: $conclusion (run $run_id)"
+            else
+                log "  rf-review: $status (run $run_id)"
             fi
+            break
         done <<< "$(echo "$rf_review_json" | jq -c '.[]')"
 
         if [[ -z "$RF_REVIEW_RESULT" ]]; then
