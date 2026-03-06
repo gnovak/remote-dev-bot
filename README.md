@@ -161,16 +161,14 @@ perform better on implementation tasks.
 
 ### Commit Trailers
 
-The agent signs its commits with a trailer identifying the model used:
+To have the agent sign its commits (e.g. with the model name), add an
+instruction to your `AGENTS.md`:
 
 ```
-Model: claude-large (anthropic/claude-opus-4-5)
+Sign all commits with a trailer: Model: <your model name and version>
 ```
 
-This is included directly in the commit message by the agent — no amend or
-force-push required. The instruction is part of the agent's built-in git
-instructions. You can customize or suppress it by adding instructions to your
-`AGENTS.md`.
+There is no built-in trailer — commit message format is entirely up to you.
 
 ## Architecture
 
