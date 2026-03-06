@@ -648,8 +648,9 @@ def create_pr(branch, pr_title, pr_body, draft=False):
     """Create a pull request and return its URL."""
     draft_flag = "--draft" if draft else ""
     body_file = "/tmp/rdb_pr_body.txt"
+    model_header = f"> 🤖 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n"
     with open(body_file, "w") as f:
-        f.write(pr_body or "")
+        f.write(model_header + (pr_body or ""))
     # Quote the title carefully
     safe_title = pr_title.replace('"', '\\"')
     cmd = (

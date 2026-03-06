@@ -188,17 +188,19 @@ jobs:
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body "$(cat <<EOF
-          ⚠️ **No API key configured for this model.**
+> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
 
-          The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
+⚠️ **No API key configured for this model.**
 
-          **To fix:** Add your API key as a repository secret:
-          \`\`\`bash
-          gh secret set ${secret_name} --repo ${{ github.repository }}
-          \`\`\`
-          Then re-trigger the bot by commenting the same command again.
-          EOF
-          )"
+The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
+
+**To fix:** Add your API key as a repository secret:
+\`\`\`bash
+gh secret set ${secret_name} --repo ${{ github.repository }}
+\`\`\`
+Then re-trigger the bot by commenting the same command again.
+EOF
+)"
           }
 
           if [[ "$MODEL" == anthropic/* ]]; then
@@ -297,7 +299,11 @@ jobs:
           # Read resolve status written by resolve.py
           if [[ ! -f /tmp/resolve_status.json ]]; then
             # resolve.py crashed before writing status (OOM, import error, etc.)
+            ALIAS="${{ needs.parse.outputs.alias }}"
+            MODEL="${{ needs.parse.outputs.model }}"
             {
+              echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo ""
               echo "### ⚠️ Agent process exited unexpectedly"
               echo ""
               echo "The agent process exited unexpectedly — see run logs for details."
@@ -315,7 +321,11 @@ jobs:
           EXPLANATION=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print(d.get('explanation',''))")
 
           if [[ "$SUCCESS" == "false" ]]; then
+            ALIAS="${{ needs.parse.outputs.alias }}"
+            MODEL="${{ needs.parse.outputs.model }}"
             {
+              echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo ""
               echo "### ⚠️ Agent could not fully resolve this issue"
               echo ""
               if [[ -n "$EXPLANATION" ]]; then
@@ -338,33 +348,6 @@ jobs:
           fi
           # Success case: PR was already created by resolve.py — no comment needed here
 
-
-      - name: Add model info to PR description
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-        run: |
-          # Add model attribution to the PR description for easy identification
-          # when comparing PRs from different models.
-          PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log | head -1)
-          if [ -z "$PR_URL" ]; then
-            echo "Could not find PR URL in send_pull_request output, skipping"
-            exit 0
-          fi
-          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
-          ALIAS="${{ needs.parse.outputs.alias }}"
-          MODEL="${{ needs.parse.outputs.model }}"
-
-          # Get current PR body
-          CURRENT_BODY=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json body --jq '.body')
-
-          # Prepend model info line
-          MODEL_LINE="🤖 **Model:** \`${ALIAS}\` (${MODEL})"
-          NEW_BODY="${MODEL_LINE}
-
-          ${CURRENT_BODY}"
-
-          # Update PR description
-          gh pr edit "$PR_NUMBER" --repo "${{ github.repository }}" --body "$NEW_BODY"
 
       - name: Assign triggerer to PR
         if: needs.parse.outputs.assign_pr == 'true'
@@ -412,9 +395,11 @@ jobs:
 
           # Format cost comment
           {
+            echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+            echo ""
             echo "### 💰 Cost Summary"
             echo ""
-            echo "**Model:** \`${ALIAS}\` (${MODEL})"
+            echo "**Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo "**Mode:** ${MODE}"
             echo ""
             echo "| Metric | Value |"
@@ -497,17 +482,19 @@ jobs:
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body "$(cat <<EOF
-          ⚠️ **No API key configured for this model.**
+> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
 
-          The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
+⚠️ **No API key configured for this model.**
 
-          **To fix:** Add your API key as a repository secret:
-          \`\`\`bash
-          gh secret set ${secret_name} --repo ${{ github.repository }}
-          \`\`\`
-          Then re-trigger the bot by commenting the same command again.
-          EOF
-          )"
+The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
+
+**To fix:** Add your API key as a repository secret:
+\`\`\`bash
+gh secret set ${secret_name} --repo ${{ github.repository }}
+\`\`\`
+Then re-trigger the bot by commenting the same command again.
+EOF
+)"
           }
 
           if [[ "$MODEL" == anthropic/* ]]; then
@@ -547,9 +534,13 @@ jobs:
           # Verify this is a PR (review mode only makes sense on PRs)
           IS_PR=${{ (github.event.issue.pull_request || github.event.pull_request) && 'true' || 'false' }}
           if [[ "$IS_PR" != "true" ]]; then
+            ALIAS="${{ needs.parse.outputs.alias }}"
+            MODEL="${{ needs.parse.outputs.model }}"
             gh issue comment "$PR_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "⚠️ \`/agent-review\` only works on pull requests, not issues."
+              --body "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
+
+⚠️ \`/agent-review\` only works on pull requests, not issues."
             exit 1
           fi
 
@@ -967,10 +958,12 @@ jobs:
 
           if [ -f /tmp/review_result.txt ]; then
             {
+              echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo ""
               cat /tmp/review_result.txt
               echo ""
               echo "---"
-              echo "_Code review by \`/agent-review-${ALIAS}\` (${MODEL})_"
+              echo "_Code review by \`/agent-review-${ALIAS}\` (\`${MODEL}\`)_"
             } > /tmp/review_comment.md
 
             gh pr comment "$PR_NUMBER" \
@@ -979,7 +972,9 @@ jobs:
           else
             gh pr comment "$PR_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "⚠️ **Review did not produce output.** The agent may have exhausted all iterations without calling \`submit_review\`. See the [workflow run logs]($RUN_URL) for details."
+              --body "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
+
+⚠️ **Review did not produce output.** The agent may have exhausted all iterations without calling \`submit_review\`. See the [workflow run logs]($RUN_URL) for details."
           fi
 
       - name: Post cost comment
@@ -1008,9 +1003,11 @@ jobs:
 
           # Format cost comment
           {
+            echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+            echo ""
             echo "### 💰 Cost Summary"
             echo ""
-            echo "**Model:** \`${ALIAS}\` (${MODEL})"
+            echo "**Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo "**Mode:** ${MODE}"
             echo ""
             echo "| Metric | Value |"
@@ -1088,17 +1085,19 @@ jobs:
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body "$(cat <<EOF
-          ⚠️ **No API key configured for this model.**
+> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
 
-          The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
+⚠️ **No API key configured for this model.**
 
-          **To fix:** Add your API key as a repository secret:
-          \`\`\`bash
-          gh secret set ${secret_name} --repo ${{ github.repository }}
-          \`\`\`
-          Then re-trigger the bot by commenting the same command again.
-          EOF
-          )"
+The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
+
+**To fix:** Add your API key as a repository secret:
+\`\`\`bash
+gh secret set ${secret_name} --repo ${{ github.repository }}
+\`\`\`
+Then re-trigger the bot by commenting the same command again.
+EOF
+)"
           }
 
           if [[ "$MODEL" == anthropic/* ]]; then
@@ -1489,13 +1488,17 @@ jobs:
           if [ -f /tmp/llm_blocked ]; then
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "⚠️ **Agent loop blocked!** The design analysis response contained \`/agent\` command(s) which could trigger a recursive agent loop. The response has been blocked for safety."
+              --body "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
+
+⚠️ **Agent loop blocked!** The design analysis response contained \`/agent\` command(s) which could trigger a recursive agent loop. The response has been blocked for safety."
           elif [ -f /tmp/design_analysis.txt ]; then
             {
+              echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo ""
               cat /tmp/design_analysis.txt
               echo ""
               echo "---"
-              echo "_Design analysis by \`/agent-design-${ALIAS}\` (${MODEL})_"
+              echo "_Design analysis by \`/agent-design-${ALIAS}\` (\`${MODEL}\`)_"
             } > /tmp/analysis_comment.md
 
             gh issue comment "$ISSUE_NUMBER" \
@@ -1504,7 +1507,9 @@ jobs:
           else
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "⚠️ **Exploration did not produce an analysis.** The agent may have exhausted all iterations without calling \`submit_analysis\`. See the [workflow run logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+              --body "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
+
+⚠️ **Exploration did not produce an analysis.** The agent may have exhausted all iterations without calling \`submit_analysis\`. See the [workflow run logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
           fi
 
       - name: Post cost comment
@@ -1533,9 +1538,11 @@ jobs:
 
           # Format cost comment
           {
+            echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+            echo ""
             echo "### 💰 Cost Summary"
             echo ""
-            echo "**Model:** \`${ALIAS}\` (${MODEL})"
+            echo "**Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo "**Mode:** ${MODE}"
             echo ""
             echo "| Metric | Value |"
