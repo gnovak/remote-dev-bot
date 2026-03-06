@@ -161,23 +161,14 @@ perform better on implementation tasks.
 
 ### Commit Trailers
 
-By default, each agent commit includes a trailer identifying the model used:
+To have the agent sign its commits (e.g. with the model name), add an
+instruction to your `AGENTS.md`:
 
 ```
-Model: claude-large (anthropic/claude-opus-4-5)
+Sign all commits with a trailer: Model: <your model name and version>
 ```
 
-This is appended by amending the commit after the PR branch is pushed, which
-causes a force-push event visible in the PR timeline. To disable this (no
-trailer, no force push), set `commit_trailer` to empty in your
-`remote-dev-bot.yaml`:
-
-```yaml
-commit_trailer: ""
-```
-
-Supported variables in the `commit_trailer` template: `{model_alias}` and
-`{model_id}`.
+There is no built-in trailer — commit message format is entirely up to you.
 
 ## Architecture
 

@@ -28,10 +28,22 @@
   still accepted as an alias.
 - **`oh_version` removed**: The `openhands.version` config key is ignored. Remove it
   from your config.
-- **`commit_trailer`**: If you use `{oh_version}` in your commit trailer template,
-  remove it. Supported variables are now only `{model_alias}` and `{model_id}`.
+- **`commit_trailer` removed**: The config key is gone. The agent now signs
+  commits directly via its built-in instructions — no amend or force-push.
+  Remove `commit_trailer` from your `remote-dev-bot.yaml`; customize via `AGENTS.md`.
 - **Branch naming**: Agent-created branches are now `rdb-fix-issue-{n}`. If you have
   scripts or searches expecting `openhands-fix-issue-*`, update them.
+
+## v0.6.1 — Remove commit_trailer config, fix branch collision and PR review context (Mar 2026)
+
+- **`commit_trailer` removed**: Agent signs commits directly; no amend step or
+  force-push. Remove from `remote-dev-bot.yaml`; customize via `AGENTS.md`.
+- **Branch collision fixed**: If `rdb-fix-issue-{n}` already exists (e.g. from
+  a previous run or parallel agent), the resolver now picks `rdb-fix-issue-{n}-2`,
+  `-3`, etc. Allows running multiple agents on the same issue to compare results.
+- **PR review context fixed**: Triggering `/agent-resolve` on a PR now includes
+  formal review submissions (approve/request changes) and inline review comments,
+  not just conversation comments.
 
 ## v0.5.0 — Better design and review, additive config (Mar 3, 2026)
 

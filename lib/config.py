@@ -22,6 +22,7 @@ Config key notes:
   - 'agent:' is the current config section for agent settings (formerly 'openhands:')
   - 'branch' is the current key for target branch (formerly 'target_branch')
   Both old keys are accepted as aliases for backward compatibility.
+  - 'commit_trailer' is removed; instruct the agent via AGENTS.md instead.
 
 Called by remote-dev-bot.yml at runtime and imported directly by unit tests.
 """
@@ -247,19 +248,6 @@ def parse_command(command_string, known_modes):
     return verb, model_alias
 
 
-def resolve_commit_trailer(template, alias, model_id):
-    """Resolve template variables in commit_trailer.
-
-    Supported variables: {model_alias}, {model_id}
-    Returns empty string if template is empty/None.
-    """
-    if not template:
-        return ""
-    return template.format(
-        model_alias=alias,
-        model_id=model_id,
-    )
-
 
 def resolve_config(base_path, override_path, command_string, local_path=None, timeout_minutes=None, args=None):
     """Load configs, merge, resolve mode + alias, return outputs dict.
@@ -451,14 +439,6 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     if action == "review" and "max_iterations" in mode_config:
         result["review_max_iterations"] = mode_config["max_iterations"]
 
-    # Resolve commit_trailer template (for resolve mode) — lives under agent:
-    # BACKCOMPAT(v0→v1, 2026-03-05): accept openhands: as alias for agent:
-    agent_cfg = config.get("agent", config.get("openhands", {}))
-    commit_trailer_template = agent_cfg.get("commit_trailer", "")
-    result["commit_trailer"] = resolve_commit_trailer(
-        commit_trailer_template, alias, model_id
-    )
-
     return result
 
 
@@ -560,7 +540,7 @@ def main():
                 f.write(f"design_max_iterations={result['design_max_iterations']}\n")
             if "review_max_iterations" in result:
                 f.write(f"review_max_iterations={result['review_max_iterations']}\n")
-            f.write(f"commit_trailer={result['commit_trailer']}\n")
+
             f.write(f"graceful_wrapup_enabled={str(result['graceful_wrapup_enabled']).lower()}\n")
             f.write(f"graceful_wrapup_iteration={result['graceful_wrapup_iteration']}\n")
             f.write(f"timeout_minutes={result['timeout_minutes']}\n")
