@@ -749,6 +749,26 @@ See the Customization section in `README.md` for details on adding repo context
 for the agent, adjusting model aliases, and changing iteration limits. These can
 be done any time after install — not just during initial setup.
 
+### Agent Instructions (AGENTS.md)
+
+You can add an `AGENTS.md` file to your repository to give the agent
+project-specific instructions. This is read automatically as part of the agent's
+context. Useful things to put there:
+
+- **Commit attribution**: Ask the agent to sign its commits so you can identify
+  which model made which change:
+
+  ```
+  ## Commit Attribution
+  Sign every commit with a Co-Authored-By trailer that identifies you (the
+  model) by name and version:
+
+      Co-Authored-By: <Your Model Name and Version> <noreply@your-provider.com>
+  ```
+
+- Project conventions, preferred patterns, areas to focus on
+- Instructions for how to run tests or build the project
+
 ---
 
 ## Phase 6: Report Install Feedback (Optional)

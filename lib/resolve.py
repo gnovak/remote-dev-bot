@@ -700,7 +700,7 @@ def main():
             {
                 "role": "assistant",
                 "content": message.content,
-                "tool_calls": [tc.dict() for tc in tool_calls],
+                "tool_calls": [tc.model_dump() for tc in tool_calls],
             }
         )
 
@@ -753,9 +753,14 @@ def main():
         if ISSUE_TYPE == "issue":
             print(f"Creating PR from {branch} -> {TARGET_BRANCH}...")
             draft = PR_TYPE == "draft"
-            pr_url = create_pr(branch, pr_title, pr_body, draft=draft)
-            print(f"PR created: {pr_url}")
-            write_pr_url(pr_url)
+            try:
+                pr_url = create_pr(branch, pr_title, pr_body, draft=draft)
+                print(f"PR created: {pr_url}")
+                write_pr_url(pr_url)
+            except Exception as e:
+                print(f"PR creation failed: {e}", file=sys.stderr)
+                write_status(False, f"Agent completed work but PR creation failed: {e}")
+                return
         else:
             # PR trigger: record the existing PR URL
             pr_url = f"https://github.com/{GITHUB_REPO}/pull/{ISSUE_NUMBER}"
