@@ -816,7 +816,39 @@ straightforward.
 
 **After all phases complete:**
 
-If problems were recorded, ask the user for consent before filing:
+If problems were recorded, first produce a conversation summary, then ask the
+user for consent before filing.
+
+**Conversation summary:** Write a narrative of the install session in this
+format:
+
+```
+## TL;DR
+
+One short paragraph summarizing what went wrong and what was needed to work
+around it.
+
+## Conversation Summary
+
+For each user message and your response, write:
+
+### User: <verbatim user message>
+<50 words or fewer summarizing your response and actions>
+
+## Feedback for the remote-dev-bot author
+
+What was confusing, what failed, what would have made this smoother. Be
+specific — e.g. "Step 3.2 should mention X before Y" rather than "the
+instructions were unclear."
+```
+
+Attach this summary to the report before filing:
+
+```python
+report.set_conversation_summary(summary_text)
+```
+
+Then ask the user for consent:
 
 ```python
 from lib.feedback import get_consent_prompt, report_problems
