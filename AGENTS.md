@@ -4,9 +4,9 @@ Project conventions for AI coding agents working on this repository.
 
 ## Project
 
-Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to
-resolve issues and create PRs, controlled via `/agent-resolve`, `/agent-design`,
-and `/agent-review` comments on GitHub issues and PRs.
+Remote Dev Bot — a GitHub Action that triggers an AI agent to resolve issues
+and create PRs, controlled via `/agent-resolve`, `/agent-design`, and
+`/agent-review` comments on GitHub issues and PRs.
 
 ### How It Works
 
@@ -14,9 +14,9 @@ and `/agent-review` comments on GitHub issues and PRs.
    `/agent-review[-<model>]` on a GitHub issue or PR
 2. Target repo's shim workflow calls `remote-dev-bot.yml` from this repo
 3. Reusable workflow parses the mode and model, dispatches to the right job
-4. Resolve mode: OpenHands runs, edits code, opens a PR. Design mode: LLM
-   analyzes the issue, posts a comment. Review mode: LLM reviews a PR, posts a
-   code review comment.
+4. Resolve mode: agent loop runs (`lib/resolve.py`), edits code, opens a PR.
+   Design mode: LLM analyzes the issue, posts a comment. Review mode: LLM
+   reviews a PR, posts a code review comment.
 5. Iterative: comment `/agent-resolve` again on the PR with feedback for another
    pass
 
@@ -52,8 +52,8 @@ and `/agent-review` comments on GitHub issues and PRs.
 - `test_compile.py` — tests that compiled outputs contain expected steps
 - `test_yaml.py` — structural/validity tests for YAML files (workflow and
   config)
-- `test_cost.py` — tests for the `parse_litellm_logs` Python function embedded
-  in the workflow's cost step; extracts it from the YAML at test time
+- `test_cost.py` — tests for cost parsing helpers (`parse_cost_from_comment`
+  bash function in `e2e.sh`)
 - `test_feedback.py` — unit tests for `lib/feedback.py`
 - `e2e.sh` — full E2E test runner; creates issues in `remote-dev-bot-test`,
   triggers runs, checks results
@@ -61,8 +61,8 @@ and `/agent-review` comments on GitHub issues and PRs.
 
 **Config**:
 
-- `remote-dev-bot.yaml` — model aliases and OpenHands settings (canonical
-  config; also serves as template for user repos)
+- `remote-dev-bot.yaml` — model aliases and agent settings (canonical config;
+  also serves as template for user repos)
 - `remote-dev-bot.local.yaml` — local overrides (gitignored); use for dev
   without affecting CI
 - `install.md` — setup instructions designed to be followed by humans or AI
@@ -96,7 +96,7 @@ pytest --doctest-modules lib/config.py
 
 1. Add to `ALLOWED_ARGS` in `lib/config.py` (name → type)
 2. Add handling in `resolve_config()` where other args are applied (search for
-   `if "target_branch" in args` as an example)
+   `if "branch" in args` as an example)
 3. If it produces a workflow output, add it to the `GITHUB_OUTPUT` writes in
    `main()`
 4. Add tests in `tests/test_config.py`
@@ -134,10 +134,10 @@ pytest --doctest-modules lib/config.py
 
 ### Changing the cost/metrics step
 
-The `parse_litellm_logs` Python function lives inside a bash heredoc in the
-"Calculate and post cost" step of `remote-dev-bot.yml`. `test_cost.py` extracts
-it directly from the YAML at test time, so tests always exercise the live code.
-After changing the step, run `pytest tests/test_cost.py -v`.
+The cost step in `remote-dev-bot.yml` reads `/tmp/llm_usage.json` (written by
+`lib/resolve.py` and the design/review loops) and formats a cost summary comment.
+`test_cost.py` tests the `parse_cost_from_comment` bash function in `e2e.sh`.
+After changing the cost step, run `pytest tests/test_cost.py -v`.
 
 ## Inline Args System
 
@@ -266,6 +266,19 @@ gh run view RUN_ID --repo gnovak/remote-dev-bot-test --log | tail -40
   PR and let the user merge it.
 - For small changes, a single-commit PR self-merged immediately is fine — the
   point is the artifact, not the review ceremony.
+
+## Commit Attribution
+
+Sign every commit with a `Co-Authored-By` trailer that identifies you (the
+model) by name and version:
+
+```
+Co-Authored-By: <Your Model Name and Version> <noreply@your-provider.com>
+```
+
+Fill in your actual model name, version, and your provider's noreply address.
+For example, a Gemini model might use `noreply@google.com`; an OpenAI model
+`noreply@openai.com`. Use whatever is accurate for your model.
 
 ## Code Style
 
