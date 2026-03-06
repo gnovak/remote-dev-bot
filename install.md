@@ -15,12 +15,10 @@ runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}."
 ## Overview
 
 **How the bot works:** When you comment `/agent-resolve` on an issue, a GitHub
-Actions workflow starts. It spins up
-[OpenHands](https://github.com/All-Hands-AI/OpenHands) (an open-source AI coding
-agent) in a sandboxed container, points it at your issue, and lets it work. The
-agent reads the issue, explores your codebase, writes code, runs tests, and
-iterates until it has a solution. Then it pushes a branch and opens a draft PR
-for your review. You can also use `/agent-design` for AI design analysis posted
+Actions workflow starts. It runs a custom LiteLLM agent loop, points it at your
+issue, and lets it work. The agent reads the issue, explores your codebase,
+writes code, runs tests, and iterates until it has a solution. Then it pushes a
+branch and opens a draft PR for your review. You can also use `/agent-design` for AI design analysis posted
 as a comment (no code changes), or `/agent-review` on a pull request to get an
 AI code review. Once you have human or machine generated comments and requested
 changes on the PR, you can comment '/agent-resolve' on the PR to make the
@@ -710,7 +708,7 @@ gh run view {run-id} --repo {owner}/{repo} --log
 
 A successful run typically takes 5-10 minutes. The agent will:
 
-1. Install OpenHands and dependencies (~1-2 min)
+1. Set up dependencies (~1-2 min)
 2. Read the issue and work on the solution (~3-7 min)
 3. Create a draft PR (~30 sec)
 
@@ -905,12 +903,13 @@ different repo owners. See the shim template in `.github/workflows/agent.yml`.
 ### Agent runs but skips PR creation
 
 - The log will say "Issue was not successfully resolved. Skipping PR creation."
-- This often means the agent hit max iterations — OpenHands marks this as
+- This often means the agent hit max iterations — it will mark this as
   "error" even if the code changes were correct
 - Try again with a more capable model
 
 ### Agent produces bad results
 
 - Add more context to the issue description
-- Add repo context in `.openhands/microagents/repo.md`
+- Add repo context via `AGENTS.md` or `CLAUDE.md` and include it in `extra_files`
+  in your `remote-dev-bot.yaml`
 - Comment `/agent-resolve` on the PR with specific feedback for another pass

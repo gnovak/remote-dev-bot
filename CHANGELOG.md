@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.6.0 — Remove OpenHands, custom LiteLLM agent loop (Mar 2026)
+
+### What changed
+
+- **OpenHands removed**: The resolve mode no longer uses `openhands-ai`. A custom
+  LiteLLM agent loop (`lib/resolve.py`) now handles codebase exploration, file
+  editing, committing, and PR creation directly — the same approach already used
+  by design and review modes.
+- **Branch control**: Branches are now named `rdb-fix-issue-{n}` (was
+  `openhands-fix-issue-{n}-try{n}`). For PR-comment triggers, the agent works
+  directly on the PR's existing branch rather than creating a new one.
+- **Multi-branch support**: The `branch` parameter now controls both where the
+  agent starts work and where the PR is targeted. Rename `openhands.target_branch`
+  → `agent.branch` in your config.
+- **Config key renamed**: `openhands:` → `agent:` in `remote-dev-bot.yaml`.
+  Old configs continue to work (backward compatible until v1).
+- **Security disclosure updated**: Agent runs bash directly on ephemeral GitHub
+  Actions VMs (not in a container). The security posture is equivalent — the
+  runner is isolated and discarded after each run.
+
+### Breaking changes
+
+- **Config key**: `openhands:` is now deprecated in favor of `agent:`. Both still
+  work, but update your `remote-dev-bot.yaml` to use `agent:`.
+- **`target_branch` → `branch`**: Rename in both config and inline args. `target_branch`
+  still accepted as an alias.
+- **`oh_version` removed**: The `openhands.version` config key is ignored. Remove it
+  from your config.
+- **`commit_trailer`**: If you use `{oh_version}` in your commit trailer template,
+  remove it. Supported variables are now only `{model_alias}` and `{model_id}`.
+- **Branch naming**: Agent-created branches are now `rdb-fix-issue-{n}`. If you have
+  scripts or searches expecting `openhands-fix-issue-*`, update them.
+
 ## v0.5.0 — Better design and review, additive config (Mar 3, 2026)
 
 ### Improvements

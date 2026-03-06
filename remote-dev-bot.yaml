@@ -12,18 +12,17 @@ default_model: claude-small
 # Modes define what the agent does. Each mode has an action and optional defaults.
 modes:
   resolve:
-    action: pr               # Run OpenHands, open a draft PR
+    action: pr               # Run agent loop, open a PR
   design:
     action: design            # Multi-round agentic loop with tool calling for design analysis
     default_model: claude-small
-    max_iterations: 10        # Iteration limit for the agentic loop (not OpenHands iterations)
+    max_iterations: 10        # Iteration limit for the agentic loop
     extra_files:
       - README.md
       - CONTRIBUTING.md
       - AGENTS.md
       - CLAUDE.md
       - .gemini/GEMINI.md
-      - .openhands/microagents/repo.md
       - how-it-works.md
     # Optional: extra_instructions appended to the canonical design prompt.
     # Use this to add project-specific guidance (e.g., preferred patterns,
@@ -63,16 +62,15 @@ models:
     id: gemini/gemini-2.5-pro
     description: "Google Gemini 2.5 Pro"
 
-# OpenHands settings
-openhands:
-  # Pin to a specific version to avoid regressions (check for updates periodically)
-  version: "1.4.0"
+# Agent settings (resolve mode)
+# Note: 'openhands:' is accepted as a backward-compatible alias for 'agent:'
+agent:
   # Max agent iterations per run (controls cost ceiling)
   max_iterations: 50
   # PR type: "draft" or "ready"
   pr_type: ready
-  # Target branch for PRs
-  target_branch: main
+  # Target branch for PRs created by the agent
+  branch: main
   # What to do when the agent can't fully resolve the issue (success=False):
   #   comment — post a comment with the agent's evaluation, no PR (default)
   #   draft   — post the same comment AND open a draft PR with partial changes
@@ -81,8 +79,8 @@ openhands:
   assign_issue: true
   # Assign the triggering user to the resulting PR
   assign_pr: true
-  # Watchdog timeout in minutes. The runner kills the OpenHands process after this
-  # many minutes, then cleanup steps (cost report, artifact upload) still run.
+  # Watchdog timeout in minutes. The runner kills the agent process after this
+  # many minutes, then cleanup steps (cost report) still run.
   # Override per-invocation with: timeout_minutes = 60 (inline arg in comment body)
   # Note: GitHub Actions has a hard 6-hour cap. If you need longer runs, set
   # timeout-minutes in your calling workflow's job definition.
@@ -95,9 +93,9 @@ openhands:
     # Threshold as fraction of max_iterations (0.8 = 80%)
     # At this point, the agent receives instructions to wrap up
     threshold: 0.8
-  # Commit trailer appended to OpenHands commits (resolve mode only).
-  # Supported variables: {model_alias}, {model_id}, {oh_version}
+  # Commit trailer appended to agent commits (resolve mode only).
+  # Supported variables: {model_alias}, {model_id}
   # Set to empty string to disable.
-  # Note: the amend step does `git commit --amend` after OpenHands pushes,
+  # Note: the amend step does `git commit --amend` after the agent pushes,
   # which requires a force-push to update the branch.
-  commit_trailer: "Model: {model_alias} ({model_id}), openhands-ai v{oh_version}"
+  commit_trailer: "Model: {model_alias} ({model_id})"

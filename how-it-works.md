@@ -19,7 +19,7 @@ repositories:
 │                                                                             │
 │   remote-dev-bot.yaml          ←── (Optional) Override config for this repo │
 │                                                                             │
-│   .openhands/microagents/repo.md ← (Optional) Context for the AI agent      │
+│   AGENTS.md / CLAUDE.md          ← (Optional) Context for the AI agent      │
 │                                                                             │
 │   Repository Secrets:                                                       │
 │     • ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY (at least one)     │
@@ -32,8 +32,8 @@ repositories:
 │                         REMOTE-DEV-BOT REPO                                 │
 │              (gnovak/remote-dev-bot or your org's fork)                     │
 │                                                                             │
-│   .github/workflows/remote-dev-bot.yml  ←── Reusable workflow: all the logic       │
-│                                      (model parsing, OpenHands, PR creation)│
+│   .github/workflows/remote-dev-bot.yml  ←── Reusable workflow: all the logic          │
+│                                      (model parsing, LiteLLM agent loop, PR creation)│
 │                                                                             │
 │   remote-dev-bot.yaml            ←── Base config: model aliases, settings   │
 │                                                                             │
@@ -51,8 +51,8 @@ This is the "engine" — the shared infrastructure that all target repos use.
 
 | File                                   | Purpose                                                                                                                                        |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.github/workflows/remote-dev-bot.yml` | The reusable workflow. Contains all the logic: parses model aliases, installs OpenHands, resolves issues, creates PRs. Target repos call this. |
-| `remote-dev-bot.yaml`                  | Base configuration. Defines model aliases (`claude-small`, `claude-large`, etc.) and OpenHands settings (version, max iterations, PR type).    |
+| `.github/workflows/remote-dev-bot.yml` | The reusable workflow. Contains all the logic: parses model aliases, runs the LiteLLM agent loop, resolves issues, creates PRs. Target repos call this. |
+| `remote-dev-bot.yaml`                  | Base configuration. Defines model aliases (`claude-small`, `claude-large`, etc.) and agent settings (max iterations, PR type).                         |
 | `.github/workflows/agent.yml`          | Shim workflow. Also serves as the template — copy this to target repos.                                                                        |
 | `install.md`                           | Step-by-step setup instructions for humans or AI assistants.                                                                                   |
 
@@ -66,8 +66,8 @@ This is where you want the AI agent to help with development.
 | File                             | Purpose                                                                                                                                                                                                                                                      |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `.github/workflows/agent.yml`    | **Required.** The shim workflow. Triggers on `/agent-resolve`, `/agent-design`, and `/agent-review` comments and calls `remote-dev-bot.yml` from remote-dev-bot. This is the only workflow file you need.                                                    |
-| `remote-dev-bot.yaml`            | **Optional.** Override config. Add model aliases, change settings, or override defaults for this specific repo. Merged on top of the base config.                                                                                                            |
-| `.openhands/microagents/repo.md` | **Optional.** Context for the AI agent. Describe your codebase, coding conventions, test commands, architecture — anything the agent should know. You can also use `AGENTS.md` or `CLAUDE.md` and add them to `extra_files` in your `remote-dev-bot.yaml`. |
+| `remote-dev-bot.yaml`            | **Optional.** Override config. Add model aliases, change settings, or override defaults for this specific repo. Merged on top of the base config.                                                                                                                                      |
+| `AGENTS.md` / `CLAUDE.md`        | **Optional.** Context for the AI agent. Describe your codebase, coding conventions, test commands, architecture — anything the agent should know. Add them to `extra_files` in your `remote-dev-bot.yaml` so the agent reads them before starting work. |
 
 **Repository Secrets (required):**
 
@@ -97,8 +97,8 @@ When someone comments `/agent-resolve-claude-large` on an issue:
    like `anthropic/claude-opus-4-5`
 6. **Feedback** — A rocket emoji is added to your comment and you're assigned to
    the issue, so you can see at a glance which issues have active work
-7. **Agent runs** — OpenHands reads the issue, explores the codebase, makes
-   changes
+7. **Agent runs** — LiteLLM agent loop (resolve.py) reads the issue, explores
+   the codebase, makes changes
 8. **PR created** — A draft (or ready) PR is opened with the changes
 
 ```
@@ -117,7 +117,7 @@ User comments /agent-resolve-claude-large
 │ remote-dev-bot.yml runs    │
 │   • checkout config │
 │   • parse alias     │
-│   • run OpenHands   │
+│   • run resolve.py  │
 │   • create PR       │
 └─────────────────────┘
          │
@@ -140,21 +140,21 @@ Example:
 ```yaml
 # remote-dev-bot/remote-dev-bot.yaml (base)
 default_model: claude-small
-openhands:
+agent:
   max_iterations: 50
   pr_type: ready
 
 # target-repo/remote-dev-bot.yaml (override)
 default_model: claude-large
-openhands:
+agent:
   max_iterations: 30
 ```
 
 Result: `default_model: claude-large`, `max_iterations: 30`, `pr_type: ready`
 (inherited from base).
 
-Merges are deep (leaf-level): overriding `openhands.max_iterations` does not
-clobber other `openhands` fields.
+Merges are deep (leaf-level): overriding `agent.max_iterations` does not
+clobber other `agent` fields.
 
 **`extra_files` is additive across all layers**, not last-wins. Files from
 the base config are always included; each deeper layer appends to that list
@@ -183,7 +183,7 @@ the command in their GitHub comment:
 ```
 /agent-resolve
 max iterations = 75
-target branch = my-feature
+branch = my-feature
 extra_files = docs/architecture.md extra-context.md
 ```
 
@@ -197,12 +197,12 @@ extra_files = docs/architecture.md extra-context.md
 
 **Supported arguments:**
 
-| Argument          | Applies to                  | Description                                                           |
-| ----------------- | --------------------------- | --------------------------------------------------------------------- |
-| `max_iterations`  | `openhands.max_iterations`  | Override iteration limit for this run                                 |
-| `target_branch`   | `openhands.target_branch`   | Override target branch for this run                                   |
-| `timeout_minutes` | `openhands.timeout_minutes` | Override watchdog timeout for this run                                |
-| `extra_files`     | the mode's `extra_files`    | Add files (space-separated) — appended to base and config-layer lists |
+| Argument          | Applies to               | Description                                                           |
+| ----------------- | ------------------------ | --------------------------------------------------------------------- |
+| `max_iterations`  | `agent.max_iterations`   | Override iteration limit for this run                                 |
+| `branch`          | `agent.branch`           | Override target branch for this run                                   |
+| `timeout_minutes` | `agent.timeout_minutes`  | Override watchdog timeout for this run                                |
+| `extra_files`     | the mode's `extra_files` | Add files (space-separated) — appended to base and config-layer lists |
 
 Unknown argument names are rejected with an error comment.
 
@@ -293,5 +293,5 @@ repo workflows). Set the Actions access level as described in step 3.
 | ---------------------------------------- | ----------------------------------------------- |
 | Set up a new repo to use the bot         | Follow [runbook.md](runbook.md)                 |
 | Change the default model for my repo     | `remote-dev-bot.yaml` in target repo            |
-| Give the agent context about my codebase | `.openhands/microagents/repo.md` in target repo |
+| Give the agent context about my codebase | `AGENTS.md` / `CLAUDE.md` via `extra_files` in `remote-dev-bot.yaml` |
 | Override a setting for a single run      | Inline args in the trigger comment (see above)  |
