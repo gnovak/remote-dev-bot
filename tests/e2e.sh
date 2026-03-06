@@ -422,7 +422,7 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
                     RF_RESOLVE_RESULT="$conclusion"
                     log "  rf-resolve: $conclusion (run $run_id)"
                     # Locate the PR and capture its initial commit SHA
-                    RF_PR_BRANCH="openhands-fix-issue-$RF_ISSUE_NUM"
+                    RF_PR_BRANCH="rdb-fix-issue-$RF_ISSUE_NUM"
                     RF_PR_NUM=$(gh pr list --repo "$TEST_REPO" \
                         --search "head:$RF_PR_BRANCH" \
                         --json number --jq '.[0].number // empty' 2>/dev/null || echo "")
@@ -643,16 +643,16 @@ for pos in "${!issue_nums[@]}"; do
         else
             # Resolve mode: check if a PR was created
             pr_count=$(gh pr list --repo "$TEST_REPO" \
-                --search "head:openhands-fix-issue-$issue_num" \
+                --search "head:rdb-fix-issue-$issue_num" \
                 --json number --jq 'length' 2>/dev/null || echo "0")
 
             if [[ "$pr_count" -gt 0 ]]; then
                 status="PASS"
                 ((pass++)) || true
-                cleanup_branches+=("openhands-fix-issue-$issue_num")
+                cleanup_branches+=("rdb-fix-issue-$issue_num")
             else
-                status="PASS (no PR)"
-                ((pass++)) || true
+                status="FAIL (no PR created)"
+                ((fail++)) || true
             fi
         fi
     elif [[ "$conclusion" == "timeout" ]]; then
@@ -689,10 +689,11 @@ if [[ -z "$RF_RESOLVE_RESULT" ]]; then
 elif [[ "$RF_RESOLVE_RESULT" == "success" ]]; then
     if [[ -n "$RF_PR_NUM" ]]; then
         rf_resolve_status="PASS (PR #$RF_PR_NUM)"
+        ((RF_PASS++)) || true
     else
-        rf_resolve_status="PASS (no PR found)"
+        rf_resolve_status="FAIL (no PR found)"
+        ((RF_FAIL++)) || true
     fi
-    ((RF_PASS++)) || true
 else
     rf_resolve_status="FAIL ($RF_RESOLVE_RESULT)"
     ((RF_FAIL++)) || true
@@ -703,7 +704,8 @@ printf "  %-25s %-30s issue #%-5s %s\n" "rf-resolve" "$rf_resolve_status" "${RF_
 rf_review_url=""
 [[ -n "$RF_REVIEW_RUN_ID" ]] && rf_review_url="https://github.com/$TEST_REPO/actions/runs/$RF_REVIEW_RUN_ID"
 if [[ "$RF_RESOLVE_RESULT" != "success" || -z "$RF_PR_NUM" ]]; then
-    rf_review_status="SKIPPED (resolve didn't create PR)"
+    rf_review_status="FAIL (resolve didn't create PR)"
+    ((RF_FAIL++)) || true
 elif [[ -z "$RF_REVIEW_RESULT" ]]; then
     rf_review_status="TIMEOUT"
     ((RF_FAIL++)) || true
@@ -727,7 +729,8 @@ printf "  %-25s %-30s PR #%-5s  %s\n" "rf-review" "$rf_review_status" "$rf_pr_re
 rf_feedback_url=""
 [[ -n "$RF_FEEDBACK_RUN_ID" ]] && rf_feedback_url="https://github.com/$TEST_REPO/actions/runs/$RF_FEEDBACK_RUN_ID"
 if [[ "$RF_REVIEW_RESULT" != "success" || -z "$RF_PR_NUM" ]]; then
-    rf_feedback_status="SKIPPED (review didn't complete)"
+    rf_feedback_status="FAIL (review didn't complete)"
+    ((RF_FAIL++)) || true
 elif [[ -z "$RF_FEEDBACK_RESULT" ]]; then
     rf_feedback_status="TIMEOUT"
     ((RF_FAIL++)) || true
@@ -794,14 +797,14 @@ if [[ -z "$WRAPUP_RESULT" ]]; then
 elif [[ "$WRAPUP_RESULT" == "success" ]]; then
     # Check for either a PR (agent finished) or a failure comment (wrapup triggered)
     pr_count=$(gh pr list --repo "$TEST_REPO" \
-        --search "head:openhands-fix-issue-$wrapup_issue_num" \
+        --search "head:rdb-fix-issue-$wrapup_issue_num" \
         --json number --jq 'length' 2>/dev/null || echo "0")
     comment_count=$(gh api "repos/$TEST_REPO/issues/$wrapup_issue_num/comments" \
         --jq '[.[] | select(.body | contains("could not fully resolve"))] | length' \
         2>/dev/null || echo "0")
     if [[ "$pr_count" -gt 0 ]]; then
         wrapup_status="PASS (agent finished — PR created)"
-        cleanup_branches+=("openhands-fix-issue-$wrapup_issue_num")
+        cleanup_branches+=("rdb-fix-issue-$wrapup_issue_num")
         ((WRAPUP_PHASE_PASS++)) || true
     elif [[ "$comment_count" -gt 0 ]]; then
         wrapup_status="PASS (wrapup triggered — failure comment posted)"
