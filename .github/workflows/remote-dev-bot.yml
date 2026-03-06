@@ -188,7 +188,7 @@ jobs:
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body "$(cat <<EOF
-> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
+🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
 
 ⚠️ **No API key configured for this model.**
 
@@ -302,7 +302,7 @@ EOF
             ALIAS="${{ needs.parse.outputs.alias }}"
             MODEL="${{ needs.parse.outputs.model }}"
             {
-              echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
               echo ""
               echo "### ⚠️ Agent process exited unexpectedly"
               echo ""
@@ -324,7 +324,7 @@ EOF
             ALIAS="${{ needs.parse.outputs.alias }}"
             MODEL="${{ needs.parse.outputs.model }}"
             {
-              echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
               echo ""
               echo "### ⚠️ Agent could not fully resolve this issue"
               echo ""
@@ -395,7 +395,7 @@ EOF
 
           # Format cost comment
           {
-            echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+            echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
             echo "### 💰 Cost Summary"
             echo ""
@@ -482,7 +482,7 @@ EOF
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body "$(cat <<EOF
-> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
+🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
 
 ⚠️ **No API key configured for this model.**
 
@@ -538,7 +538,7 @@ EOF
             MODEL="${{ needs.parse.outputs.model }}"
             gh issue comment "$PR_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
+              --body "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
 
 ⚠️ \`/agent-review\` only works on pull requests, not issues."
             exit 1
@@ -958,7 +958,7 @@ EOF
 
           if [ -f /tmp/review_result.txt ]; then
             {
-              echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
               echo ""
               cat /tmp/review_result.txt
               echo ""
@@ -972,7 +972,7 @@ EOF
           else
             gh pr comment "$PR_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
+              --body "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
 
 ⚠️ **Review did not produce output.** The agent may have exhausted all iterations without calling \`submit_review\`. See the [workflow run logs]($RUN_URL) for details."
           fi
@@ -1003,7 +1003,7 @@ EOF
 
           # Format cost comment
           {
-            echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+            echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
             echo "### 💰 Cost Summary"
             echo ""
@@ -1085,7 +1085,7 @@ EOF
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body "$(cat <<EOF
-> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
+🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
 
 ⚠️ **No API key configured for this model.**
 
@@ -1488,12 +1488,12 @@ EOF
           if [ -f /tmp/llm_blocked ]; then
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
+              --body "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
 
 ⚠️ **Agent loop blocked!** The design analysis response contained \`/agent\` command(s) which could trigger a recursive agent loop. The response has been blocked for safety."
           elif [ -f /tmp/design_analysis.txt ]; then
             {
-              echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
               echo ""
               cat /tmp/design_analysis.txt
               echo ""
@@ -1507,7 +1507,7 @@ EOF
           else
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
+              --body "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
 
 ⚠️ **Exploration did not produce an analysis.** The agent may have exhausted all iterations without calling \`submit_analysis\`. See the [workflow run logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
           fi
@@ -1538,7 +1538,7 @@ EOF
 
           # Format cost comment
           {
-            echo "> 🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+            echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
             echo "### 💰 Cost Summary"
             echo ""
