@@ -93,9 +93,3 @@ agent:
     # Threshold as fraction of max_iterations (0.8 = 80%)
     # At this point, the agent receives instructions to wrap up
     threshold: 0.8
-  # Commit trailer appended to agent commits (resolve mode only).
-  # Supported variables: {model_alias}, {model_id}
-  # Set to empty string to disable.
-  # Note: the amend step does `git commit --amend` after the agent pushes,
-  # which requires a force-push to update the branch.
-  commit_trailer: "Model: {model_alias} ({model_id})"

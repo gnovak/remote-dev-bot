@@ -17,7 +17,6 @@ from lib.config import (
     parse_command,
     parse_invocation,
     resolve_config,
-    resolve_commit_trailer,
 )
 
 
@@ -820,150 +819,6 @@ def test_resolve_config_case_insensitive(config_dir):
     assert result["alias"] == "claude-small"
 
 
-# --- resolve_commit_trailer ---
-
-
-def test_resolve_commit_trailer_basic():
-    """Basic template substitution."""
-    result = resolve_commit_trailer(
-        "Model: {model_alias} ({model_id})",
-        "claude-large",
-        "anthropic/claude-opus-4-5",
-    )
-    assert result == "Model: claude-large (anthropic/claude-opus-4-5)"
-
-
-def test_resolve_commit_trailer_empty_template():
-    """Empty template returns empty string."""
-    assert resolve_commit_trailer("", "alias", "model") == ""
-    assert resolve_commit_trailer(None, "alias", "model") == ""
-
-
-def test_resolve_commit_trailer_partial_template():
-    """Template with only some variables."""
-    result = resolve_commit_trailer("Model: {model_alias}", "claude-small", "anthropic/claude-sonnet-4-5")
-    assert result == "Model: claude-small"
-
-
-def test_resolve_commit_trailer_no_variables():
-    """Template with no variables."""
-    result = resolve_commit_trailer("Static trailer", "alias", "model")
-    assert result == "Static trailer"
-
-
-# --- commit_trailer in resolve_config ---
-
-
-def test_resolve_config_commit_trailer_default(config_dir):
-    """Config without commit_trailer returns empty string."""
-    tmp_path, base_path = config_dir
-    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
-    assert "commit_trailer" in result
-    assert result["commit_trailer"] == ""
-
-
-def test_resolve_config_commit_trailer_with_template():
-    """Config with commit_trailer template resolves variables."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        yaml.dump(
-            {
-                "default_model": "m1",
-                "models": {"m1": {"id": "anthropic/test-model"}},
-                "modes": {"resolve": {"action": "pr"}},
-                "agent": {"commit_trailer": "Model: {model_alias} ({model_id})"},
-            },
-            f,
-        )
-        path = f.name
-    try:
-        result = resolve_config(path, "nonexistent.yaml", "resolve")
-        assert result["commit_trailer"] == "Model: m1 (anthropic/test-model)"
-    finally:
-        os.unlink(path)
-
-
-def test_resolve_config_commit_trailer_override():
-    """Override config can change commit_trailer."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as base_f:
-        yaml.dump(
-            {
-                "default_model": "m1",
-                "models": {"m1": {"id": "anthropic/test-model"}},
-                "modes": {"resolve": {"action": "pr"}},
-                "agent": {"commit_trailer": "Base trailer: {model_alias}"},
-            },
-            base_f,
-        )
-        base_path = base_f.name
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as override_f:
-        yaml.dump(
-            {
-                "agent": {"commit_trailer": "Override trailer: {model_id}"},
-            },
-            override_f,
-        )
-        override_path = override_f.name
-
-    try:
-        result = resolve_config(base_path, override_path, "resolve")
-        assert result["commit_trailer"] == "Override trailer: anthropic/test-model"
-    finally:
-        os.unlink(base_path)
-        os.unlink(override_path)
-
-
-def test_resolve_config_commit_trailer_disable_via_override():
-    """Override config can disable commit_trailer by setting empty string."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as base_f:
-        yaml.dump(
-            {
-                "default_model": "m1",
-                "models": {"m1": {"id": "anthropic/test-model"}},
-                "modes": {"resolve": {"action": "pr"}},
-                "agent": {"commit_trailer": "Base trailer: {model_alias}"},
-            },
-            base_f,
-        )
-        base_path = base_f.name
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as override_f:
-        yaml.dump(
-            {
-                "agent": {"commit_trailer": ""},
-            },
-            override_f,
-        )
-        override_path = override_f.name
-
-    try:
-        result = resolve_config(base_path, override_path, "resolve")
-        assert result["commit_trailer"] == ""
-    finally:
-        os.unlink(base_path)
-        os.unlink(override_path)
-
-
-def test_resolve_config_commit_trailer_openhands_key_backcompat():
-    """Commit trailer can still be set under openhands: key — BACKCOMPAT."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        yaml.dump(
-            {
-                "default_model": "m1",
-                "models": {"m1": {"id": "anthropic/test-model"}},
-                "modes": {"resolve": {"action": "pr"}},
-                "openhands": {"commit_trailer": "Old key: {model_alias}"},
-            },
-            f,
-        )
-        path = f.name
-    try:
-        result = resolve_config(path, "nonexistent.yaml", "resolve")
-        assert result["commit_trailer"] == "Old key: m1"
-    finally:
-        os.unlink(path)
-
-
 # --- three-layer config (local_path) ---
 
 
@@ -1172,12 +1027,13 @@ class TestConfigMain:
         content = self._call_main("resolve", tmp_path)
         for key in (
             "mode", "action", "model", "alias",
-            "max_iterations", "pr_type", "on_failure", "commit_trailer",
+            "max_iterations", "pr_type", "on_failure",
             "assign_issue", "assign_pr", "target_branch", "timeout_minutes",
         ):
             assert f"{key}=" in content, f"Missing key in GITHUB_OUTPUT: {key}"
-        # oh_version must NOT be written — it's been removed
+        # these keys must NOT be written — they've been removed
         assert "oh_version=" not in content
+        assert "commit_trailer=" not in content
 
     def test_resolve_mode_and_action_values(self, tmp_path):
         content = self._call_main("resolve", tmp_path)

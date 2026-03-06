@@ -161,23 +161,16 @@ perform better on implementation tasks.
 
 ### Commit Trailers
 
-By default, each agent commit includes a trailer identifying the model used:
+The agent signs its commits with a trailer identifying the model used:
 
 ```
 Model: claude-large (anthropic/claude-opus-4-5)
 ```
 
-This is appended by amending the commit after the PR branch is pushed, which
-causes a force-push event visible in the PR timeline. To disable this (no
-trailer, no force push), set `commit_trailer` to empty in your
-`remote-dev-bot.yaml`:
-
-```yaml
-commit_trailer: ""
-```
-
-Supported variables in the `commit_trailer` template: `{model_alias}` and
-`{model_id}`.
+This is included directly in the commit message by the agent — no amend or
+force-push required. The instruction is part of the agent's built-in git
+instructions. You can customize or suppress it by adding instructions to your
+`AGENTS.md`.
 
 ## Architecture
 

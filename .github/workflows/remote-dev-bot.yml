@@ -60,7 +60,6 @@ jobs:
       target_branch: ${{ steps.parse.outputs.target_branch }}
       target_branch_explicit: ${{ steps.parse.outputs.target_branch_explicit }}
       extra_files: ${{ steps.parse.outputs.extra_files }}
-      commit_trailer: ${{ steps.parse.outputs.commit_trailer }}
       assign_issue: ${{ steps.parse.outputs.assign_issue }}
       assign_pr: ${{ steps.parse.outputs.assign_pr }}
       design_max_iterations: ${{ steps.parse.outputs.design_max_iterations }}
@@ -255,7 +254,6 @@ jobs:
           MAX_ITERATIONS: ${{ needs.parse.outputs.max_iterations }}
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
-          COMMIT_TRAILER: ${{ needs.parse.outputs.commit_trailer }}
           ALIAS: ${{ needs.parse.outputs.alias }}
           EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
         run: |
@@ -340,29 +338,6 @@ jobs:
           fi
           # Success case: PR was already created by resolve.py — no comment needed here
 
-      - name: Amend commit with model info
-        if: needs.parse.outputs.commit_trailer != ''
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-        run: |
-          # resolve.py pushes its own commits, so we amend the last one after it runs.
-          # Extract the PR URL from /tmp/spr_output.log, fetch that branch, amend, force push.
-          PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log | head -1)
-          if [ -z "$PR_URL" ]; then
-            echo "Could not find PR URL in spr_output.log, skipping amend"
-            exit 0
-          fi
-          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
-          BRANCH=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefName --jq '.headRefName')
-          git fetch origin "$BRANCH"
-          git checkout "$BRANCH"
-          git config user.email "${{ github.repository_owner }}@users.noreply.github.com"
-          git config user.name "${{ github.repository_owner }}"
-          CURRENT_MSG=$(git log -1 --format=%B)
-          git commit --amend -m "${CURRENT_MSG}
-
-          ${{ needs.parse.outputs.commit_trailer }}"
-          git push --force origin "$BRANCH"
 
       - name: Add model info to PR description
         env:

@@ -388,6 +388,20 @@ Use the bash tool to edit files. Good approaches:
    ```
    Push after each logical chunk of work — if you run out of iterations with uncommitted work, it is lost.
 
+### Commit messages
+Sign your commits by appending a trailer identifying the model used:
+
+```
+Model: {alias} ({llm_model})
+```
+
+Example:
+```
+git commit -m "Fix null check in auth handler
+
+Model: {alias} ({llm_model})"
+```
+
 ### Finishing
 - When done: call `finish(success=True, pr_title="...", pr_body="...")`
   - For issue triggers: the workflow creates a PR from your branch to the target branch
@@ -415,11 +429,16 @@ When you reach iteration **{WRAPUP_ITERATION}**, begin wrapping up:
 Do not start new work after iteration {WRAPUP_ITERATION}.
 """
 
+    git_instructions = GIT_INSTRUCTIONS.format(
+        alias=ALIAS or LLM_MODEL,
+        llm_model=LLM_MODEL,
+    )
+
     prompt = (
         f"# Repository Context\n\n{repo_context}\n\n"
         f"# Task\n\n{issue_context_str}\n"
         + SECURITY_RULES
-        + GIT_INSTRUCTIONS
+        + git_instructions
     )
     if wrapup_hint:
         prompt += wrapup_hint
