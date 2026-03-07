@@ -382,7 +382,7 @@ Follow this process:
 1. **Explore first**: Before writing any code, read the relevant files. Use grep/bash to find where the relevant logic lives. Understand the structure before changing anything.
 2. **Plan**: Identify the minimal set of changes needed.
 3. **Implement**: Make focused, minimal changes. Modify existing files rather than creating new ones. Never create multiple versions of the same file (e.g., fix.py alongside fix_v2.py).
-4. **Verify**: Run tests if they exist. Check that the code is syntactically valid.
+4. **Verify**: Run tests if they exist. Check that the code is syntactically valid. If tests require dependencies that aren't installed, install them first (`pip install pytest`, `npm install`, etc.) — you are allowed to install packages freely.
 5. **Commit and push**: Stage all changes, commit with a clear message, and push.
 6. **Finish**: Call finish() with a meaningful pr_title and pr_body.
 
