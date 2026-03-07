@@ -436,7 +436,7 @@ bash(command="git status && python -m pytest tests/test_pagination.py -q")
 
 **Turn 5** — call finish:
 ```
-finish(success=True, pr_title="Fix off-by-one error in pagination", pr_body="Root cause: paginate() subtracted 1 from page_size incorrectly, causing the last item on each page to be dropped. Fix: removed the erroneous subtraction in src/pagination.py.")
+finish(success=True, pr_title="Fix off-by-one error in pagination", pr_body="Fixes #42\n\nRoot cause: paginate() subtracted 1 from page_size incorrectly, causing the last item on each page to be dropped. Fix: removed the erroneous subtraction in src/pagination.py.")
 ```
 """
 
@@ -474,6 +474,15 @@ Use the bash tool to edit files. Good approaches:
   - For PR triggers: the workflow records the PR URL; no new PR is created
 - If you cannot complete: call `finish(success=False, explanation="...")` describing what you tried and why it failed
 - Before calling finish: verify your changes work (run tests if they exist, check the code compiles)
+
+**PR title**: Use imperative mood describing the change, not the issue number.
+  Good: "Add MVP CLI for bridge analysis"
+  Good: "Fix null pointer in session loader"
+  Bad:  "Fix issue #44" or "Resolve GitHub issue"
+
+**PR body**: Must include `Fixes #{ISSUE_NUMBER}` on its own line so GitHub
+  automatically closes the issue when the PR is merged. Follow with a brief
+  description of what changed and why.
 """
 
 
@@ -616,7 +625,9 @@ TOOLS = [
                         "type": "string",
                         "description": (
                             "Body for the pull request "
-                            "(for issue triggers with success=True)"
+                            "(for issue triggers with success=True). "
+                            "Must include 'Fixes #N' on its own line (where N is the issue number) "
+                            "to enable GitHub auto-close on merge."
                         ),
                     },
                 },
