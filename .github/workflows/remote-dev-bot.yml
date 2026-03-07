@@ -183,24 +183,23 @@ jobs:
           ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
 
           # Helper: post a friendly comment when the required API key secret is missing.
+          MODEL_HEADER="🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+          NO_API_KEY_WARNING="⚠️ **No API key configured for this model.**"
           post_no_api_key_comment() {
             local secret_name="$1"
+            {
+              printf '%s\n\n' "${MODEL_HEADER}"
+              printf '%s\n\n' "${NO_API_KEY_WARNING}"
+              printf 'The selected model \`%s\` (\`%s\`) requires an \`%s\` secret, but none was found.\n\n' "${ALIAS}" "${MODEL}" "${secret_name}"
+              printf '**To fix:** Add your API key as a repository secret:\n'
+              printf '\`\`\`bash\n'
+              printf 'gh secret set %s --repo ${{ github.repository }}\n' "${secret_name}"
+              printf '\`\`\`\n'
+              printf 'Then re-trigger the bot by commenting the same command again.\n'
+            } > /tmp/no_api_key_comment.md
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "$(cat <<EOF
-🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
-
-⚠️ **No API key configured for this model.**
-
-The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
-
-**To fix:** Add your API key as a repository secret:
-\`\`\`bash
-gh secret set ${secret_name} --repo ${{ github.repository }}
-\`\`\`
-Then re-trigger the bot by commenting the same command again.
-EOF
-)"
+              --body-file /tmp/no_api_key_comment.md
           }
 
           if [[ "$MODEL" == anthropic/* ]]; then
@@ -477,24 +476,23 @@ EOF
           ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
 
           # Helper: post a friendly comment when the required API key secret is missing.
+          MODEL_HEADER="🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+          NO_API_KEY_WARNING="⚠️ **No API key configured for this model.**"
           post_no_api_key_comment() {
             local secret_name="$1"
+            {
+              printf '%s\n\n' "${MODEL_HEADER}"
+              printf '%s\n\n' "${NO_API_KEY_WARNING}"
+              printf 'The selected model \`%s\` (\`%s\`) requires an \`%s\` secret, but none was found.\n\n' "${ALIAS}" "${MODEL}" "${secret_name}"
+              printf '**To fix:** Add your API key as a repository secret:\n'
+              printf '\`\`\`bash\n'
+              printf 'gh secret set %s --repo ${{ github.repository }}\n' "${secret_name}"
+              printf '\`\`\`\n'
+              printf 'Then re-trigger the bot by commenting the same command again.\n'
+            } > /tmp/no_api_key_comment.md
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "$(cat <<EOF
-🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
-
-⚠️ **No API key configured for this model.**
-
-The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
-
-**To fix:** Add your API key as a repository secret:
-\`\`\`bash
-gh secret set ${secret_name} --repo ${{ github.repository }}
-\`\`\`
-Then re-trigger the bot by commenting the same command again.
-EOF
-)"
+              --body-file /tmp/no_api_key_comment.md
           }
 
           if [[ "$MODEL" == anthropic/* ]]; then
@@ -536,11 +534,12 @@ EOF
           if [[ "$IS_PR" != "true" ]]; then
             ALIAS="${{ needs.parse.outputs.alias }}"
             MODEL="${{ needs.parse.outputs.model }}"
+            MODEL_HEADER="🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+            REVIEW_NOT_PR_WARNING="⚠️ \`/agent-review\` only works on pull requests, not issues."
+            printf '%s\n\n%s\n' "${MODEL_HEADER}" "${REVIEW_NOT_PR_WARNING}" > /tmp/review_not_pr.md
             gh issue comment "$PR_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
-
-⚠️ \`/agent-review\` only works on pull requests, not issues."
+              --body-file /tmp/review_not_pr.md
             exit 1
           fi
 
@@ -970,11 +969,12 @@ EOF
               --repo "${{ github.repository }}" \
               --body-file /tmp/review_comment.md
           else
+            MODEL_HEADER="🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+            NO_OUTPUT_WARNING="⚠️ **Review did not produce output.** The agent may have exhausted all iterations without calling \`submit_review\`. See the [workflow run logs]($RUN_URL) for details."
+            printf '%s\n\n%s\n' "${MODEL_HEADER}" "${NO_OUTPUT_WARNING}" > /tmp/review_no_output.md
             gh pr comment "$PR_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
-
-⚠️ **Review did not produce output.** The agent may have exhausted all iterations without calling \`submit_review\`. See the [workflow run logs]($RUN_URL) for details."
+              --body-file /tmp/review_no_output.md
           fi
 
       - name: Post cost comment
@@ -1080,24 +1080,23 @@ EOF
           ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
 
           # Helper: post a friendly comment when the required API key secret is missing.
+          MODEL_HEADER="🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+          NO_API_KEY_WARNING="⚠️ **No API key configured for this model.**"
           post_no_api_key_comment() {
             local secret_name="$1"
+            {
+              printf '%s\n\n' "${MODEL_HEADER}"
+              printf '%s\n\n' "${NO_API_KEY_WARNING}"
+              printf 'The selected model \`%s\` (\`%s\`) requires an \`%s\` secret, but none was found.\n\n' "${ALIAS}" "${MODEL}" "${secret_name}"
+              printf '**To fix:** Add your API key as a repository secret:\n'
+              printf '\`\`\`bash\n'
+              printf 'gh secret set %s --repo ${{ github.repository }}\n' "${secret_name}"
+              printf '\`\`\`\n'
+              printf 'Then re-trigger the bot by commenting the same command again.\n'
+            } > /tmp/no_api_key_comment.md
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "$(cat <<EOF
-🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
-
-⚠️ **No API key configured for this model.**
-
-The selected model \`${ALIAS}\` (\`${MODEL}\`) requires an \`${secret_name}\` secret, but none was found.
-
-**To fix:** Add your API key as a repository secret:
-\`\`\`bash
-gh secret set ${secret_name} --repo ${{ github.repository }}
-\`\`\`
-Then re-trigger the bot by commenting the same command again.
-EOF
-)"
+              --body-file /tmp/no_api_key_comment.md
           }
 
           if [[ "$MODEL" == anthropic/* ]]; then
@@ -1484,16 +1483,17 @@ EOF
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           ALIAS="${{ needs.parse.outputs.alias }}"
           MODEL="${{ needs.parse.outputs.model }}"
+          MODEL_HEADER="🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
 
           if [ -f /tmp/llm_blocked ]; then
+            LOOP_BLOCKED_WARNING="⚠️ **Agent loop blocked!** The design analysis response contained \`/agent\` command(s) which could trigger a recursive agent loop. The response has been blocked for safety."
+            printf '%s\n\n%s\n' "${MODEL_HEADER}" "${LOOP_BLOCKED_WARNING}" > /tmp/loop_blocked_comment.md
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
-
-⚠️ **Agent loop blocked!** The design analysis response contained \`/agent\` command(s) which could trigger a recursive agent loop. The response has been blocked for safety."
+              --body-file /tmp/loop_blocked_comment.md
           elif [ -f /tmp/design_analysis.txt ]; then
             {
-              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo "${MODEL_HEADER}"
               echo ""
               cat /tmp/design_analysis.txt
               echo ""
@@ -1505,11 +1505,11 @@ EOF
               --repo "${{ github.repository }}" \
               --body-file /tmp/analysis_comment.md
           else
+            NO_ANALYSIS_WARNING="⚠️ **Exploration did not produce an analysis.** The agent may have exhausted all iterations without calling \`submit_analysis\`. See the [workflow run logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+            printf '%s\n\n%s\n' "${MODEL_HEADER}" "${NO_ANALYSIS_WARNING}" > /tmp/no_analysis_comment.md
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
-              --body "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)
-
-⚠️ **Exploration did not produce an analysis.** The agent may have exhausted all iterations without calling \`submit_analysis\`. See the [workflow run logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+              --body-file /tmp/no_analysis_comment.md
           fi
 
       - name: Post cost comment
