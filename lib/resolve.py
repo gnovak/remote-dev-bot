@@ -492,17 +492,27 @@ def build_system_prompt(repo_context, issue_context_str):
     """Build the system prompt for the resolve agent."""
     wrapup_hint = ""
     if WRAPUP_ENABLED and WRAPUP_ITERATION > 0:
+        remaining = MAX_ITERATIONS - WRAPUP_ITERATION
         wrapup_hint = f"""
-## Iteration Budget
+## ⚠️ Iteration Budget — WRAP-UP REQUIRED
 
 This task has a budget of **{MAX_ITERATIONS} iterations**.
 
-When you reach iteration **{WRAPUP_ITERATION}**, begin wrapping up:
-1. Commit all changes you have made so far with a clear commit message
-2. If the task is not fully complete, add a brief TODO comment describing what remains
-3. Call `finish()` with your honest assessment of what was accomplished
+**When you reach iteration {WRAPUP_ITERATION}, you MUST begin wrapping up immediately.**
+At that point only {remaining} iteration(s) remain. Do NOT continue working toward a
+complete solution — partial work committed and pushed is far better than complete work
+that never ships.
 
-Do not start new work after iteration {WRAPUP_ITERATION}.
+You MUST take these steps at iteration {WRAPUP_ITERATION}:
+1. **Commit** whatever work exists, even if incomplete:
+   `git add -A && git commit -m "WIP: partial implementation"`
+2. **Push** immediately:
+   `git push origin HEAD`
+3. **Call `finish()`** with `success=False` if the task is incomplete, explaining
+   what was done and what still remains.
+
+Do NOT start new work after iteration {WRAPUP_ITERATION}. Do NOT wait until the work
+is complete before committing — call `finish()` now.
 """
 
     prompt = (
