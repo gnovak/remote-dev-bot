@@ -69,7 +69,8 @@ def _find_available_branch(issue_number):
     Checks remote via git ls-remote so we don't miss branches that were
     created by a previous run or by a parallel agent.
     """
-    base = f"rdb-fix-issue-{issue_number}"
+    alias_suffix = f"-{ALIAS}" if ALIAS else ""
+    base = f"rdb-fix-issue-{issue_number}{alias_suffix}"
     candidate = base
     suffix = 1
     while True:
