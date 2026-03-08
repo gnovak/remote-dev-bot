@@ -2,46 +2,20 @@
 
 ## v0.6.0 — Custom LiteLLM agent loop, OpenHands removed (Mar 2026)
 
-### What changed
+OpenHands has been replaced with a custom LiteLLM agent loop (`lib/resolve.py`),
+the same approach already used by design and review modes. This gives full control
+over branch naming, git workflow, and PR creation.
 
-- **OpenHands removed**: Resolve mode no longer uses `openhands-ai`. A custom
-  LiteLLM agent loop (`lib/resolve.py`) now handles codebase exploration, file
-  editing, committing, and PR creation directly — the same approach already used
-  by design and review modes.
-- **Branch naming**: Branches are now `rdb-fix-issue-{n}-{alias}` (was
-  `openhands-fix-issue-{n}-try{n}`). For PR-comment triggers, the agent works
-  directly on the existing PR branch rather than creating a new one.
-- **Config key renamed**: `openhands:` → `agent:` in `remote-dev-bot.yaml`.
-  Old configs continue to work (backward compatible).
-- **`target_branch` → `branch`**: Rename in config and inline args. `target_branch`
-  still accepted as an alias.
-- **Security disclosure updated**: Agent runs bash directly on ephemeral GitHub
-  Actions VMs (not in a container). Security posture is equivalent.
-- **Claude 4.6 models**: Upgraded to `claude-sonnet-4-6` and `claude-opus-4-6`.
-- **gpt-large upgraded**: Now uses `gpt-5.3-codex`.
-- **Model label**: Every comment and PR body shows `🤖 Model: alias/id` at the top.
-- **Prompt improvements**: AGENT_ROLE, WORKFLOW, STUCK_RECOVERY, no-tool-call
-  recovery loop, worked example, dep install permission, PR title guidance.
-- **Conversation summary**: Install feedback now includes a conversation summary.
+Other changes: Claude 4.6 models, gpt-5.3-codex, model label on all comments,
+improved resolve prompt (AGENT_ROLE, WORKFLOW, STUCK_RECOVERY, worked example),
+graceful iteration wrapup, `commit_trailer` config removed (agent signs commits
+directly via `AGENTS.md`), branch collision handling (`rdb-fix-issue-{n}-2`, etc.),
+PR review context now includes formal review submissions and inline review comments,
+and various e2e test fixes.
 
-### Breaking changes
-
-- **`openhands:` deprecated** in favor of `agent:`. Both work; update your config.
-- **`target_branch` → `branch`**: `target_branch` accepted as alias until v1.
-- **`oh_version` removed**: `openhands.version` config key is now ignored.
-- **Branch naming changed**: Branches are now `rdb-fix-issue-{n}-{alias}`.
-  Update any scripts expecting `openhands-fix-issue-*`.
-
-## v0.6.1 — Remove commit_trailer config, fix branch collision and PR review context (Mar 2026)
-
-- **`commit_trailer` removed**: Agent signs commits directly; no amend step or
-  force-push. Remove from `remote-dev-bot.yaml`; customize via `AGENTS.md`.
-- **Branch collision fixed**: If `rdb-fix-issue-{n}` already exists (e.g. from
-  a previous run or parallel agent), the resolver now picks `rdb-fix-issue-{n}-2`,
-  `-3`, etc. Allows running multiple agents on the same issue to compare results.
-- **PR review context fixed**: Triggering `/agent-resolve` on a PR now includes
-  formal review submissions (approve/request changes) and inline review comments,
-  not just conversation comments.
+**Breaking changes:** `openhands:` → `agent:` in config (old key still works);
+`target_branch` → `branch` (old key still works); branch names are now
+`rdb-fix-issue-{n}-{alias}`; `oh_version` config key removed.
 
 ## v0.5.0 — Better design and review, additive config (Mar 3, 2026)
 
