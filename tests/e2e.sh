@@ -616,19 +616,17 @@ if [[ "$RF_REVIEW_RESULT" == "success" && -n "$RF_PR_NUM" ]]; then
             [[ "$conclusion" == "skipped" ]] && continue
             echo "$RF_FEEDBACK_BASELINE" | grep -qx "$run_id" && continue
 
-            if [[ "$display_title" == *"e2e-rv-$RF_TS"* ]]; then
-                RF_FEEDBACK_RUN_ID="$run_id"
-                if [[ "$status" == "completed" ]]; then
-                    RF_FEEDBACK_RESULT="$conclusion"
-                    log "  rf-feedback: $conclusion (run $run_id)"
-                    # Check whether the branch has a new commit
-                    RF_FEEDBACK_NEW_SHA=$(gh api "repos/$TEST_REPO/git/ref/heads/$RF_PR_BRANCH" \
-                        --jq '.object.sha' 2>/dev/null || echo "")
-                else
-                    log "  rf-feedback: $status (run $run_id)"
-                fi
-                break
+            RF_FEEDBACK_RUN_ID="$run_id"
+            if [[ "$status" == "completed" ]]; then
+                RF_FEEDBACK_RESULT="$conclusion"
+                log "  rf-feedback: $conclusion (run $run_id)"
+                # Check whether the branch has a new commit
+                RF_FEEDBACK_NEW_SHA=$(gh api "repos/$TEST_REPO/git/ref/heads/$RF_PR_BRANCH" \
+                    --jq '.object.sha' 2>/dev/null || echo "")
+            else
+                log "  rf-feedback: $status (run $run_id)"
             fi
+            break
         done <<< "$(echo "$rf_feedback_json" | jq -c '.[]')"
 
         if [[ -z "$RF_FEEDBACK_RESULT" ]]; then
