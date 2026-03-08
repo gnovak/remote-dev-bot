@@ -1,38 +1,36 @@
 # Changelog
 
-## v0.6.0 — Remove OpenHands, custom LiteLLM agent loop (Mar 2026)
+## v0.6.0 — Custom LiteLLM agent loop, OpenHands removed (Mar 2026)
 
 ### What changed
 
-- **OpenHands removed**: The resolve mode no longer uses `openhands-ai`. A custom
+- **OpenHands removed**: Resolve mode no longer uses `openhands-ai`. A custom
   LiteLLM agent loop (`lib/resolve.py`) now handles codebase exploration, file
   editing, committing, and PR creation directly — the same approach already used
   by design and review modes.
-- **Branch control**: Branches are now named `rdb-fix-issue-{n}` (was
+- **Branch naming**: Branches are now `rdb-fix-issue-{n}-{alias}` (was
   `openhands-fix-issue-{n}-try{n}`). For PR-comment triggers, the agent works
-  directly on the PR's existing branch rather than creating a new one.
-- **Multi-branch support**: The `branch` parameter now controls both where the
-  agent starts work and where the PR is targeted. Rename `openhands.target_branch`
-  → `agent.branch` in your config.
+  directly on the existing PR branch rather than creating a new one.
 - **Config key renamed**: `openhands:` → `agent:` in `remote-dev-bot.yaml`.
-  Old configs continue to work (backward compatible until v1).
+  Old configs continue to work (backward compatible).
+- **`target_branch` → `branch`**: Rename in config and inline args. `target_branch`
+  still accepted as an alias.
 - **Security disclosure updated**: Agent runs bash directly on ephemeral GitHub
-  Actions VMs (not in a container). The security posture is equivalent — the
-  runner is isolated and discarded after each run.
+  Actions VMs (not in a container). Security posture is equivalent.
+- **Claude 4.6 models**: Upgraded to `claude-sonnet-4-6` and `claude-opus-4-6`.
+- **gpt-large upgraded**: Now uses `gpt-5.3-codex`.
+- **Model label**: Every comment and PR body shows `🤖 Model: alias/id` at the top.
+- **Prompt improvements**: AGENT_ROLE, WORKFLOW, STUCK_RECOVERY, no-tool-call
+  recovery loop, worked example, dep install permission, PR title guidance.
+- **Conversation summary**: Install feedback now includes a conversation summary.
 
 ### Breaking changes
 
-- **Config key**: `openhands:` is now deprecated in favor of `agent:`. Both still
-  work, but update your `remote-dev-bot.yaml` to use `agent:`.
-- **`target_branch` → `branch`**: Rename in both config and inline args. `target_branch`
-  still accepted as an alias.
-- **`oh_version` removed**: The `openhands.version` config key is ignored. Remove it
-  from your config.
-- **`commit_trailer` removed**: The config key is gone. The agent now signs
-  commits directly via its built-in instructions — no amend or force-push.
-  Remove `commit_trailer` from your `remote-dev-bot.yaml`; customize via `AGENTS.md`.
-- **Branch naming**: Agent-created branches are now `rdb-fix-issue-{n}`. If you have
-  scripts or searches expecting `openhands-fix-issue-*`, update them.
+- **`openhands:` deprecated** in favor of `agent:`. Both work; update your config.
+- **`target_branch` → `branch`**: `target_branch` accepted as alias until v1.
+- **`oh_version` removed**: `openhands.version` config key is now ignored.
+- **Branch naming changed**: Branches are now `rdb-fix-issue-{n}-{alias}`.
+  Update any scripts expecting `openhands-fix-issue-*`.
 
 ## v0.6.1 — Remove commit_trailer config, fix branch collision and PR review context (Mar 2026)
 
