@@ -46,6 +46,10 @@ GIT_USERNAME = (
 )
 
 
+# Sentinels for top-level cleanup handler
+_branch_created: str | None = None  # set as soon as branch is known
+_pr_created: bool = False            # set when any PR (draft or real) is successfully created
+
 # --- Utilities ---
 
 def run(cmd, *, check=True, timeout=60):
@@ -719,9 +723,11 @@ def write_usage(input_tokens, output_tokens, cost, iterations):
 # --- Main agent loop ---
 
 def main():
+    global _branch_created, _pr_created
     # Set up branch
     print(f"Setting up branch for {ISSUE_TYPE} #{ISSUE_NUMBER}...")
     branch = setup_branch()
+    _branch_created = branch
     print(f"Working on branch: {branch}")
 
     # Gather repository context
@@ -934,6 +940,7 @@ def main():
                 )
                 pr_url = create_pr(branch, f"WIP: partial work on #{ISSUE_NUMBER}", draft_body, draft=True)
                 print(f"Created draft PR for partial work: {pr_url}")
+                _pr_created = True
             except Exception as e:
                 print(f"Could not create draft PR: {e}")
         return
@@ -953,6 +960,7 @@ def main():
                 pr_url = create_pr(branch, pr_title, pr_body, draft=draft)
                 print(f"PR created: {pr_url}")
                 write_pr_url(pr_url)
+                _pr_created = True
             except Exception as e:
                 print(f"PR creation failed: {e}", file=sys.stderr)
                 write_status(False, f"Agent completed work but PR creation failed: {e}")
@@ -975,9 +983,44 @@ def main():
                 )
                 write_pr_url(pr_url)
                 print(f"Draft PR created: {pr_url}")
+                _pr_created = True
             except Exception as e:
                 print(f"Failed to create draft PR: {e}", file=sys.stderr)
 
 
+def _cleanup():
+    """Best-effort: create draft PR if the agent terminated without creating one."""
+    if not _pr_created and _branch_created and ISSUE_TYPE == "issue":
+        try:
+            remote_exists = bool(run(
+                f"git ls-remote --heads origin {_branch_created}",
+                check=False, timeout=30
+            ).strip())
+            if remote_exists:
+                draft_body = (
+                    f"\U0001f916 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n"
+                    f"\u26a0\ufe0f **Partial work** \u2014 agent terminated unexpectedly before completing the task.\n\n"
+                    f"This draft PR contains whatever was committed and pushed during the run. "
+                    f"To continue, trigger `/agent-resolve` as a comment on this PR and the "
+                    f"agent will pick up from this branch."
+                )
+                pr_url = create_pr(
+                    _branch_created,
+                    f"WIP: partial work on #{ISSUE_NUMBER}",
+                    draft_body,
+                    draft=True
+                )
+                print(f"Cleanup handler: created draft PR {pr_url}")
+        except Exception as e:
+            print(f"Cleanup handler: could not create draft PR: {e}")
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        print(f"Unhandled exception in resolve.py: {e}")
+        traceback.print_exc()
+        write_status(False, f"Agent crashed: {e}")
+    finally:
+        _cleanup()
