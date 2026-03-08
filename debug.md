@@ -1,10 +1,18 @@
-# Debug / Tuning Parameters
+# Debugging and Observability
 
-These inline arguments are available for debugging and tuning agent behavior.
-They are not part of the stable public interface and may change without notice.
-Pass them in the comment body when triggering the agent:
+This document describes the observability and tuning features available in
+remote-dev-bot.
 
-    /agent-resolve bash_output_limit = 4000
+## Configuration Arguments
+
+These arguments can be passed inline in the trigger comment (after the command
+line):
+
+```
+/agent resolve
+status_log_interval = 5
+max_iterations = 50
+```
 
 ---
 
@@ -13,7 +21,8 @@ Pass them in the comment body when triggering the agent:
 ### `bash_output_limit`
 
 Maximum characters of bash tool output to include in the agent's context.
-Output exceeding this limit is truncated with a note. Set to `0` to disable truncation.
+Output exceeding this limit is truncated with a note. Set to `0` to disable
+truncation.
 
 - **Default:** `8000`
 - **Lower values:** Reduce context size and cost; risk hiding relevant output
@@ -36,8 +45,32 @@ over long runs. Set to `0` to keep all tool results (default behavior).
 
 ### `status_log_interval`
 
-*(Coming soon)* Every N iterations, the agent writes a one-sentence status update
-to a running log. The log is posted as a comment at the end of the run.
-Set to `0` to disable.
+Every N iterations, the agent is asked for a 1-2 sentence status update (a
+side-channel call that does not affect the main conversation). The collected
+updates are posted as an issue comment at the end of the run.
 
 - **Default:** `0` (disabled)
+- **Suggested:** `5` for a 50-iteration run (gives ~10 checkpoints)
+- **Cost:** One small extra API call per interval; output is tiny so cost impact
+  is minimal
+
+---
+
+## PR Description
+
+When the agent calls `finish()`, it is required to provide a
+`conversation_summary` — a 3-5 sentence description of the approach taken, key
+decisions made, and any dead ends hit. This appears as a `## Summary` section
+at the top of the PR description.
+
+## GitHub Actions Step Summary
+
+After each resolve run, a summary table is written to the GitHub Actions run
+page (`$GITHUB_STEP_SUMMARY`). This appears at the top of the Actions run
+without needing to dig through logs, and includes:
+
+- Result (success/failure)
+- Estimated cost
+- Number of iterations used
+- Model alias and ID
+- Agent's final status explanation
