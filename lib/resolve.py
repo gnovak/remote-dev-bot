@@ -917,6 +917,25 @@ def main():
     if finish_args is None:
         write_status(False, "Agent exhausted all iterations without calling finish()")
         print("Agent did not call finish() — treating as failure")
+        remote_branch_exists = bool(run(
+            f"git ls-remote --heads origin {branch}",
+            check=False, timeout=30
+        ).strip())
+        if ISSUE_TYPE == "issue" and remote_branch_exists:
+            try:
+                draft_body = (
+                    f"\U0001f916 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n"
+                    f"\u26a0\ufe0f **Partial work** \u2014 agent exhausted all {MAX_ITERATIONS} iterations "
+                    f"without completing the task.\n\n"
+                    f"This draft PR contains whatever was committed and pushed during the run. "
+                    f"To continue, trigger `/agent-resolve` as a comment on this PR and the "
+                    f"agent will pick up from this branch.\n\n"
+                    f"**Agent's last status:** No status recorded."
+                )
+                pr_url = create_pr(branch, f"WIP: partial work on #{ISSUE_NUMBER}", draft_body, draft=True)
+                print(f"Created draft PR for partial work: {pr_url}")
+            except Exception as e:
+                print(f"Could not create draft PR: {e}")
         return
 
     success = finish_args.get("success", False)
