@@ -32,6 +32,7 @@ ON_FAILURE = os.environ.get("ON_FAILURE", "comment")  # "comment" | "draft"
 MAX_ITERATIONS = int(os.environ.get("MAX_ITERATIONS", "50") or "50")
 WRAPUP_ENABLED = os.environ.get("WRAPUP_ENABLED", "true").lower() == "true"
 WRAPUP_ITERATION = int(os.environ.get("WRAPUP_ITERATION", "0") or "0")
+STATUS_LOG_INTERVAL = int(os.environ.get("STATUS_LOG_INTERVAL", "0") or "0")
 COMMIT_TRAILER = os.environ.get("COMMIT_TRAILER", "")
 ALIAS = os.environ.get("ALIAS", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
@@ -646,8 +647,16 @@ TOOLS = [
                             "to enable GitHub auto-close on merge."
                         ),
                     },
+                    "conversation_summary": {
+                        "type": "string",
+                        "description": (
+                            "3-5 sentence summary of the approach taken, key decisions made, "
+                            "any interesting paths explored or dead ends hit. "
+                            "This appears in the PR description."
+                        ),
+                    },
                 },
-                "required": ["success", "explanation"],
+                "required": ["success", "explanation", "conversation_summary"],
             },
         },
     },
@@ -782,6 +791,7 @@ def main():
     finish_args = None
     last_iteration = 0
     no_tool_call_count = 0
+    status_log = []  # list of (iteration, status_text) tuples
 
     rate_limit_retries = 0
     MAX_RATE_LIMIT_RETRIES = 3
@@ -915,9 +925,54 @@ def main():
             if done:
                 break
 
+            # Rolling status log: every STATUS_LOG_INTERVAL iterations, make a side-channel
+            # API call to ask the agent for a brief status update.
+            if STATUS_LOG_INTERVAL > 0 and (iteration + 1) % STATUS_LOG_INTERVAL == 0:
+                try:
+                    status_messages = messages + [
+                        {
+                            "role": "user",
+                            "content": (
+                                "STATUS CHECK: In 1-2 sentences, what are you currently doing "
+                                "and what is your immediate next step? "
+                                "(This is logged for the run summary — answer briefly then continue your work.)"
+                            ),
+                        }
+                    ]
+                    status_response = completion(
+                        model=LLM_MODEL,
+                        messages=status_messages,
+                        max_tokens=256,
+                    )
+                    status_text = ""
+                    if status_response.choices:
+                        sc = status_response.choices[0].message
+                        if hasattr(sc, "content") and sc.content:
+                            status_text = sc.content.strip()
+                    if status_text:
+                        status_log.append((iteration + 1, status_text))
+                        print(f"  [Status log iter {iteration + 1}]: {status_text[:100]}")
+                except Exception as e:
+                    print(f"  [Status log] failed at iteration {iteration + 1}: {e}")
+
     # Write usage data (always, even on exception)
     finally:
         write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1)
+
+    # Post rolling status log as issue comment (if any entries were collected)
+    if status_log and ISSUE_NUMBER and GITHUB_REPO:
+        try:
+            log_text = "\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
+            comment_body = f"## Agent Status Log\n\n{log_text}"
+            comment_file = "/tmp/rdb_status_log_comment.txt"
+            with open(comment_file, "w") as f:
+                f.write(comment_body)
+            run(
+                f"gh issue comment {ISSUE_NUMBER} --repo {GITHUB_REPO} --body-file {comment_file}",
+                check=False,
+            )
+        except Exception as e:
+            print(f"Could not post status log comment: {e}")
 
     # Handle finish
     if finish_args is None:
@@ -949,6 +1004,10 @@ def main():
     explanation = finish_args.get("explanation", "")
     pr_title = finish_args.get("pr_title") or f"Fix for issue #{ISSUE_NUMBER}"
     pr_body = finish_args.get("pr_body") or ""
+
+    conv_summary = finish_args.get("conversation_summary", "")
+    if conv_summary:
+        pr_body = f"## Summary\n\n{conv_summary}\n\n---\n\n{pr_body}"
 
     write_status(success, explanation)
 

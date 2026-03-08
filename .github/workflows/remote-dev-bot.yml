@@ -255,6 +255,7 @@ jobs:
           MAX_ITERATIONS: ${{ needs.parse.outputs.max_iterations }}
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
+          STATUS_LOG_INTERVAL: ${{ needs.parse.outputs.status_log_interval }}
           ALIAS: ${{ needs.parse.outputs.alias }}
           EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
         run: |
@@ -347,6 +348,38 @@ jobs:
           fi
           # Success case: PR was already created by resolve.py — no comment needed here
 
+
+      - name: Write step summary
+        if: always()
+        env:
+          ALIAS: ${{ needs.parse.outputs.alias }}
+          LLM_MODEL: ${{ needs.parse.outputs.model }}
+        run: |
+          if [ -f /tmp/llm_usage.json ]; then
+            cost=$(python3 -c "import json; d=json.load(open('/tmp/llm_usage.json')); print(f\"\${d.get('cost',0):.2f}\")")
+            iters=$(python3 -c "import json; d=json.load(open('/tmp/llm_usage.json')); print(d.get('iterations',0))")
+          else
+            cost="unknown"
+            iters="unknown"
+          fi
+          if [ -f /tmp/resolve_status.json ]; then
+            success=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('✅' if d.get('success') else '❌')")
+            explanation=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print(d.get('explanation','')[:200])")
+          else
+            success="❓"
+            explanation="No status recorded"
+          fi
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## Resolve Run Summary
+          | | |
+          |---|---|
+          | **Result** | $success |
+          | **Cost** | \$$cost |
+          | **Iterations** | $iters |
+          | **Model** | ${{ env.ALIAS }} (${{ env.LLM_MODEL }}) |
+
+          **Status:** $explanation
+          EOF
 
       - name: Assign triggerer to PR
         if: needs.parse.outputs.assign_pr == 'true'
