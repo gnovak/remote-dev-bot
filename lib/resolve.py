@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 import litellm
 from litellm import completion
@@ -766,122 +767,141 @@ def main():
     last_iteration = 0
     no_tool_call_count = 0
 
-    for iteration in range(MAX_ITERATIONS):
-        last_iteration = iteration
-        print(f"=== Iteration {iteration + 1}/{MAX_ITERATIONS} ===")
+    rate_limit_retries = 0
+    MAX_RATE_LIMIT_RETRIES = 3
 
-        try:
-            response = completion(
-                model=LLM_MODEL,
-                messages=messages,
-                tools=TOOLS,
-                max_tokens=16384,
-            )
-        except litellm.exceptions.APIConnectionError as exc:
-            err_msg = str(exc)
-            if "max_output_tokens" in err_msg:
-                print(f"LiteLLM APIConnectionError (max_output_tokens): {exc}")
-                write_status(
-                    False,
-                    f"Model hit output token limit at iteration {iteration + 1} — context too large",
-                )
-            else:
-                print(f"LiteLLM APIConnectionError: {exc}")
-                write_status(
-                    False,
-                    f"API connection error at iteration {iteration + 1}: {exc}",
-                )
-            break
-        except litellm.exceptions.APIError as exc:
-            err_msg = str(exc)
-            if "max_output_tokens" in err_msg:
-                print(f"LiteLLM APIError (max_output_tokens): {exc}")
-                write_status(
-                    False,
-                    f"Model hit output token limit at iteration {iteration + 1} — context too large",
-                )
-            else:
-                print(f"LiteLLM APIError: {exc}")
-                write_status(
-                    False,
-                    f"API error at iteration {iteration + 1}: {exc}",
-                )
-            break
+    try:
+        for iteration in range(MAX_ITERATIONS):
+            last_iteration = iteration
+            print(f"=== Iteration {iteration + 1}/{MAX_ITERATIONS} ===")
 
-        # Track token usage
-        usage = getattr(response, "usage", None)
-        if usage:
-            total_input_tokens += getattr(usage, "prompt_tokens", 0)
-            total_output_tokens += getattr(usage, "completion_tokens", 0)
-        cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
-        if cost:
-            total_cost += cost
-
-        message = response.choices[0].message
-        tool_calls = getattr(message, "tool_calls", None)
-
-        if not tool_calls:
-            no_tool_call_count += 1
-            if no_tool_call_count >= 3:
-                print("No tool calls for 3 consecutive iterations — breaking")
-                break
-            print(f"No tool calls (attempt {no_tool_call_count}/3) — injecting recovery message")
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "Please continue working on the task using the tools available to you. "
-                        "You MUST call a tool in every response — do not describe what you would do, do it. "
-                        "If you believe the task is complete, call finish(). "
-                        "If you cannot proceed, call finish(success=False, explanation='...'). "
-                        "IMPORTANT: NEVER ask for human help. Use the tools to make progress or call finish() to stop."
-                    ),
-                }
-            )
-            continue
-
-        no_tool_call_count = 0
-
-        # Add assistant message to conversation
-        messages.append(
-            {
-                "role": "assistant",
-                "content": message.content,
-                "tool_calls": [tc.model_dump() for tc in tool_calls],
-            }
-        )
-
-        # Process tool calls
-        done = False
-        for tool_call in tool_calls:
-            tool_name = tool_call.function.name
             try:
-                arguments = json.loads(tool_call.function.arguments)
-            except json.JSONDecodeError:
-                arguments = {}
+                response = completion(
+                    model=LLM_MODEL,
+                    messages=messages,
+                    tools=TOOLS,
+                    max_tokens=16384,
+                )
+            except litellm.exceptions.RateLimitError as exc:
+                rate_limit_retries += 1
+                if rate_limit_retries <= MAX_RATE_LIMIT_RETRIES:
+                    wait_secs = 60 * rate_limit_retries
+                    print(f"Rate limit hit (retry {rate_limit_retries}/{MAX_RATE_LIMIT_RETRIES}), "
+                          f"waiting {wait_secs}s: {exc}")
+                    time.sleep(wait_secs)
+                    continue
+                else:
+                    print(f"Rate limit: exhausted {MAX_RATE_LIMIT_RETRIES} retries, treating as failure.")
+                    write_status(False, f"Rate limit error after {MAX_RATE_LIMIT_RETRIES} retries "
+                                 f"at iteration {iteration + 1}: {exc}")
+                    break
+            except litellm.exceptions.APIConnectionError as exc:
+                err_msg = str(exc)
+                if "max_output_tokens" in err_msg:
+                    print(f"LiteLLM APIConnectionError (max_output_tokens): {exc}")
+                    write_status(
+                        False,
+                        f"Model hit output token limit at iteration {iteration + 1} — context too large",
+                    )
+                else:
+                    print(f"LiteLLM APIConnectionError: {exc}")
+                    write_status(
+                        False,
+                        f"API connection error at iteration {iteration + 1}: {exc}",
+                    )
+                break
+            except litellm.exceptions.APIError as exc:
+                err_msg = str(exc)
+                if "max_output_tokens" in err_msg:
+                    print(f"LiteLLM APIError (max_output_tokens): {exc}")
+                    write_status(
+                        False,
+                        f"Model hit output token limit at iteration {iteration + 1} — context too large",
+                    )
+                else:
+                    print(f"LiteLLM APIError: {exc}")
+                    write_status(
+                        False,
+                        f"API error at iteration {iteration + 1}: {exc}",
+                    )
+                break
 
-            print(f"  Tool: {tool_name}({list(arguments.keys())})")
+            # Track token usage
+            usage = getattr(response, "usage", None)
+            if usage:
+                total_input_tokens += getattr(usage, "prompt_tokens", 0)
+                total_output_tokens += getattr(usage, "completion_tokens", 0)
+            cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
+            if cost:
+                total_cost += cost
+            rate_limit_retries = 0
 
-            if tool_name == "finish":
-                finish_args = arguments
-                done = True
-                tool_result = "finish() received. Task loop ending."
-            else:
-                tool_result = execute_tool(tool_name, arguments)
+            message = response.choices[0].message
+            tool_calls = getattr(message, "tool_calls", None)
 
+            if not tool_calls:
+                no_tool_call_count += 1
+                if no_tool_call_count >= 3:
+                    print("No tool calls for 3 consecutive iterations — breaking")
+                    break
+                print(f"No tool calls (attempt {no_tool_call_count}/3) — injecting recovery message")
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Please continue working on the task using the tools available to you. "
+                            "You MUST call a tool in every response — do not describe what you would do, do it. "
+                            "If you believe the task is complete, call finish(). "
+                            "If you cannot proceed, call finish(success=False, explanation='...'). "
+                            "IMPORTANT: NEVER ask for human help. Use the tools to make progress or call finish() to stop."
+                        ),
+                    }
+                )
+                continue
+
+            no_tool_call_count = 0
+
+            # Add assistant message to conversation
             messages.append(
                 {
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": tool_result,
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": [tc.model_dump() for tc in tool_calls],
                 }
             )
 
-        if done:
-            break
+            # Process tool calls
+            done = False
+            for tool_call in tool_calls:
+                tool_name = tool_call.function.name
+                try:
+                    arguments = json.loads(tool_call.function.arguments)
+                except json.JSONDecodeError:
+                    arguments = {}
 
-    # Write usage data
-    write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1)
+                print(f"  Tool: {tool_name}({list(arguments.keys())})")
+
+                if tool_name == "finish":
+                    finish_args = arguments
+                    done = True
+                    tool_result = "finish() received. Task loop ending."
+                else:
+                    tool_result = execute_tool(tool_name, arguments)
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": tool_result,
+                    }
+                )
+
+            if done:
+                break
+
+    # Write usage data (always, even on exception)
+    finally:
+        write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1)
 
     # Handle finish
     if finish_args is None:
