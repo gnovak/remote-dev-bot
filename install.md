@@ -10,17 +10,24 @@ comment.
 The easiest way to install is to tell your favorite AI agent "Follow the
 runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}."
 
+> **First time?** If you'd like to see remote-dev-bot in action before
+> installing, check out [demo.md](demo.md) for annotated examples showing the
+> resolve, design, and review workflows. Then come back here to set it up on
+> your own repo.
+>
+> **For AI agents:** Before starting Phase 1, ask the user if they'd like to see
+> examples of remote-dev-bot in action. If yes, guide them through
+> [demo.md](demo.md) first, then return here to continue with installation.
+
 ---
 
 ## Overview
 
 **How the bot works:** When you comment `/agent-resolve` on an issue, a GitHub
-Actions workflow starts. It spins up
-[OpenHands](https://github.com/All-Hands-AI/OpenHands) (an open-source AI coding
-agent) in a sandboxed container, points it at your issue, and lets it work. The
-agent reads the issue, explores your codebase, writes code, runs tests, and
-iterates until it has a solution. Then it pushes a branch and opens a draft PR
-for your review. You can also use `/agent-design` for AI design analysis posted
+Actions workflow starts. It runs a custom LiteLLM agent loop, points it at your
+issue, and lets it work. The agent reads the issue, explores your codebase,
+writes code, runs tests, and iterates until it has a solution. Then it pushes a
+branch and opens a draft PR for your review. You can also use `/agent-design` for AI design analysis posted
 as a comment (no code changes), or `/agent-review` on a pull request to get an
 AI code review. Once you have human or machine generated comments and requested
 changes on the PR, you can comment '/agent-resolve' on the PR to make the
@@ -222,6 +229,20 @@ If all these commands succeed, your GitHub CLI is properly configured!
 ---
 
 ## Phase 2: GitHub Repository Settings
+
+> **Clarification: Claude subscription vs. API key**
+>
+> If you already use Claude (the chatbot at claude.ai) or have Claude Code
+> installed, you still need a separate API key for remote-dev-bot. Here's why:
+>
+> | What you might have             | What it gives you           | Works with remote-dev-bot? |
+> | ------------------------------- | --------------------------- | -------------------------- |
+> | Claude.ai subscription ($20/mo) | Chatbot access              | ❌ No — consumer product    |
+> | Claude Code / GitHub App        | AI coding assistant         | ❌ No — runs locally/in IDE |
+> | Anthropic API key               | Pay-per-token API access    | ✅ Yes — this is what you need |
+>
+> The API is billed separately through console.anthropic.com. New accounts
+> typically receive free credits for testing.
 
 ### Step 2.1: Enable Actions Permissions
 
@@ -710,7 +731,7 @@ gh run view {run-id} --repo {owner}/{repo} --log
 
 A successful run typically takes 5-10 minutes. The agent will:
 
-1. Install OpenHands and dependencies (~1-2 min)
+1. Set up dependencies (~1-2 min)
 2. Read the issue and work on the solution (~3-7 min)
 3. Create a draft PR (~30 sec)
 
@@ -745,11 +766,47 @@ gh pr list --repo {owner}/{repo}
 
 ---
 
+## Next Steps
+
+Congratulations! You have a working remote-dev-bot installation.
+
+**Want guided practice?** See [onboarding.md](onboarding.md) for hands-on
+exercises that walk you through resolve, design, review, and iteration
+workflows on your own repo.
+
+**Ready to dive in?** See the [Customization section in README.md](README.md#customization)
+for adding repo context, adjusting models, and tuning settings.
+
+> **For AI agents:** Ask the user if they'd like help learning to use
+> remote-dev-bot. If yes, guide them through [onboarding.md](onboarding.md).
+
+---
+
 ## Phase 5: Customize (Optional)
 
 See the Customization section in `README.md` for details on adding repo context
 for the agent, adjusting model aliases, and changing iteration limits. These can
 be done any time after install — not just during initial setup.
+
+### Agent Instructions (AGENTS.md)
+
+You can add an `AGENTS.md` file to your repository to give the agent
+project-specific instructions. This is read automatically as part of the agent's
+context. Useful things to put there:
+
+- **Commit attribution**: Ask the agent to sign its commits so you can identify
+  which model made which change:
+
+  ```
+  ## Commit Attribution
+  Sign every commit with a Co-Authored-By trailer that identifies you (the
+  model) by name and version:
+
+      Co-Authored-By: <Your Model Name and Version> <noreply@your-provider.com>
+  ```
+
+- Project conventions, preferred patterns, areas to focus on
+- Instructions for how to run tests or build the project
 
 ---
 
@@ -818,7 +875,39 @@ straightforward.
 
 **After all phases complete:**
 
-If problems were recorded, ask the user for consent before filing:
+If problems were recorded, first produce a conversation summary, then ask the
+user for consent before filing.
+
+**Conversation summary:** Write a narrative of the install session in this
+format:
+
+```
+## TL;DR
+
+One short paragraph summarizing what went wrong and what was needed to work
+around it.
+
+## Conversation Summary
+
+For each user message and your response, write:
+
+### User: <verbatim user message>
+<50 words or fewer summarizing your response and actions>
+
+## Feedback for the remote-dev-bot author
+
+What was confusing, what failed, what would have made this smoother. Be
+specific — e.g. "Step 3.2 should mention X before Y" rather than "the
+instructions were unclear."
+```
+
+Attach this summary to the report before filing:
+
+```python
+report.set_conversation_summary(summary_text)
+```
+
+Then ask the user for consent:
 
 ```python
 from lib.feedback import get_consent_prompt, report_problems
@@ -905,12 +994,13 @@ different repo owners. See the shim template in `.github/workflows/agent.yml`.
 ### Agent runs but skips PR creation
 
 - The log will say "Issue was not successfully resolved. Skipping PR creation."
-- This often means the agent hit max iterations — OpenHands marks this as
+- This often means the agent hit max iterations — it will mark this as
   "error" even if the code changes were correct
 - Try again with a more capable model
 
 ### Agent produces bad results
 
 - Add more context to the issue description
-- Add repo context in `.openhands/microagents/repo.md`
+- Add repo context via `AGENTS.md` or `CLAUDE.md` and include it in `extra_files`
+  in your `remote-dev-bot.yaml`
 - Comment `/agent-resolve` on the PR with specific feedback for another pass

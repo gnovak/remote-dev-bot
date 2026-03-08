@@ -160,6 +160,35 @@ fi
 log() { echo "==> $*"; }
 err() { echo "ERROR: $*" >&2; }
 
+# Post a comment on an issue, retrying on GraphQL "Could not resolve" errors.
+# GitHub's GraphQL API can return this transiently for newly created issues due
+# to eventual consistency. Retries up to 5 times with 3-second backoff.
+post_issue_comment() {
+    local issue_num="$1"
+    local repo="$2"
+    local body="$3"
+    local max_retries=5
+    local retry_delay=3
+    local attempt=1
+    while [[ $attempt -le $max_retries ]]; do
+        if gh issue comment "$issue_num" --repo "$repo" --body "$body" 2>/tmp/e2e_comment_err; then
+            return 0
+        fi
+        if grep -q "Could not resolve" /tmp/e2e_comment_err 2>/dev/null; then
+            log "  Warning: issue #$issue_num not yet visible via GraphQL (attempt $attempt/$max_retries), retrying in ${retry_delay}s..."
+            sleep "$retry_delay"
+            attempt=$((attempt + 1))
+        else
+            # Non-transient error: propagate it
+            cat /tmp/e2e_comment_err >&2
+            return 1
+        fi
+    done
+    err "Failed to comment on issue #$issue_num after $max_retries attempts"
+    cat /tmp/e2e_comment_err >&2
+    return 1
+}
+
 # Extract cost from a Cost Summary comment body.
 # Returns the cost as a decimal string (e.g., "1.23") or "0.00" if not found.
 parse_cost_from_comment() {
@@ -279,7 +308,7 @@ for idx in "${active_indices[@]}"; do
     cleanup_issues+=("$issue_num")
 
     log "  Issue #$issue_num created. Triggering: $cmd"
-    gh issue comment "$issue_num" --repo "$TEST_REPO" --body "$cmd"
+    post_issue_comment "$issue_num" "$TEST_REPO" "$cmd"
 done
 
 # --- Create review+feedback issue and trigger resolve ---
@@ -291,7 +320,7 @@ rf_issue_url=$(gh issue create --repo "$TEST_REPO" \
 RF_ISSUE_NUM="${rf_issue_url##*/}"
 cleanup_issues+=("$RF_ISSUE_NUM")
 log "  Issue #$RF_ISSUE_NUM created. Triggering /agent-resolve..."
-gh issue comment "$RF_ISSUE_NUM" --repo "$TEST_REPO" --body "/agent-resolve"
+post_issue_comment "$RF_ISSUE_NUM" "$TEST_REPO" "/agent-resolve"
 
 # --- Trigger timeout test ---
 log "Creating timeout test issue..."
@@ -303,9 +332,8 @@ timeout_issue_url=$(gh issue create --repo "$TEST_REPO" \
 timeout_issue_num="${timeout_issue_url##*/}"
 cleanup_issues+=("$timeout_issue_num")
 
-log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout_minutes = 5..."
-gh issue comment "$timeout_issue_num" --repo "$TEST_REPO" \
-    --body $'/agent-resolve\ntimeout_minutes = 5'
+log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout_minutes = 1..."
+post_issue_comment "$timeout_issue_num" "$TEST_REPO" $'/agent-resolve\ntimeout_minutes = 1'
 
 TIMEOUT_RUN_ID=""
 TIMEOUT_RESULT=""
@@ -322,8 +350,7 @@ wrapup_issue_num="${wrapup_issue_url##*/}"
 cleanup_issues+=("$wrapup_issue_num")
 
 log "  Issue #$wrapup_issue_num. Posting /agent-resolve with max_iterations = 4..."
-gh issue comment "$wrapup_issue_num" --repo "$TEST_REPO" \
-    --body $'/agent-resolve\nmax_iterations = 4'
+post_issue_comment "$wrapup_issue_num" "$TEST_REPO" $'/agent-resolve\nmax_iterations = 4'
 
 WRAPUP_RUN_ID=""
 WRAPUP_RESULT=""
@@ -422,7 +449,7 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
                     RF_RESOLVE_RESULT="$conclusion"
                     log "  rf-resolve: $conclusion (run $run_id)"
                     # Locate the PR and capture its initial commit SHA
-                    RF_PR_BRANCH="openhands-fix-issue-$RF_ISSUE_NUM"
+                    RF_PR_BRANCH="rdb-fix-issue-$RF_ISSUE_NUM"
                     RF_PR_NUM=$(gh pr list --repo "$TEST_REPO" \
                         --search "head:$RF_PR_BRANCH" \
                         --json number --jq '.[0].number // empty' 2>/dev/null || echo "")
@@ -510,7 +537,11 @@ done
 if [[ "$RF_RESOLVE_RESULT" == "success" && -n "$RF_PR_NUM" ]]; then
     log ""
     log "rf-review: Posting /agent-review on PR #$RF_PR_NUM..."
-    RF_REVIEW_BASELINE=$(gh run list --repo "$TEST_REPO" --limit 50 --json databaseId \
+    # Capture baseline of existing run IDs before posting the comment, so we can
+    # identify the new run by exclusion rather than by displayTitle (which for a
+    # PR comment trigger equals the PR title, not the tagged issue title).
+    RF_REVIEW_BASELINE=$(gh run list --repo "$TEST_REPO" --limit 50 \
+        --event issue_comment --json databaseId \
         --jq '.[].databaseId' 2>/dev/null || echo "")
 
     gh pr comment "$RF_PR_NUM" --repo "$TEST_REPO" --body "/agent-review"
@@ -520,28 +551,28 @@ if [[ "$RF_RESOLVE_RESULT" == "success" && -n "$RF_PR_NUM" ]]; then
 
     while [[ $rf_review_elapsed -lt $RF_REVIEW_TIMEOUT && -z "$RF_REVIEW_RESULT" ]]; do
         rf_review_json=$(gh run list --repo "$TEST_REPO" --limit 50 \
+            --event issue_comment \
             --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
 
         while IFS= read -r row; do
             [[ -z "$row" ]] && continue
-            display_title=$(echo "$row" | jq -r '.displayTitle')
             status=$(echo "$row" | jq -r '.status')
             conclusion=$(echo "$row" | jq -r '.conclusion')
             run_id=$(echo "$row" | jq -r '.databaseId')
 
             [[ "$conclusion" == "skipped" ]] && continue
+            # Skip any run that existed before we posted /agent-review
             echo "$RF_REVIEW_BASELINE" | grep -qx "$run_id" && continue
 
-            if [[ "$display_title" == *"e2e-rv-$RF_TS"* ]]; then
-                RF_REVIEW_RUN_ID="$run_id"
-                if [[ "$status" == "completed" ]]; then
-                    RF_REVIEW_RESULT="$conclusion"
-                    log "  rf-review: $conclusion (run $run_id)"
-                else
-                    log "  rf-review: $status (run $run_id)"
-                fi
-                break
+            # This is a new issue_comment-triggered run — it must be ours
+            RF_REVIEW_RUN_ID="$run_id"
+            if [[ "$status" == "completed" ]]; then
+                RF_REVIEW_RESULT="$conclusion"
+                log "  rf-review: $conclusion (run $run_id)"
+            else
+                log "  rf-review: $status (run $run_id)"
             fi
+            break
         done <<< "$(echo "$rf_review_json" | jq -c '.[]')"
 
         if [[ -z "$RF_REVIEW_RESULT" ]]; then
@@ -585,19 +616,17 @@ if [[ "$RF_REVIEW_RESULT" == "success" && -n "$RF_PR_NUM" ]]; then
             [[ "$conclusion" == "skipped" ]] && continue
             echo "$RF_FEEDBACK_BASELINE" | grep -qx "$run_id" && continue
 
-            if [[ "$display_title" == *"e2e-rv-$RF_TS"* ]]; then
-                RF_FEEDBACK_RUN_ID="$run_id"
-                if [[ "$status" == "completed" ]]; then
-                    RF_FEEDBACK_RESULT="$conclusion"
-                    log "  rf-feedback: $conclusion (run $run_id)"
-                    # Check whether the branch has a new commit
-                    RF_FEEDBACK_NEW_SHA=$(gh api "repos/$TEST_REPO/git/ref/heads/$RF_PR_BRANCH" \
-                        --jq '.object.sha' 2>/dev/null || echo "")
-                else
-                    log "  rf-feedback: $status (run $run_id)"
-                fi
-                break
+            RF_FEEDBACK_RUN_ID="$run_id"
+            if [[ "$status" == "completed" ]]; then
+                RF_FEEDBACK_RESULT="$conclusion"
+                log "  rf-feedback: $conclusion (run $run_id)"
+                # Check whether the branch has a new commit
+                RF_FEEDBACK_NEW_SHA=$(gh api "repos/$TEST_REPO/git/ref/heads/$RF_PR_BRANCH" \
+                    --jq '.object.sha' 2>/dev/null || echo "")
+            else
+                log "  rf-feedback: $status (run $run_id)"
             fi
+            break
         done <<< "$(echo "$rf_feedback_json" | jq -c '.[]')"
 
         if [[ -z "$RF_FEEDBACK_RESULT" ]]; then
@@ -643,16 +672,16 @@ for pos in "${!issue_nums[@]}"; do
         else
             # Resolve mode: check if a PR was created
             pr_count=$(gh pr list --repo "$TEST_REPO" \
-                --search "head:openhands-fix-issue-$issue_num" \
+                --search "head:rdb-fix-issue-$issue_num" \
                 --json number --jq 'length' 2>/dev/null || echo "0")
 
             if [[ "$pr_count" -gt 0 ]]; then
                 status="PASS"
                 ((pass++)) || true
-                cleanup_branches+=("openhands-fix-issue-$issue_num")
+                cleanup_branches+=("rdb-fix-issue-$issue_num")
             else
-                status="PASS (no PR)"
-                ((pass++)) || true
+                status="FAIL (no PR created)"
+                ((fail++)) || true
             fi
         fi
     elif [[ "$conclusion" == "timeout" ]]; then
@@ -689,10 +718,11 @@ if [[ -z "$RF_RESOLVE_RESULT" ]]; then
 elif [[ "$RF_RESOLVE_RESULT" == "success" ]]; then
     if [[ -n "$RF_PR_NUM" ]]; then
         rf_resolve_status="PASS (PR #$RF_PR_NUM)"
+        ((RF_PASS++)) || true
     else
-        rf_resolve_status="PASS (no PR found)"
+        rf_resolve_status="FAIL (no PR found)"
+        ((RF_FAIL++)) || true
     fi
-    ((RF_PASS++)) || true
 else
     rf_resolve_status="FAIL ($RF_RESOLVE_RESULT)"
     ((RF_FAIL++)) || true
@@ -703,7 +733,8 @@ printf "  %-25s %-30s issue #%-5s %s\n" "rf-resolve" "$rf_resolve_status" "${RF_
 rf_review_url=""
 [[ -n "$RF_REVIEW_RUN_ID" ]] && rf_review_url="https://github.com/$TEST_REPO/actions/runs/$RF_REVIEW_RUN_ID"
 if [[ "$RF_RESOLVE_RESULT" != "success" || -z "$RF_PR_NUM" ]]; then
-    rf_review_status="SKIPPED (resolve didn't create PR)"
+    rf_review_status="FAIL (resolve didn't create PR)"
+    ((RF_FAIL++)) || true
 elif [[ -z "$RF_REVIEW_RESULT" ]]; then
     rf_review_status="TIMEOUT"
     ((RF_FAIL++)) || true
@@ -727,7 +758,8 @@ printf "  %-25s %-30s PR #%-5s  %s\n" "rf-review" "$rf_review_status" "$rf_pr_re
 rf_feedback_url=""
 [[ -n "$RF_FEEDBACK_RUN_ID" ]] && rf_feedback_url="https://github.com/$TEST_REPO/actions/runs/$RF_FEEDBACK_RUN_ID"
 if [[ "$RF_REVIEW_RESULT" != "success" || -z "$RF_PR_NUM" ]]; then
-    rf_feedback_status="SKIPPED (review didn't complete)"
+    rf_feedback_status="FAIL (review didn't complete)"
+    ((RF_FAIL++)) || true
 elif [[ -z "$RF_FEEDBACK_RESULT" ]]; then
     rf_feedback_status="TIMEOUT"
     ((RF_FAIL++)) || true
@@ -794,14 +826,14 @@ if [[ -z "$WRAPUP_RESULT" ]]; then
 elif [[ "$WRAPUP_RESULT" == "success" ]]; then
     # Check for either a PR (agent finished) or a failure comment (wrapup triggered)
     pr_count=$(gh pr list --repo "$TEST_REPO" \
-        --search "head:openhands-fix-issue-$wrapup_issue_num" \
+        --search "head:rdb-fix-issue-$wrapup_issue_num" \
         --json number --jq 'length' 2>/dev/null || echo "0")
     comment_count=$(gh api "repos/$TEST_REPO/issues/$wrapup_issue_num/comments" \
         --jq '[.[] | select(.body | contains("could not fully resolve"))] | length' \
         2>/dev/null || echo "0")
     if [[ "$pr_count" -gt 0 ]]; then
         wrapup_status="PASS (agent finished — PR created)"
-        cleanup_branches+=("openhands-fix-issue-$wrapup_issue_num")
+        cleanup_branches+=("rdb-fix-issue-$wrapup_issue_num")
         ((WRAPUP_PHASE_PASS++)) || true
     elif [[ "$comment_count" -gt 0 ]]; then
         wrapup_status="PASS (wrapup triggered — failure comment posted)"

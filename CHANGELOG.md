@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.6.0 — Custom LiteLLM agent loop, OpenHands removed (Mar 2026)
+
+OpenHands has been replaced with a custom LiteLLM agent loop (`lib/resolve.py`),
+the same approach already used by design and review modes. This gives full control
+over branch naming, git workflow, and PR creation.
+
+Other changes: Claude 4.6 models, gpt-5.3-codex, model label on all comments,
+improved resolve prompt (AGENT_ROLE, WORKFLOW, STUCK_RECOVERY, worked example),
+graceful iteration wrapup, `commit_trailer` config removed (agent signs commits
+directly via `AGENTS.md`), branch collision handling (`rdb-fix-issue-{n}-2`, etc.),
+PR review context now includes formal review submissions and inline review comments,
+and various e2e test fixes.
+
+**Breaking changes:** `openhands:` → `agent:` in config (old key still works);
+`target_branch` → `branch` (old key still works); branch names are now
+`rdb-fix-issue-{n}-{alias}`; `oh_version` config key removed.
+
 ## v0.5.0 — Better design and review, additive config (Mar 3, 2026)
 
 ### Improvements
