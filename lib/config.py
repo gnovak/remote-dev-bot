@@ -59,7 +59,9 @@ ALLOWED_ARGS = {
     "branch": str,               # agent.branch (target branch for PRs)
     # BACKCOMPAT(v0→v1, 2026-03-05): target_branch accepted as alias for branch
     "target_branch": str,
-    "status_log_interval": int,  # rolling status log interval (0 = disabled)
+    "status_log_interval": int,       # rolling status log interval (0 = disabled)
+    "bash_output_limit": int,          # agent bash output truncation
+    "context_keep_tool_results": int,  # how many tool result pairs to keep
 }
 
 
@@ -386,6 +388,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         target_branch_explicit = True
 
     status_log_interval = args.get("status_log_interval", 0)
+    bash_output_limit = args.get("bash_output_limit", None)
+    context_keep_tool_results = args.get("context_keep_tool_results", None)
 
     # Calculate the iteration warning threshold (iteration number at which to warn)
     wrapup_iteration = int(max_iter * wrapup_threshold) if wrapup_enabled else 0
@@ -409,6 +413,11 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         "timeout_minutes": resolved_timeout,
         "status_log_interval": status_log_interval,
     }
+
+    if bash_output_limit is not None:
+        result["bash_output_limit"] = bash_output_limit
+    if context_keep_tool_results is not None:
+        result["context_keep_tool_results"] = context_keep_tool_results
 
     # Include extra_instructions if the mode defines one (appended to canonical prompt)
     if "extra_instructions" in mode_config:
@@ -549,6 +558,10 @@ def main():
             f.write(f"graceful_wrapup_iteration={result['graceful_wrapup_iteration']}\n")
             f.write(f"timeout_minutes={result['timeout_minutes']}\n")
             f.write(f"status_log_interval={result['status_log_interval']}\n")
+            if "bash_output_limit" in result:
+                f.write(f"bash_output_limit={result['bash_output_limit']}\n")
+            if "context_keep_tool_results" in result:
+                f.write(f"context_keep_tool_results={result['context_keep_tool_results']}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"
