@@ -460,11 +460,11 @@ Use the bash tool to edit files. Good approaches:
    git add <files>
    git commit -m "Clear description of what and why"
    ```
-3. Push to remote regularly:
+3. **Push immediately after every `git commit`:**
    ```
    git push origin HEAD
    ```
-   Push after each logical chunk of work — if you run out of iterations with uncommitted work, it is lost.
+   After every `git commit`, immediately run `git push origin HEAD` to preserve your work on the remote. This ensures progress is saved even if the run is interrupted before completion.
 
 ### Finishing
 - Before calling finish(), run `git status` to confirm all changes are committed and the working tree is clean.
