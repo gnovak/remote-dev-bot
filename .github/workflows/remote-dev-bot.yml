@@ -67,6 +67,8 @@ jobs:
       graceful_wrapup_enabled: ${{ steps.parse.outputs.graceful_wrapup_enabled }}
       graceful_wrapup_iteration: ${{ steps.parse.outputs.graceful_wrapup_iteration }}
       timeout_minutes: ${{ steps.parse.outputs.timeout_minutes }}
+      design_context_keep_tool_results: ${{ steps.parse.outputs.design_context_keep_tool_results }}
+      review_context_keep_tool_results: ${{ steps.parse.outputs.review_context_keep_tool_results }}
 
     steps:
       - name: Generate app token
@@ -640,13 +642,19 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
           REVIEW_MAX_ITERATIONS: ${{ needs.parse.outputs.review_max_iterations }}
+          REVIEW_CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.review_context_keep_tool_results }}
+          REVIEW_WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
+          REVIEW_WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
         run: |
           python3 << 'PYEOF'
           import json
           import os
           import subprocess
+          import sys
           import yaml
 
+          sys.path.insert(0, ".remote-dev-bot/lib")
+          from context import trim_tool_results
           from litellm import completion
 
           model = "${{ needs.parse.outputs.model }}"
@@ -660,6 +668,14 @@ jobs:
 
           # Get max iterations from config (default 10)
           max_iterations = int(os.environ.get("REVIEW_MAX_ITERATIONS", "10") or "10")
+
+          # Graceful wrapup settings
+          wrapup_enabled = os.environ.get("REVIEW_WRAPUP_ENABLED", "true").lower() == "true"
+          wrapup_iteration = int(os.environ.get("REVIEW_WRAPUP_ITERATION", "0") or "0")
+          wrapup_injected = False
+
+          # Context trimming
+          context_keep_tool_results = int(os.environ.get("REVIEW_CONTEXT_KEEP_TOOL_RESULTS", "0") or "0")
 
           # Generate repository file listing (tracked files only — PR head branch)
           result = subprocess.run(
@@ -960,8 +976,29 @@ jobs:
                       "content": result,
                   })
 
+              # Trim old tool result pairs to manage context size
+              if context_keep_tool_results > 0:
+                  messages = trim_tool_results(messages, context_keep_tool_results)
+
               if done:
                   break
+
+              # Graceful wrapup: at 80% of max_iterations, inject a user message
+              # telling the agent to wrap up and call submit_review with what it has.
+              if (wrapup_enabled and wrapup_iteration > 0
+                      and not wrapup_injected and iteration + 1 >= wrapup_iteration):
+                  remaining = max_iterations - (iteration + 1)
+                  messages.append({
+                      "role": "user",
+                      "content": (
+                          f"You have used {iteration + 1} of {max_iterations} iterations "
+                          f"({remaining} remaining). "
+                          "Please wrap up your review now and call submit_review with "
+                          "whatever analysis you have gathered so far. "
+                          "Do not start new lines of inquiry."
+                      ),
+                  })
+                  wrapup_injected = True
 
           # Save usage data for the cost comment step
           with open("/tmp/llm_usage.json", "w") as f:
@@ -1200,14 +1237,20 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
           DESIGN_MAX_ITERATIONS: ${{ needs.parse.outputs.design_max_iterations }}
+          DESIGN_CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.design_context_keep_tool_results }}
+          DESIGN_WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
+          DESIGN_WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
         run: |
           python3 << 'PYEOF'
           import json
           import os
           import re
           import subprocess
+          import sys
           import yaml
 
+          sys.path.insert(0, ".remote-dev-bot/lib")
+          from context import trim_tool_results
           from litellm import completion
 
           model = "${{ needs.parse.outputs.model }}"
@@ -1225,6 +1268,14 @@ jobs:
 
           # Get max iterations from config (default 10)
           max_iterations = int(os.environ.get("DESIGN_MAX_ITERATIONS", "10") or "10")
+
+          # Graceful wrapup settings
+          wrapup_enabled = os.environ.get("DESIGN_WRAPUP_ENABLED", "true").lower() == "true"
+          wrapup_iteration = int(os.environ.get("DESIGN_WRAPUP_ITERATION", "0") or "0")
+          wrapup_injected = False
+
+          # Context trimming
+          context_keep_tool_results = int(os.environ.get("DESIGN_CONTEXT_KEEP_TOOL_RESULTS", "0") or "0")
 
           # Generate repository file listing (tracked files only)
           result = subprocess.run(
@@ -1488,8 +1539,29 @@ jobs:
                       "content": result,
                   })
 
+              # Trim old tool result pairs to manage context size
+              if context_keep_tool_results > 0:
+                  messages = trim_tool_results(messages, context_keep_tool_results)
+
               if done:
                   break
+
+              # Graceful wrapup: at 80% of max_iterations, inject a user message
+              # telling the agent to wrap up and call submit_analysis with what it has.
+              if (wrapup_enabled and wrapup_iteration > 0
+                      and not wrapup_injected and iteration + 1 >= wrapup_iteration):
+                  remaining = max_iterations - (iteration + 1)
+                  messages.append({
+                      "role": "user",
+                      "content": (
+                          f"You have used {iteration + 1} of {max_iterations} iterations "
+                          f"({remaining} remaining). "
+                          "Please wrap up your analysis now and call submit_analysis with "
+                          "whatever analysis you have gathered so far. "
+                          "Do not start new lines of inquiry."
+                      ),
+                  })
+                  wrapup_injected = True
 
           # Save usage data for the cost comment step
           with open("/tmp/llm_usage.json", "w") as f:

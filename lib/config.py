@@ -61,7 +61,9 @@ ALLOWED_ARGS = {
     "target_branch": str,
     "status_log_interval": int,       # rolling status log interval (0 = disabled)
     "bash_output_limit": int,          # agent bash output truncation
-    "context_keep_tool_results": int,  # how many tool result pairs to keep
+    "context_keep_tool_results": int,  # how many tool result pairs to keep (resolve)
+    "design_context_keep_tool_results": int,  # how many tool result pairs to keep (design)
+    "review_context_keep_tool_results": int,  # how many tool result pairs to keep (review)
 }
 
 
@@ -337,6 +339,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     # Read agent settings (formerly openhands:)
     # BACKCOMPAT(v0→v1, 2026-03-05): accept openhands: as alias for agent:
     oh = config.get("agent", config.get("openhands", {}))
+    # max_iter: mode_config wins over global agent config (per-mode default),
+    # and inline arg wins over both (applied below after action is resolved).
     max_iter = oh.get("max_iterations", 50)
     pr_type = oh.get("pr_type", "ready")
     on_failure = oh.get("on_failure", "comment")
@@ -373,6 +377,12 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     # Mode settings
     action = mode_config.get("action", "pr")
 
+    # For agentic loop modes (design, review), the mode config can specify its own
+    # max_iterations as a per-mode default, overriding the global agent.max_iterations.
+    # Inline args win over both (applied below).
+    if action in ("design", "review") and "max_iterations" in mode_config:
+        max_iter = mode_config["max_iterations"]
+
     # Apply command-line arg overrides
     target_branch_explicit = False  # True only when set via inline arg
     if "max_iterations" in args:
@@ -390,6 +400,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     status_log_interval = args.get("status_log_interval", 0)
     bash_output_limit = args.get("bash_output_limit", None)
     context_keep_tool_results = args.get("context_keep_tool_results", None)
+    design_context_keep_tool_results = args.get("design_context_keep_tool_results", None)
+    review_context_keep_tool_results = args.get("review_context_keep_tool_results", None)
 
     # Calculate the iteration warning threshold (iteration number at which to warn)
     wrapup_iteration = int(max_iter * wrapup_threshold) if wrapup_enabled else 0
@@ -418,6 +430,10 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         result["bash_output_limit"] = bash_output_limit
     if context_keep_tool_results is not None:
         result["context_keep_tool_results"] = context_keep_tool_results
+    if design_context_keep_tool_results is not None:
+        result["design_context_keep_tool_results"] = design_context_keep_tool_results
+    if review_context_keep_tool_results is not None:
+        result["review_context_keep_tool_results"] = review_context_keep_tool_results
 
     # Include extra_instructions if the mode defines one (appended to canonical prompt)
     if "extra_instructions" in mode_config:
@@ -446,11 +462,14 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             print(f"  {key}: {value}")
         print()
 
-    # Include max_iterations for agentic loop modes (design and review)
-    if action == "design" and "max_iterations" in mode_config:
-        result["design_max_iterations"] = mode_config["max_iterations"]
-    if action == "review" and "max_iterations" in mode_config:
-        result["review_max_iterations"] = mode_config["max_iterations"]
+    # Include max_iterations for agentic loop modes (design and review).
+    # Use max_iter (already resolved, including any inline arg override) rather than
+    # mode_config["max_iterations"] so that e.g. `max_iterations = 20` in the comment
+    # body is honoured for design and review modes, not just for resolve.
+    if action == "design":
+        result["design_max_iterations"] = max_iter
+    if action == "review":
+        result["review_max_iterations"] = max_iter
 
     return result
 
@@ -562,6 +581,10 @@ def main():
                 f.write(f"bash_output_limit={result['bash_output_limit']}\n")
             if "context_keep_tool_results" in result:
                 f.write(f"context_keep_tool_results={result['context_keep_tool_results']}\n")
+            if "design_context_keep_tool_results" in result:
+                f.write(f"design_context_keep_tool_results={result['design_context_keep_tool_results']}\n")
+            if "review_context_keep_tool_results" in result:
+                f.write(f"review_context_keep_tool_results={result['review_context_keep_tool_results']}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"
