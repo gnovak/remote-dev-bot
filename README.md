@@ -8,7 +8,9 @@ like delegating work to an experienced coworker. This system aims to provide
 that alternative.
 
 > **To install, say to your AI agent:**
-> "Follow the instructions at https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/install.md to install gnovak/remote-dev-bot for use in {your-username}/{your-repo}"
+> ```
+> claude "Read https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/install.md and follow it to set up remote-dev-bot for my repo {owner}/{repo}. This is my first time — walk me through each step, explain what's happening, and ask before doing anything."
+> ```
 
 There are already excellent vendor-specific implementations of this pattern
 (GitHub Copilot Workspace, Cursor, etc.), so this project isn't necessarily

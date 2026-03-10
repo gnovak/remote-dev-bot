@@ -1,5 +1,7 @@
 # Remote Dev Bot — Setup Guide
 
+> **For AI agents reading this file:** This is a guided installation runbook, not a script to execute blindly. Read it fully, then walk the user through each phase — explaining what each step does and asking for confirmation before making changes. Experienced users may ask you to go faster; see "Using This Guide with an AI Coding Agent" below for guidance on both modes.
+
 ## Quick Start
 
 This guide will walk you through setting up Remote Dev Bot on your GitHub
@@ -7,8 +9,7 @@ repository. By the end, you'll have an AI-powered bot that can automatically
 resolve issues and create pull requests when triggered by a `/agent-resolve`
 comment.
 
-The easiest way to install is to tell your favorite AI agent "Follow the
-runbook.md file to set up remote-dev-bot for my repo {owner}/{repo}."
+The easiest way to install is to tell your favorite AI agent "Read https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/install.md and follow it to set up remote-dev-bot for my repo {owner}/{repo}."
 
 > **First time?** If you'd like to see remote-dev-bot in action before
 > installing, check out [demo.md](demo.md) for annotated examples showing the
@@ -105,13 +106,13 @@ setup process.
 **First time? Use the guided setup** (recommended):
 
 ```bash
-claude "Follow the install.md file to set up remote-dev-bot for my repo {owner}/{repo}. This is my first time — walk me through each step, explain what's happening, and ask before doing anything."
+claude "Read https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/install.md and follow it to set up remote-dev-bot for my repo {owner}/{repo}. This is my first time — walk me through each step, explain what's happening, and ask before doing anything."
 ```
 
 **Done this before? Use the fast setup:**
 
 ```bash
-claude "Follow the install.md file to set up remote-dev-bot for my repo {owner}/{repo}. I'm familiar with the process — go fast, just ask me for secrets and confirmations."
+claude "Read https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/install.md and follow it to set up remote-dev-bot for my repo {owner}/{repo}. I'm familiar with the process — go fast, just ask me for secrets and confirmations."
 ```
 
 These examples use Claude Code, but the same prompts work with any AI coding
