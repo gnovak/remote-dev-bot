@@ -165,7 +165,12 @@ def execute_bash(command):
             output = f"(exit code {result.returncode})\n" + output
         output = output or "(no output)"
         if BASH_OUTPUT_LIMIT > 0 and len(output) > BASH_OUTPUT_LIMIT:
-            output = output[:BASH_OUTPUT_LIMIT] + f"\n... [truncated: output was {len(output)} chars, limit is {BASH_OUTPUT_LIMIT}]"
+            half = BASH_OUTPUT_LIMIT // 2
+            output = (
+                output[:half]
+                + f"\n\n... [output truncated: {len(output)} chars total, showing first and last {half} chars] ...\n\n"
+                + output[-half:]
+            )
         return output
     except subprocess.TimeoutExpired:
         return "Error: Command timed out after 30 seconds"
