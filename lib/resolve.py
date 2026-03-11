@@ -1071,14 +1071,14 @@ def main():
         ).strip())
         if ISSUE_TYPE == "issue" and remote_branch_exists:
             try:
+                last_status = status_log[-1][1] if status_log else "No status recorded."
                 draft_body = (
-                    f"\U0001f916 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n"
                     f"\u26a0\ufe0f **Partial work** \u2014 agent exhausted all {MAX_ITERATIONS} iterations "
                     f"without completing the task.\n\n"
                     f"This draft PR contains whatever was committed and pushed during the run. "
                     f"To continue, trigger `/agent-resolve` as a comment on this PR and the "
                     f"agent will pick up from this branch.\n\n"
-                    f"**Agent's last status:** No status recorded."
+                    f"**Agent's last status:** {last_status}"
                 )
                 pr_url = create_pr(branch, f"WIP: partial work on #{ISSUE_NUMBER}", draft_body, draft=True)
                 print(f"Created draft PR for partial work: {pr_url}")
@@ -1112,10 +1112,27 @@ def main():
                 write_status(False, f"Agent completed work but PR creation failed: {e}")
                 return
         else:
-            # PR trigger: record the existing PR URL
+            # PR trigger: record the existing PR URL, convert draft→ready, post success comment
             pr_url = f"https://github.com/{GITHUB_REPO}/pull/{ISSUE_NUMBER}"
             write_pr_url(pr_url)
             print(f"PR trigger complete: {pr_url}")
+            try:
+                run(f"gh pr ready {ISSUE_NUMBER} --repo {GITHUB_REPO}", check=False, timeout=30)
+                print("Converted PR from draft to ready")
+            except Exception as e:
+                print(f"Could not convert PR to ready: {e}")
+            try:
+                comment_body = f"🤖 **Agent completed successfully.**\n\n{explanation}"
+                comment_file = "/tmp/rdb_success_comment.txt"
+                with open(comment_file, "w") as f:
+                    f.write(comment_body)
+                run(
+                    f"gh pr comment {ISSUE_NUMBER} --repo {GITHUB_REPO} --body-file {comment_file}",
+                    timeout=30,
+                )
+                print("Posted success comment")
+            except Exception as e:
+                print(f"Could not post success comment: {e}")
     else:
         print(f"Agent reported failure: {explanation}")
         if ON_FAILURE == "draft" and ISSUE_TYPE == "issue":
@@ -1144,7 +1161,6 @@ def _cleanup():
             ).strip())
             if remote_exists:
                 draft_body = (
-                    f"\U0001f916 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n"
                     f"\u26a0\ufe0f **Partial work** \u2014 agent terminated unexpectedly before completing the task.\n\n"
                     f"This draft PR contains whatever was committed and pushed during the run. "
                     f"To continue, trigger `/agent-resolve` as a comment on this PR and the "
