@@ -397,7 +397,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         target_branch = args["target_branch"]
         target_branch_explicit = True
 
-    status_log_interval = args.get("status_log_interval", 0)
+    status_log_interval = args.get("status_log_interval", 5)
     bash_output_limit = args.get("bash_output_limit", None)
     context_keep_tool_results = args.get("context_keep_tool_results", None)
     design_context_keep_tool_results = args.get("design_context_keep_tool_results", None)
