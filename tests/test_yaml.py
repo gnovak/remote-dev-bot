@@ -47,7 +47,7 @@ def test_config_has_required_keys(bot_config):
     assert "default_model" in bot_config
     assert "models" in bot_config
     assert "modes" in bot_config
-    assert "openhands" in bot_config
+    assert "agent" in bot_config
 
 
 def test_default_model_exists_in_models(bot_config):
@@ -88,13 +88,9 @@ def test_every_model_id_has_known_provider(bot_config):
         )
 
 
-def test_openhands_has_version(bot_config):
-    assert "version" in bot_config["openhands"]
-
-
-def test_openhands_has_max_iterations(bot_config):
-    assert "max_iterations" in bot_config["openhands"]
-    assert isinstance(bot_config["openhands"]["max_iterations"], int)
+def test_agent_has_max_iterations(bot_config):
+    assert "max_iterations" in bot_config["agent"]
+    assert isinstance(bot_config["agent"]["max_iterations"], int)
 
 
 # --- Security checks ---
@@ -105,23 +101,19 @@ def resolve_yml():
     return (REPO_ROOT / ".github/workflows/remote-dev-bot.yml").read_text()
 
 
-def test_resolve_yml_injects_security_guardrails(resolve_yml):
-    """Verify the security microagent step exists in remote-dev-bot.yml."""
-    assert "Inject security guardrails" in resolve_yml
-    assert "remote-dev-bot-security.md" in resolve_yml
-    assert "NEVER output, print, log, echo" in resolve_yml
+def test_resolve_py_has_security_rules():
+    """Verify lib/resolve.py embeds security rules in the agent's system prompt."""
+    resolve_py = (REPO_ROOT / "lib/resolve.py").read_text()
+    assert "NEVER output, print, log, echo" in resolve_py
+    assert "SECURITY_RULES" in resolve_py
+    assert "E2E_TEST_TOKEN" in resolve_py
 
 
-def test_resolve_yml_has_max_iterations_override(resolve_yml):
-    """Verify the workflow overrides success=false when agent hits max iterations.
-
-    This is a workaround for the completion function false-positive issue where
-    the LLM-based completion check can return success=true even when the agent
-    hit max iterations mid-task.
-    """
-    assert "Agent reached maximum iteration" in resolve_yml
-    # Verify the logic checks the error field
-    assert "error = data.get('error')" in resolve_yml or "data.get('error')" in resolve_yml
+def test_resolve_py_has_max_iterations_loop():
+    """Verify lib/resolve.py enforces MAX_ITERATIONS and reports failure on exhaustion."""
+    resolve_py = (REPO_ROOT / "lib/resolve.py").read_text()
+    assert "MAX_ITERATIONS" in resolve_py
+    assert "exhausted all iterations" in resolve_py
 
 
 class TestMaxIterationsSuccessOverride:
@@ -229,12 +221,12 @@ def test_agent_yml_has_author_association_gate():
 # --- Loop prevention checks ---
 
 
-def test_design_mode_has_context_files(bot_config):
-    """Design mode should have a context_files list."""
+def test_design_mode_has_extra_files(bot_config):
+    """Design mode should have an extra_files list."""
     design_mode = bot_config["modes"]["design"]
-    assert "context_files" in design_mode, "Design mode missing 'context_files'"
-    assert isinstance(design_mode["context_files"], list), "context_files should be a list"
-    assert len(design_mode["context_files"]) > 0, "context_files should not be empty"
+    assert "extra_files" in design_mode, "Design mode missing 'extra_files'"
+    assert isinstance(design_mode["extra_files"], list), "extra_files should be a list"
+    assert len(design_mode["extra_files"]) > 0, "extra_files should not be empty"
 
 
 def test_design_prompt_has_loop_prevention(resolve_yml):

@@ -3,7 +3,7 @@
 # This is all you need in each repo that uses Remote Dev Bot.
 # The real logic lives in gnovak/remote-dev-bot and updates automatically.
 #
-# Prerequisites (see runbook.md for details):
+# Prerequisites (see install.md for details):
 #   - Repository secrets: at least one LLM API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY)
 #   - Actions permissions: read/write + allow PR creation
 #

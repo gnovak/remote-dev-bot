@@ -1,44 +1,59 @@
 # Contributing to Remote Dev Bot
 
-This file documents the development and testing infrastructure. If you're a user looking to install remote-dev-bot, see [runbook.md](runbook.md).
+This file documents the development and testing infrastructure. If you're a user
+looking to install remote-dev-bot, see [install.md](install.md).
 
 ## Repos
 
-| Repo | Purpose |
-|------|---------|
-| `gnovak/remote-dev-bot` | The reusable workflow, config, tests, and docs (this repo) |
+| Repo                         | Purpose                                                                                                                |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `gnovak/remote-dev-bot`      | The reusable workflow, config, tests, and docs (this repo)                                                             |
 | `gnovak/remote-dev-bot-test` | Throwaway test repo. Shim points at `remote-dev-bot.yml@e2e-test`. Git history and issues don't matter — leave a mess. |
 
 ## Test Accounts
 
 Three separate GitHub identities are used so each role is cleanly separated:
-- **`gnovak`** owns the repos and does normal development
-- **`remote-dev-bot`** acts as a friendly collaborator, so e2e tests can trigger agent runs without polluting `gnovak`'s contribution stats and without special-casing the security gate
-- **`remote-dev-bot-tester`** simulates an external stranger, so security tests can verify the collaborator gate actually blocks unauthorized users
 
-| Account | Purpose | Credentials stored as |
-|---------|---------|----------------------|
-| `gnovak` | Repo owner. Used for normal development and testing. | `RDB_PAT_TOKEN` (on both repos), or GitHub App (`RDB_APP_ID` variable + `RDB_APP_PRIVATE_KEY` secret) |
-| `remote-dev-bot` | Dedicated bot account. Collaborator on `remote-dev-bot-test`. Posts authorized test comments that trigger agent runs without attributing activity to `gnovak`. | `RDB_TESTER_PAT_TOKEN` (on remote-dev-bot) |
-| `remote-dev-bot-tester` | Simulates an unauthorized external user. NOT a collaborator on any repo. | `RDB_TESTER_UNAUTHORIZED_PAT_TOKEN` (on remote-dev-bot) |
+- **`gnovak`** owns the repos and does normal development
+- **`remote-dev-bot`** acts as a friendly collaborator, so e2e tests can trigger
+  agent runs without polluting `gnovak`'s contribution stats and without
+  special-casing the security gate
+- **`remote-dev-bot-tester`** simulates an external stranger, so security tests
+  can verify the collaborator gate actually blocks unauthorized users
+
+| Account                 | Purpose                                                                                                                                                        | Credentials stored as                                                                                 |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `gnovak`                | Repo owner. Used for normal development and testing.                                                                                                           | `RDB_PAT_TOKEN` (on both repos), or GitHub App (`RDB_APP_ID` variable + `RDB_APP_PRIVATE_KEY` secret) |
+| `remote-dev-bot`        | Dedicated bot account. Collaborator on `remote-dev-bot-test`. Posts authorized test comments that trigger agent runs without attributing activity to `gnovak`. | `RDB_TESTER_PAT_TOKEN` (on remote-dev-bot)                                                            |
+| `remote-dev-bot-tester` | Simulates an unauthorized external user. NOT a collaborator on any repo.                                                                                       | `RDB_TESTER_UNAUTHORIZED_PAT_TOKEN` (on remote-dev-bot)                                               |
 
 ### remote-dev-bot (bot account) details
+
 - Classic PAT with `public_repo` + `workflow` scopes, no expiration
-- **`public_repo`** — create issues, post comments, open PRs in public repos (standard e2e test flow)
-- **`workflow`** — read/write `.github/workflows/` files; required by compiled e2e tests, which temporarily swap the shim for the compiled workflow and must restore it afterwards. Without this scope, the swap fails with HTTP 404.
-- Must be a collaborator on `remote-dev-bot-test` so the security gate allows its trigger comments
+- **`public_repo`** — create issues, post comments, open PRs in public repos
+  (standard e2e test flow)
+- **`workflow`** — read/write `.github/workflows/` files; required by compiled
+  e2e tests, which temporarily swap the shim for the compiled workflow and must
+  restore it afterwards. Without this scope, the swap fails with HTTP 404.
+- Must be a collaborator on `remote-dev-bot-test` so the security gate allows
+  its trigger comments
 - Keeps test activity out of `gnovak`'s GitHub contribution stats
 
 ### remote-dev-bot-tester details
+
 - Classic PAT with `public_repo` scope, no expiration
-- Used by e2e security tests to verify that non-collaborators cannot trigger agent runs
-- The PAT only works on public repos — the gating test requires repos to be public
+- Used by e2e security tests to verify that non-collaborators cannot trigger
+  agent runs
+- The PAT only works on public repos — the gating test requires repos to be
+  public
 
 ## GitHub App and Reserved Identities
 
 ### GitHub App: `remote-dev-bot`
+
 - Created at https://github.com/settings/apps/remote-dev-bot (owned by `gnovak`)
-- When used, the bot posts as `remote-dev-bot[bot]` — a clearly distinct identity from the repo owner
+- When used, the bot posts as `remote-dev-bot[bot]` — a clearly distinct
+  identity from the repo owner
 - App ID: `2895037`
 - Installed on all `gnovak` repos (blanket install). Only repos with `RDB_APP_PRIVATE_KEY` secret actually use it. Currently configured on: `gnovak/remote-dev-bot`, `gnovak/remote-dev-bot-test`
 - Permissions (all Read & write): Contents, Issues, Pull Requests, Workflows, Actions, Checks
@@ -48,9 +63,12 @@ Three separate GitHub identities are used so each role is cleanly separated:
 - Private key stored as `RDB_APP_PRIVATE_KEY` secret; App ID stored as `RDB_APP_ID` variable
 
 ### GitHub username: `remote-dev-bot`
+
 - Active as a dedicated bot account (collaborator on `remote-dev-bot-test`)
-- Used by e2e tests to post authorized trigger comments (see Test Accounts above)
-- The GitHub App (`remote-dev-bot[bot]`) is a separate identity used for agent responses and PRs
+- Used by e2e tests to post authorized trigger comments (see Test Accounts
+  above)
+- The GitHub App (`remote-dev-bot[bot]`) is a separate identity used for agent
+  responses and PRs
 
 ## Secrets Map
 
@@ -92,13 +110,13 @@ rdb uses a three-layer config merge plus optional per-invocation runtime args (e
 | Runtime args | Inline `name = value` lines in the trigger comment | Override for a single run; see `ALLOWED_ARGS` in `lib/config.py` |
 
 All merges are deep (leaf-level), so overriding `modes.design.max_iterations`
-does not clobber `modes.design.context_files`.  Lists replace entirely (no
+does not clobber `modes.design.context_files`. Lists replace entirely (no
 concatenation).
 
 ### Self-dev local config (`remote-dev-bot.local.yaml`)
 
 This file lives in the rdb repo root and applies when rdb is used to develop
-itself.  It adds rdb implementation files (`lib/config.py`, etc.) to the design
+itself. It adds rdb implementation files (`lib/config.py`, etc.) to the design
 agent's `context_files` so the design agent can see actual code rather than
 guessing.
 
@@ -107,22 +125,46 @@ only fetches `remote-dev-bot.yaml` and `lib/`, so `remote-dev-bot.local.yaml`
 never appears in a user's `.remote-dev-bot/` directory.
 
 Users can create their own `remote-dev-bot.local.yaml` if they want a third
-config layer, but there is no documented use case for this — `remote-dev-bot.yaml`
-already covers all user customisation needs.
+config layer, but there is no documented use case for this —
+`remote-dev-bot.yaml` already covers all user customisation needs.
 
 ## Branch Model
 
-| Branch | Purpose | Who points here |
-|--------|---------|-----------------|
-| `main` | Stable, released, tagged | External users' shims (`agent.yml@main`) |
-| `dev` | Long-lived integration branch, accumulates work ahead of `main` | `dogfood.yml@dev` (rdb self-dev) |
-| `e2e-test` | Ephemeral test pointer, reset by e2e scripts before each test run | `remote-dev-bot-test` shim |
+| Branch     | Purpose                                                           | Who points here                          |
+| ---------- | ----------------------------------------------------------------- | ---------------------------------------- |
+| `main`     | Stable, released, tagged                                          | External users' shims (`agent.yml@main`) |
+| `dev`      | Long-lived integration branch, accumulates work ahead of `main`   | `dogfood.yml@dev` (rdb self-dev)         |
+| `e2e-test` | Ephemeral test pointer, reset by e2e scripts before each test run | `remote-dev-bot-test` shim               |
 
-**PRs go to `dev`, not `main`**, unless the change is a hotfix to something already released. When `dev` is ready to release: run the full test suite (with `e2e-test` pointing at `dev`), then merge `dev` → `main` and tag.
+**Pre-1.0 (current):** Two branches — `dev` and `main`. Small stable changes
+can PR directly to `main`; after merging, do a `git merge origin/main` on `dev`
+(trivial fast-forward since `dev` is a superset of `main`). Larger or
+experimental changes PR to `dev` and promote to `main` when baked. Accept
+occasional breakage on `main` — the cost of a broken main is low before there
+are real users, and the cost of extra process is paid every day.
+
+**Post-1.0:** Graduate to three branches:
+
+| Branch     | Role                                                               |
+| ---------- | ------------------------------------------------------------------ |
+| `dev`      | Experimental / long-baking features                                |
+| `staging`  | Release candidates — batches from `dev` ready for a QA pass       |
+| `main`     | Live, protected — only ever receives merges from `staging`         |
+
+The QA gate lives between `staging` and `main`. `dev` → `staging` is
+free-flowing; `staging` → `main` is the deliberate go/no-go moment. For this
+project "QA" means running `e2e.sh` and spot-checking a couple live triggers —
+roughly 20 minutes per release.
+
+Until then: **PRs go to `dev`** (or directly to `main` for small, ready
+changes). When `dev` is ready to release: run the full test suite, then merge
+`dev` → `main` and tag.
 
 ### Dogfood shim (`dogfood.yml`)
 
-`agent.yml` in this repo points at `@main` — it is the canonical shim users copy, so it must stay stable. To test pre-release features from `dev` against rdb's own issues, use the `/dogfood` command instead of `/agent`:
+`agent.yml` in this repo points at `@main` — it is the canonical shim users
+copy, so it must stay stable. To test pre-release features from `dev` against
+rdb's own issues, use the `/dogfood` command instead of `/agent`:
 
 ```
 /dogfood                        — resolve with default model (uses dev branch)
@@ -134,49 +176,80 @@ already covers all user customisation needs.
 
 ## Dev Cycle
 
-See [AGENTS.md](AGENTS.md) for the full dev cycle documentation, including how the `e2e-test` branch pointer works and how to trigger test runs.
+See [AGENTS.md](AGENTS.md) for the full dev cycle documentation, including how
+the `e2e-test` branch pointer works and how to trigger test runs.
 
 ## Test Infrastructure
 
 ### Unit tests (`tests/test_config.py`, `tests/test_yaml.py`, `tests/test_compile.py`)
+
 - Run with `pytest tests/ -v` (needs `PYTHONPATH=.`)
 - CI runs these on PRs to main (`.github/workflows/test.yml`)
 
 #### Keeping defaults in sync
 
-`lib/config.py` and `scripts/compile.py` both have a fallback default for `openhands.version` (used when the config file has no `openhands` section). These must stay in sync. Both currently default to `"1.4.0"`. Each has a `# NOTE: keep in sync` comment pointing to the other.
+`lib/config.py` and `scripts/compile.py` both have a fallback default for
+`openhands.version` (used when the config file has no `openhands` section).
+These must stay in sync. Both currently default to `"1.4.0"`. Each has a
+`# NOTE: keep in sync` comment pointing to the other.
 
 ### E2E tests (`tests/e2e.sh`)
+
 - Creates issues in remote-dev-bot-test, triggers agent, polls for completion
 - Modes: `--provider claude` (one model family), `--all-models` (every alias)
 - Run via GitHub Actions: `.github/workflows/e2e.yml` (workflow_dispatch)
 - See `./tests/e2e.sh --help` for options
 
 ### Security e2e tests (`tests/e2e-security.sh`)
+
 - Secret exfiltration: verify agent refuses to expose secrets
 - User gating: verify non-collaborator comments don't trigger runs
 - Requires repos to be public and uses `RDB_TESTER_PAT_TOKEN`
 
 ### Loop prevention (not e2e tested — intentionally)
-The design agent has two layers of defense against recursive loops (where its response starts with `/agent` and re-triggers itself): a prompt instruction telling the LLM not to do it, and a regex check that blocks the response if it does. We deliberately do NOT e2e test this, because the test itself would be dangerous — if the regex has a bug, the test creates the very loop it's trying to prevent, consuming LLM budget. The regex is well covered by unit tests (`tests/test_yaml.py::TestLoopPreventionRegex`). The shim's `startsWith(comment.body, '/agent-')` trigger requires `/` as the literal first character (leading whitespace defeats it), which provides an additional layer of safety.
+
+The design agent has two layers of defense against recursive loops (where its
+response starts with `/agent` and re-triggers itself): a prompt instruction
+telling the LLM not to do it, and a regex check that blocks the response if it
+does. We deliberately do NOT e2e test this, because the test itself would be
+dangerous — if the regex has a bug, the test creates the very loop it's trying
+to prevent, consuming LLM budget. The regex is well covered by unit tests
+(`tests/test_yaml.py::TestLoopPreventionRegex`). The shim's
+`startsWith(comment.body, '/agent-')` trigger requires `/` as the literal first
+character (leading whitespace defeats it), which provides an additional layer of
+safety.
 
 ### Compiled workflow tests
-- Unit tests (`tests/test_compile.py`): validate both compiled files (resolve and design) — structure, triggers, permissions, model aliases, security microagent
-- E2E: `./tests/e2e.sh --compiled` swaps compiled workflows into the test repo, runs the full suite, then restores the shim. Use this before releases.
+
+- Unit tests (`tests/test_compile.py`): validate both compiled files (resolve
+  and design) — structure, triggers, permissions, model aliases, security
+  microagent
+- E2E: `./tests/e2e.sh --compiled` swaps compiled workflows into the test repo,
+  runs the full suite, then restores the shim. Use this before releases.
 
 ### Full test suite (`.github/workflows/full-test-suite.yml`)
-- One-button "run everything" workflow: unit tests → e2e shim → e2e compiled → e2e security
-- Jobs run **sequentially** — all e2e tests share `remote-dev-bot-test` and cannot run in parallel (shared e2e-test pointer, workflow files, and issues)
-- **Failure strategy**: unit tests are a fast-fail gate (e2e jobs skip if they fail); the three e2e blocks continue past each other's failures so one run gives a complete picture across all blocks. After a full run, use the individual workflow_dispatch workflows to rerun only the failing blocks.
+
+- One-button "run everything" workflow: unit tests → e2e shim → e2e compiled →
+  e2e security
+- Jobs run **sequentially** — all e2e tests share `remote-dev-bot-test` and
+  cannot run in parallel (shared e2e-test pointer, workflow files, and issues)
+- **Failure strategy**: unit tests are a fast-fail gate (e2e jobs skip if they
+  fail); the three e2e blocks continue past each other's failures so one run
+  gives a complete picture across all blocks. After a full run, use the
+  individual workflow_dispatch workflows to rerun only the failing blocks.
 - Use before releases to validate everything in one go
 
 ### Shared state constraint
-All e2e tests (functional, compiled, security) use `remote-dev-bot-test` as their target repo. They share:
+
+All e2e tests (functional, compiled, security) use `remote-dev-bot-test` as
+their target repo. They share:
+
 - The `e2e-test` branch pointer (set to the branch under test)
 - Workflow files in the test repo (compiled tests swap out the shim)
 - Issues and PRs created during the test run
 
-**Do not run e2e workflows in parallel.** Use the full test suite workflow for sequential execution, or run individual workflows one at a time.
+**Do not run e2e workflows in parallel.** Use the full test suite workflow for
+sequential execution, or run individual workflows one at a time.
 
 ## Release Procedure
 

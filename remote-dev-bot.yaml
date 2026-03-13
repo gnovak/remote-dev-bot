@@ -21,12 +21,11 @@ modes:
       - AGENTS.md
       - CLAUDE.md
       - .gemini/GEMINI.md
-      - .openhands/microagents/repo.md
       - how-it-works.md
-    # Optional: additional_instructions appended to the canonical design prompt.
+    # Optional: extra_instructions appended to the canonical design prompt.
     # Use this to add project-specific guidance (e.g., preferred patterns,
     # areas to focus on, or terminology). Do not duplicate the base prompt.
-    # additional_instructions: |
+    # extra_instructions: |
     #   When analyzing issues, always consider the impact on our deploy pipeline.
 
   review:
@@ -60,11 +59,11 @@ modes:
 
 models:
   claude-small:
-    id: anthropic/claude-sonnet-4-5
+    id: anthropic/claude-sonnet-4-6
     description: "Balanced cost/capability — good default for most tasks"
 
   claude-large:
-    id: anthropic/claude-opus-4-5
+    id: anthropic/claude-opus-4-6
     description: "Most capable — for complex multi-file features"
 
   gpt-small:
@@ -72,8 +71,8 @@ models:
     description: "OpenAI GPT-5.1 Codex Mini — good default"
 
   gpt-large:
-    id: openai/gpt-5.2-codex
-    description: "OpenAI GPT-5.2 Codex — best coding model"
+    id: openai/gpt-5.3-codex
+    description: "OpenAI GPT-5.3 Codex — best coding model"
 
   gemini-small:
     id: gemini/gemini-2.5-flash
@@ -83,16 +82,15 @@ models:
     id: gemini/gemini-2.5-pro
     description: "Google Gemini 2.5 Pro"
 
-# OpenHands settings
-openhands:
-  # Pin to a specific version to avoid regressions (check for updates periodically)
-  version: "1.4.0"
+# Agent settings (resolve mode)
+# Note: 'openhands:' is accepted as a backward-compatible alias for 'agent:'
+agent:
   # Max agent iterations per run (controls cost ceiling)
   max_iterations: 50
   # PR type: "draft" or "ready"
   pr_type: ready
-  # Target branch for PRs
-  target_branch: main
+  # Target branch for PRs created by the agent
+  branch: main
   # What to do when the agent can't fully resolve the issue (success=False):
   #   comment — post a comment with the agent's evaluation, no PR (default)
   #   draft   — post the same comment AND open a draft PR with partial changes

@@ -18,9 +18,9 @@ openhands:
 
 modes:
   design:
-    # Extend context_files to include rdb implementation files.
+    # Extend extra_files to include rdb implementation files.
     # Lists replace (not concatenate), so include everything wanted.
-    context_files:
+    extra_files:
       # Standard project docs (same as base remote-dev-bot.yaml)
       - README.md
       - CONTRIBUTING.md
@@ -31,9 +31,7 @@ modes:
       - how-it-works.md
       # rdb implementation files (only meaningful when devving rdb itself)
       - lib/config.py
-      - scripts/compile.py
       - lib/feedback.py
-      - scripts/compile.py
       # rdb workflows (core of the system)
       - .github/workflows/remote-dev-bot.yml
       - .github/workflows/agent.yml

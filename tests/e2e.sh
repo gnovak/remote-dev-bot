@@ -6,13 +6,12 @@
 #
 # Usage:
 #   ./tests/e2e.sh [--branch <branch>] [--test <name>] [--provider <name>]
-#                  [--all-models] [--compiled]
+#                  [--all-models]
 #
 #   --branch      Branch to test (default: main). Sets e2e-test pointer to this branch.
 #   --test        Run a specific test only (default: all)
 #   --provider    Run only tests for a specific model family (claude/gpt/gemini)
 #   --all-models  Test every model alias, not just one per provider
-#   --compiled    Test compiled workflows instead of shim (pre-release validation)
 
 set -euo pipefail
 
@@ -26,7 +25,6 @@ BRANCH="main"
 FILTER_TEST=""
 FILTER_PROVIDER=""
 ALL_MODELS=false
-USE_COMPILED=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -34,9 +32,8 @@ while [[ $# -gt 0 ]]; do
         --test) FILTER_TEST="$2"; shift 2 ;;
         --provider) FILTER_PROVIDER="$2"; shift 2 ;;
         --all-models) ALL_MODELS=true; shift ;;
-        --compiled) USE_COMPILED=true; shift ;;
         -h|--help)
-            head -17 "$0" | tail -13
+            head -16 "$0" | tail -12
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -99,11 +96,14 @@ if $ALL_MODELS; then
         exit 1
     fi
 
-    # Read all model aliases and their model family names from the config
+    # Read all model aliases and their model family names from the config.
+    # Tasks modify README.md rather than creating new files — Gemini models use
+    # insert_line=0 when creating files from scratch, which sets wrong file
+    # ownership and causes git add to fail with Permission denied. See #272.
     while IFS='|' read -r alias model_family; do
         safe_alias="${alias//-/_}"
-        add_test "$alias" "Test ($alias): add hello_${safe_alias}.py" \
-            "Create a file hello_${safe_alias}.py with a function hello() that returns 'Hello from ${alias}!'" \
+        add_test "$alias" "Test ($alias): update README for ${alias}" \
+            "Add a '## ${alias}' section to README.md containing a Python code block with a function hello_${safe_alias}() that returns 'Hello from ${alias}!'." \
             "/agent-resolve-$alias" "$model_family" "resolve"
     done < <(python3 -c "
 import yaml, sys
@@ -119,8 +119,8 @@ for alias, info in config.get('models', {}).items():
 ")
 
     # Default model test (resolve mode, no alias)
-    add_test "default-model" "Test (default): add hello_default.py" \
-        "Create a file hello_default.py with a function hello() that returns 'Hello from default!'" \
+    add_test "default-model" "Test (default): update README for default" \
+        "Add a '## Default' section to README.md containing a Python code block with a function hello_default() that returns 'Hello from default!'." \
         "/agent-resolve" "all" "resolve"
 else
     # Smoke tests: one small model per provider + default
@@ -136,13 +136,16 @@ else
         "Create a file wave.py with a function wave() that returns 'Wave!'" \
         "/agent-resolve-gpt-small" "gpt" "resolve"
 
-    add_test "gemini" "Test: add hi.py" \
-        "Create a file hi.py with a function hi() that returns 'Hi!'" \
+    # Modify README.md rather than creating a new file — Gemini models use
+    # insert_line=0 when creating files from scratch, which sets wrong file
+    # ownership and causes git add to fail with Permission denied. See #272.
+    add_test "gemini" "Test: update README with hi function" \
+        "Add a '## Gemini' section to README.md containing a Python code block with a function hi() that returns 'Hi!'." \
         "/agent-resolve-gemini-small" "gemini" "resolve"
 
-    # Design mode smoke test
+    # Design mode smoke test (agentic loop with tool calling)
     add_test "design" "Test: design analysis" \
-        "Discuss whether this test repo should have a README. What would you include?" \
+        "Discuss the design trade-offs of storing configuration in YAML vs TOML vs JSON for a developer tooling project." \
         "/agent-design" "all" "design"
 
     # Explore mode smoke test (dev-only feature)
@@ -162,6 +165,35 @@ fi
 log() { echo "==> $*"; }
 err() { echo "ERROR: $*" >&2; }
 
+# Post a comment on an issue, retrying on GraphQL "Could not resolve" errors.
+# GitHub's GraphQL API can return this transiently for newly created issues due
+# to eventual consistency. Retries up to 5 times with 3-second backoff.
+post_issue_comment() {
+    local issue_num="$1"
+    local repo="$2"
+    local body="$3"
+    local max_retries=5
+    local retry_delay=3
+    local attempt=1
+    while [[ $attempt -le $max_retries ]]; do
+        if gh issue comment "$issue_num" --repo "$repo" --body "$body" 2>/tmp/e2e_comment_err; then
+            return 0
+        fi
+        if grep -q "Could not resolve" /tmp/e2e_comment_err 2>/dev/null; then
+            log "  Warning: issue #$issue_num not yet visible via GraphQL (attempt $attempt/$max_retries), retrying in ${retry_delay}s..."
+            sleep "$retry_delay"
+            attempt=$((attempt + 1))
+        else
+            # Non-transient error: propagate it
+            cat /tmp/e2e_comment_err >&2
+            return 1
+        fi
+    done
+    err "Failed to comment on issue #$issue_num after $max_retries attempts"
+    cat /tmp/e2e_comment_err >&2
+    return 1
+}
+
 # Extract cost from a Cost Summary comment body.
 # Returns the cost as a decimal string (e.g., "1.23") or "0.00" if not found.
 parse_cost_from_comment() {
@@ -179,100 +211,6 @@ parse_cost_from_comment() {
 cleanup_issues=()
 cleanup_branches=()
 
-# --- Compiled workflow swap ---
-# When --compiled is used, we replace the shim (agent.yml) in the test repo
-# with agent-resolve.yml, add agent-design.yml, run the full test suite, then
-# restore the original shim and remove agent-design.yml.
-
-ORIGINAL_SHIM_CONTENT=""  # base64-encoded original shim
-ORIGINAL_SHIM_SHA=""      # SHA for restoring
-DESIGN_WORKFLOW_SHA=""     # SHA for removing agent-design.yml on cleanup
-
-install_compiled_workflow() {
-    log "Compiling workflows..."
-    python3 scripts/compile.py /tmp/compiled-workflows
-
-    log "Saving original shim from $TEST_REPO..."
-    local shim_response
-    shim_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml")
-    ORIGINAL_SHIM_CONTENT=$(echo "$shim_response" | jq -r '.content' | tr -d '\n')
-    ORIGINAL_SHIM_SHA=$(echo "$shim_response" | jq -r '.sha')
-
-    log "Replacing shim with compiled resolve workflow..."
-    local resolve_content
-    resolve_content=$(base64 < /tmp/compiled-workflows/agent-resolve.yml | tr -d '\n')
-
-    gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
-        --method PUT \
-        -f message="E2E: swap shim for compiled resolve workflow (pre-release test)" \
-        -f content="$resolve_content" \
-        -f sha="$ORIGINAL_SHIM_SHA" >/dev/null
-
-    log "Adding compiled design workflow..."
-    local design_content
-    design_content=$(base64 < /tmp/compiled-workflows/agent-design.yml | tr -d '\n')
-
-    local design_response
-    design_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-        --method PUT \
-        -f message="E2E: add compiled design workflow (pre-release test)" \
-        -f content="$design_content" 2>&1) || {
-        # File may already exist; get its SHA and update
-        local existing_sha
-        existing_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-            --jq '.sha' 2>/dev/null || echo "")
-        if [[ -n "$existing_sha" ]]; then
-            design_response=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-                --method PUT \
-                -f message="E2E: update compiled design workflow (pre-release test)" \
-                -f content="$design_content" \
-                -f sha="$existing_sha")
-        fi
-    }
-    DESIGN_WORKFLOW_SHA=$(echo "$design_response" | jq -r '.content.sha' 2>/dev/null || echo "")
-
-    log "Compiled workflows installed. Waiting 10s for GitHub to register..."
-    sleep 10
-}
-
-restore_shim() {
-    if [[ -z "$ORIGINAL_SHIM_CONTENT" ]]; then return; fi
-    log "Restoring original shim in $TEST_REPO..."
-
-    # Get current SHA (it changed when we installed compiled)
-    local current_sha
-    current_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
-        --jq '.sha' 2>/dev/null || echo "")
-
-    if [[ -z "$current_sha" ]]; then
-        err "Could not find agent.yml to restore — manual fix needed!"
-        return
-    fi
-
-    if gh api "repos/$TEST_REPO/contents/.github/workflows/agent.yml" \
-        --method PUT \
-        -f message="E2E: restore original shim after pre-release test" \
-        -f content="$ORIGINAL_SHIM_CONTENT" \
-        -f sha="$current_sha" >/dev/null 2>&1; then
-        log "  Original shim restored."
-    else
-        err "Failed to restore shim — manual fix needed!"
-        err "Original content saved in ORIGINAL_SHIM_CONTENT variable"
-    fi
-
-    # Remove agent-design.yml if we added it
-    local design_sha
-    design_sha=$(gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-        --jq '.sha' 2>/dev/null || echo "")
-    if [[ -n "$design_sha" ]]; then
-        gh api "repos/$TEST_REPO/contents/.github/workflows/agent-design.yml" \
-            -X DELETE \
-            -f message="E2E: remove compiled design workflow after pre-release test" \
-            -f sha="$design_sha" >/dev/null 2>&1 || true
-        log "  Compiled design workflow removed."
-    fi
-}
-
 cleanup() {
     log "Cleaning up..."
     for issue_num in "${cleanup_issues[@]+"${cleanup_issues[@]}"}"; do
@@ -281,9 +219,6 @@ cleanup() {
     for branch in "${cleanup_branches[@]+"${cleanup_branches[@]}"}"; do
         gh api "repos/$TEST_REPO/git/refs/heads/$branch" -X DELETE 2>/dev/null || true
     done
-    if $USE_COMPILED; then
-        restore_shim
-    fi
     log "Cleanup complete."
 }
 
@@ -312,16 +247,7 @@ fi
 
 mode="smoke"
 $ALL_MODELS && mode="all-models"
-if $USE_COMPILED; then
-    log "COMPILED MODE: testing compiled workflows (pre-release validation)"
-fi
 log "Running ${#active_indices[@]} test(s) against branch '$BRANCH' ($mode)"
-
-# --- Install compiled workflow if requested ---
-
-if $USE_COMPILED; then
-    install_compiled_workflow
-fi
 
 # --- Point e2e-test at target branch ---
 # Always reset e2e-test, even when testing main. e2e-test can drift (e.g. stuck at an old
@@ -339,29 +265,24 @@ is_baseline_id() {
     echo "$BASELINE_IDS" | grep -qx "$id"
 }
 
-# --- Find old merged PR for review test ---
-# The review test uses a previously merged PR from rdb-test, eliminating the
-# dependency on the resolve tests creating a fresh PR first.
-log "Finding most recently merged PR in $TEST_REPO for review test..."
-REVIEW_PR_NUM=$(gh pr list --repo "$TEST_REPO" --state merged --limit 1 --json number --jq '.[0].number' 2>/dev/null || echo "")
-REVIEW_PR_TITLE=""
-REVIEW_MATCH_STR=""
-REVIEW_SKIP=false
-
-if [[ -z "$REVIEW_PR_NUM" ]]; then
-    log "  Warning: no merged PR found — review test will be skipped"
-    REVIEW_SKIP=true
-else
-    REVIEW_PR_TITLE=$(gh pr view "$REVIEW_PR_NUM" --repo "$TEST_REPO" --json title --jq '.title' 2>/dev/null || echo "")
-    # Extract the e2e timestamp tag from the PR title (e.g. e2e-1234567890)
-    REVIEW_MATCH_STR=$(echo "$REVIEW_PR_TITLE" | grep -oE 'e2e-[0-9]+' | head -1 || echo "")
-    if [[ -z "$REVIEW_MATCH_STR" ]]; then
-        # Fallback: match by PR number in the title
-        REVIEW_MATCH_STR="Fix issue.*$REVIEW_PR_NUM"
-    fi
-    log "  Will use PR #$REVIEW_PR_NUM (title: '$REVIEW_PR_TITLE')"
-    log "  Review match string: '$REVIEW_MATCH_STR'"
-fi
+# --- Review + Feedback test state ---
+# Review+Feedback is a self-contained test: create issue → resolve → review open PR → feedback resolve.
+# The rf-resolve step runs in parallel with the main tests. rf-review and rf-feedback
+# resolve) run sequentially after the main polling loop completes.
+RF_TS=$(date +%s)
+RF_ISSUE_NUM=""
+RF_RESOLVE_RUN_ID=""
+RF_RESOLVE_RESULT=""
+RF_PR_NUM=""
+RF_PR_BRANCH=""
+RF_INITIAL_SHA=""
+# Review step state
+RF_REVIEW_RUN_ID=""
+RF_REVIEW_RESULT=""
+# Feedback step state
+RF_FEEDBACK_RUN_ID=""
+RF_FEEDBACK_RESULT=""
+RF_FEEDBACK_NEW_SHA=""
 
 # --- Create all test issues and trigger all workflows simultaneously ---
 
@@ -392,17 +313,19 @@ for idx in "${active_indices[@]}"; do
     cleanup_issues+=("$issue_num")
 
     log "  Issue #$issue_num created. Triggering: $cmd"
-    gh issue comment "$issue_num" --repo "$TEST_REPO" --body "$cmd"
+    post_issue_comment "$issue_num" "$TEST_REPO" "$cmd"
 done
 
-# --- Trigger review test ---
-REVIEW_RUN_ID=""
-REVIEW_RESULT=""
-
-if [[ "$REVIEW_SKIP" == "false" ]]; then
-    log "Posting /agent-review on PR #$REVIEW_PR_NUM..."
-    gh pr comment "$REVIEW_PR_NUM" --repo "$TEST_REPO" --body "/agent-review"
-fi
+# --- Create review+feedback issue and trigger resolve ---
+# Uses a unique e2e-rv-$RF_TS tag so rf runs can be identified unambiguously.
+log "Creating review+feedback issue..."
+rf_issue_url=$(gh issue create --repo "$TEST_REPO" \
+    --title "Test: review+feedback (e2e-rv-$RF_TS)" \
+    --body "Add a '## ReviewFeedback' section to README.md containing a Python code block with a function rf_stub() that returns None.")
+RF_ISSUE_NUM="${rf_issue_url##*/}"
+cleanup_issues+=("$RF_ISSUE_NUM")
+log "  Issue #$RF_ISSUE_NUM created. Triggering /agent-resolve..."
+post_issue_comment "$RF_ISSUE_NUM" "$TEST_REPO" "/agent-resolve"
 
 # --- Trigger timeout test ---
 log "Creating timeout test issue..."
@@ -414,12 +337,28 @@ timeout_issue_url=$(gh issue create --repo "$TEST_REPO" \
 timeout_issue_num="${timeout_issue_url##*/}"
 cleanup_issues+=("$timeout_issue_num")
 
-log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout_minutes = 5..."
-gh issue comment "$timeout_issue_num" --repo "$TEST_REPO" \
-    --body $'/agent-resolve\ntimeout_minutes = 5'
+log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout_minutes = 1..."
+post_issue_comment "$timeout_issue_num" "$TEST_REPO" $'/agent-resolve\ntimeout_minutes = 1'
 
 TIMEOUT_RUN_ID=""
 TIMEOUT_RESULT=""
+
+# --- Trigger wrapup test ---
+# Verifies that approaching max_iterations triggers graceful wrapup instructions.
+log "Creating wrapup test issue..."
+wrapup_ts=$(date +%s)
+wrapup_title="Test: graceful wrapup (e2e-wrapup-$wrapup_ts)"
+wrapup_issue_url=$(gh issue create --repo "$TEST_REPO" \
+    --title "$wrapup_title" \
+    --body "Implement a comprehensive test suite with 20+ test cases for all Python files in this repository. Include edge cases, error paths, and integration tests.")
+wrapup_issue_num="${wrapup_issue_url##*/}"
+cleanup_issues+=("$wrapup_issue_num")
+
+log "  Issue #$wrapup_issue_num. Posting /agent-resolve with max_iterations = 4..."
+post_issue_comment "$wrapup_issue_num" "$TEST_REPO" $'/agent-resolve\nmax_iterations = 4'
+
+WRAPUP_RUN_ID=""
+WRAPUP_RESULT=""
 
 # Give all workflows a moment to start before polling
 log "Waiting 15s for all workflows to start..."
@@ -429,7 +368,7 @@ sleep 15
 #
 # Match runs to tests using displayTitle, which includes the issue/PR title.
 # Resolve tests: title contains e2e-$timestamp (unique per run) AND the test's title prefix.
-# Review test: title contains $REVIEW_MATCH_STR (from old merged PR's title).
+# Review+Feedback resolve: title contains e2e-rv-$RF_TS.
 # Timeout test: title contains e2e-timeout-$timeout_ts.
 # All non-baseline runs only (exclude pre-existing runs captured above).
 
@@ -495,8 +434,8 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
         fi
     done
 
-    # --- Poll review test ---
-    if [[ "$REVIEW_SKIP" == "false" && -z "$REVIEW_RESULT" ]]; then
+    # --- Poll review+feedback resolve ---
+    if [[ -z "$RF_RESOLVE_RESULT" ]]; then
         all_done=false
 
         while IFS= read -r row; do
@@ -509,13 +448,24 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
             [[ "$conclusion" == "skipped" ]] && continue
             is_baseline_id "$run_id" && continue
 
-            if [[ "$display_title" =~ $REVIEW_MATCH_STR ]]; then
-                REVIEW_RUN_ID="$run_id"
+            if [[ "$display_title" == *"e2e-rv-$RF_TS"* ]]; then
+                RF_RESOLVE_RUN_ID="$run_id"
                 if [[ "$status" == "completed" ]]; then
-                    REVIEW_RESULT="$conclusion"
-                    log "  review: $conclusion (run $run_id)"
+                    RF_RESOLVE_RESULT="$conclusion"
+                    log "  rf-resolve: $conclusion (run $run_id)"
+                    # Locate the PR and capture its initial commit SHA
+                    RF_PR_BRANCH="rdb-fix-issue-$RF_ISSUE_NUM"
+                    RF_PR_NUM=$(gh pr list --repo "$TEST_REPO" \
+                        --search "head:$RF_PR_BRANCH" \
+                        --json number --jq '.[0].number // empty' 2>/dev/null || echo "")
+                    if [[ -n "$RF_PR_NUM" ]]; then
+                        RF_INITIAL_SHA=$(gh api "repos/$TEST_REPO/git/ref/heads/$RF_PR_BRANCH" \
+                            --jq '.object.sha' 2>/dev/null || echo "")
+                        cleanup_branches+=("$RF_PR_BRANCH")
+                        log "  rf-resolve: PR #$RF_PR_NUM branch $RF_PR_BRANCH (SHA ${RF_INITIAL_SHA:0:7})"
+                    fi
                 else
-                    log "  review: $status (run $run_id)"
+                    log "  rf-resolve: $status (run $run_id)"
                 fi
                 break
             fi
@@ -549,6 +499,33 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
         done <<< "$(echo "$run_json" | jq -c '.[]')"
     fi
 
+    # --- Poll wrapup test ---
+    if [[ -z "$WRAPUP_RESULT" ]]; then
+        all_done=false
+
+        while IFS= read -r row; do
+            [[ -z "$row" ]] && continue
+            display_title=$(echo "$row" | jq -r '.displayTitle')
+            status=$(echo "$row" | jq -r '.status')
+            conclusion=$(echo "$row" | jq -r '.conclusion')
+            run_id=$(echo "$row" | jq -r '.databaseId')
+
+            [[ "$conclusion" == "skipped" ]] && continue
+            is_baseline_id "$run_id" && continue
+
+            if [[ "$display_title" == *"e2e-wrapup-$wrapup_ts"* ]]; then
+                WRAPUP_RUN_ID="$run_id"
+                if [[ "$status" == "completed" ]]; then
+                    WRAPUP_RESULT="$conclusion"
+                    log "  wrapup-test: $conclusion (run $run_id)"
+                else
+                    log "  wrapup-test: $status (run $run_id)"
+                fi
+                break
+            fi
+        done <<< "$(echo "$run_json" | jq -c '.[]')"
+    fi
+
     if $all_done; then
         break
     fi
@@ -558,15 +535,118 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
     elapsed=$((elapsed + POLL_INTERVAL))
 done
 
+# --- Review step (sequential, after main polling loop) ---
+# Post /agent-review on the open PR created by rf-resolve.
+# Capture a new baseline first so rf-resolve's run ID is excluded.
+
+if [[ "$RF_RESOLVE_RESULT" == "success" && -n "$RF_PR_NUM" ]]; then
+    log ""
+    log "rf-review: Posting /agent-review on PR #$RF_PR_NUM..."
+    # Capture baseline of existing run IDs before posting the comment, so we can
+    # identify the new run by exclusion rather than by displayTitle (which for a
+    # PR comment trigger equals the PR title, not the tagged issue title).
+    RF_REVIEW_BASELINE=$(gh run list --repo "$TEST_REPO" --limit 50 \
+        --event issue_comment --json databaseId \
+        --jq '.[].databaseId' 2>/dev/null || echo "")
+
+    gh pr comment "$RF_PR_NUM" --repo "$TEST_REPO" --body "/agent-review"
+
+    rf_review_elapsed=0
+    RF_REVIEW_TIMEOUT=1200  # 20 minutes
+
+    while [[ $rf_review_elapsed -lt $RF_REVIEW_TIMEOUT && -z "$RF_REVIEW_RESULT" ]]; do
+        rf_review_json=$(gh run list --repo "$TEST_REPO" --limit 50 \
+            --event issue_comment \
+            --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
+
+        while IFS= read -r row; do
+            [[ -z "$row" ]] && continue
+            status=$(echo "$row" | jq -r '.status')
+            conclusion=$(echo "$row" | jq -r '.conclusion')
+            run_id=$(echo "$row" | jq -r '.databaseId')
+
+            [[ "$conclusion" == "skipped" ]] && continue
+            # Skip any run that existed before we posted /agent-review
+            echo "$RF_REVIEW_BASELINE" | grep -qx "$run_id" && continue
+
+            # This is a new issue_comment-triggered run — it must be ours
+            RF_REVIEW_RUN_ID="$run_id"
+            if [[ "$status" == "completed" ]]; then
+                RF_REVIEW_RESULT="$conclusion"
+                log "  rf-review: $conclusion (run $run_id)"
+            else
+                log "  rf-review: $status (run $run_id)"
+            fi
+            break
+        done <<< "$(echo "$rf_review_json" | jq -c '.[]')"
+
+        if [[ -z "$RF_REVIEW_RESULT" ]]; then
+            log "  rf-review: waiting... (${rf_review_elapsed}s)"
+            sleep "$POLL_INTERVAL"
+            rf_review_elapsed=$((rf_review_elapsed + POLL_INTERVAL))
+        fi
+    done
+fi
+
+# --- Feedback step (sequential, after rf-review) ---
+# Post a feedback comment + /agent-resolve on the PR, then wait for a new commit.
+# Capture a new baseline so rf-review's run ID is excluded.
+
+if [[ "$RF_REVIEW_RESULT" == "success" && -n "$RF_PR_NUM" ]]; then
+    log ""
+    log "rf-feedback: Posting feedback + /agent-resolve on PR #$RF_PR_NUM..."
+    RF_FEEDBACK_BASELINE=$(gh run list --repo "$TEST_REPO" --limit 50 --json databaseId \
+        --jq '.[].databaseId' 2>/dev/null || echo "")
+
+    # Post feedback first, then trigger resolve
+    gh pr comment "$RF_PR_NUM" --repo "$TEST_REPO" \
+        --body "Please update rf_stub() to return the string 'hello world' instead of None."
+    sleep 2
+    gh pr comment "$RF_PR_NUM" --repo "$TEST_REPO" --body "/agent-resolve"
+
+    rf_feedback_elapsed=0
+    RF_FEEDBACK_TIMEOUT=1200  # 20 minutes
+
+    while [[ $rf_feedback_elapsed -lt $RF_FEEDBACK_TIMEOUT && -z "$RF_FEEDBACK_RESULT" ]]; do
+        rf_feedback_json=$(gh run list --repo "$TEST_REPO" --limit 50 \
+            --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
+
+        while IFS= read -r row; do
+            [[ -z "$row" ]] && continue
+            display_title=$(echo "$row" | jq -r '.displayTitle')
+            status=$(echo "$row" | jq -r '.status')
+            conclusion=$(echo "$row" | jq -r '.conclusion')
+            run_id=$(echo "$row" | jq -r '.databaseId')
+
+            [[ "$conclusion" == "skipped" ]] && continue
+            echo "$RF_FEEDBACK_BASELINE" | grep -qx "$run_id" && continue
+
+            RF_FEEDBACK_RUN_ID="$run_id"
+            if [[ "$status" == "completed" ]]; then
+                RF_FEEDBACK_RESULT="$conclusion"
+                log "  rf-feedback: $conclusion (run $run_id)"
+                # Check whether the branch has a new commit
+                RF_FEEDBACK_NEW_SHA=$(gh api "repos/$TEST_REPO/git/ref/heads/$RF_PR_BRANCH" \
+                    --jq '.object.sha' 2>/dev/null || echo "")
+            else
+                log "  rf-feedback: $status (run $run_id)"
+            fi
+            break
+        done <<< "$(echo "$rf_feedback_json" | jq -c '.[]')"
+
+        if [[ -z "$RF_FEEDBACK_RESULT" ]]; then
+            log "  rf-feedback: waiting... (${rf_feedback_elapsed}s)"
+            sleep "$POLL_INTERVAL"
+            rf_feedback_elapsed=$((rf_feedback_elapsed + POLL_INTERVAL))
+        fi
+    done
+fi
+
 # --- Verify results ---
 
 log ""
 log "========================================="
-if $USE_COMPILED; then
-    log "  E2E Test Results (COMPILED)"
-else
-    log "  E2E Test Results"
-fi
+log "  E2E Test Results"
 log "========================================="
 
 pass=0
@@ -608,16 +688,16 @@ for pos in "${!issue_nums[@]}"; do
         else
             # Resolve mode: check if a PR was created
             pr_count=$(gh pr list --repo "$TEST_REPO" \
-                --search "head:openhands-fix-issue-$issue_num" \
+                --search "head:rdb-fix-issue-$issue_num" \
                 --json number --jq 'length' 2>/dev/null || echo "0")
 
             if [[ "$pr_count" -gt 0 ]]; then
                 status="PASS"
                 ((pass++)) || true
-                cleanup_branches+=("openhands-fix-issue-$issue_num")
+                cleanup_branches+=("rdb-fix-issue-$issue_num")
             else
-                status="PASS (no PR)"
-                ((pass++)) || true
+                status="FAIL (no PR created)"
+                ((fail++)) || true
             fi
         fi
     elif [[ "$conclusion" == "timeout" ]]; then
@@ -637,37 +717,58 @@ for pos in "${!issue_nums[@]}"; do
     printf "  %-25s %-30s issue #%-5s %s\n" "$name" "$status" "$issue_num" "$log_url"
 done
 
-# --- Review test result ---
+# --- Review + Feedback results ---
 log ""
-log "--- Review Test ---"
+log "--- Review + Feedback Test ---"
 
-REVIEW_PASS=0
-REVIEW_FAIL=0
+RF_PASS=0
+RF_FAIL=0
+rf_pr_ref="${RF_PR_NUM:-N/A}"
 
-review_log_url=""
-[[ -n "$REVIEW_RUN_ID" ]] && review_log_url="https://github.com/$TEST_REPO/actions/runs/$REVIEW_RUN_ID"
+# rf-resolve result
+rf_resolve_url=""
+[[ -n "$RF_RESOLVE_RUN_ID" ]] && rf_resolve_url="https://github.com/$TEST_REPO/actions/runs/$RF_RESOLVE_RUN_ID"
+if [[ -z "$RF_RESOLVE_RESULT" ]]; then
+    rf_resolve_status="TIMEOUT"
+    ((RF_FAIL++)) || true
+elif [[ "$RF_RESOLVE_RESULT" == "success" ]]; then
+    if [[ -n "$RF_PR_NUM" ]]; then
+        rf_resolve_status="PASS (PR #$RF_PR_NUM)"
+        ((RF_PASS++)) || true
+    else
+        rf_resolve_status="FAIL (no PR found)"
+        ((RF_FAIL++)) || true
+    fi
+else
+    rf_resolve_status="FAIL ($RF_RESOLVE_RESULT)"
+    ((RF_FAIL++)) || true
+fi
+printf "  %-25s %-30s issue #%-5s %s\n" "rf-resolve" "$rf_resolve_status" "${RF_ISSUE_NUM:-N/A}" "$rf_resolve_url"
 
-if [[ "$REVIEW_SKIP" == "true" ]]; then
-    review_status="SKIPPED (no merged PR found)"
-elif [[ -z "$REVIEW_RESULT" ]]; then
-    review_status="TIMEOUT"
-    ((REVIEW_FAIL++)) || true
-elif [[ "$REVIEW_RESULT" == "success" ]]; then
-    # Verify review comment was posted on the PR
-    comment_count=$(gh api "repos/$TEST_REPO/issues/$REVIEW_PR_NUM/comments" \
+# rf-review result
+rf_review_url=""
+[[ -n "$RF_REVIEW_RUN_ID" ]] && rf_review_url="https://github.com/$TEST_REPO/actions/runs/$RF_REVIEW_RUN_ID"
+if [[ "$RF_RESOLVE_RESULT" != "success" || -z "$RF_PR_NUM" ]]; then
+    rf_review_status="FAIL (resolve didn't create PR)"
+    ((RF_FAIL++)) || true
+elif [[ -z "$RF_REVIEW_RESULT" ]]; then
+    rf_review_status="TIMEOUT"
+    ((RF_FAIL++)) || true
+elif [[ "$RF_REVIEW_RESULT" == "success" ]]; then
+    comment_count=$(gh api "repos/$TEST_REPO/issues/$RF_PR_NUM/comments" \
         --jq '[.[] | select(.body | contains("Code review by"))] | length' \
         2>/dev/null || echo "0")
     if [[ "$comment_count" -gt 0 ]]; then
-        review_status="PASS (review comment posted)"
-        ((REVIEW_PASS++)) || true
+        rf_review_status="PASS (review comment posted)"
     else
-        review_status="PASS (no review comment found)"
-        ((REVIEW_PASS++)) || true
+        rf_review_status="PASS (no review comment found)"
     fi
+    ((RF_PASS++)) || true
 else
-    review_status="FAIL ($REVIEW_RESULT)"
-    ((REVIEW_FAIL++)) || true
+    rf_review_status="FAIL ($RF_REVIEW_RESULT)"
+    ((RF_FAIL++)) || true
 fi
+printf "  %-25s %-30s PR #%-5s  %s\n" "rf-review" "$rf_review_status" "$rf_pr_ref" "$rf_review_url"
 
 
 review_ref="${REVIEW_PR_NUM:-N/A}"
@@ -839,23 +940,41 @@ for pos in "${!issue_nums[@]}"; do
     fi
 done
 
-# Collect cost from review test
-if [[ "$REVIEW_SKIP" == "false" && -n "$REVIEW_PR_NUM" ]]; then
-    cost_comment=$(gh api "repos/$TEST_REPO/issues/$REVIEW_PR_NUM/comments" \
+# Collect cost from rf-resolve (issue comments)
+if [[ -n "$RF_ISSUE_NUM" ]]; then
+    cost_comment=$(gh api "repos/$TEST_REPO/issues/$RF_ISSUE_NUM/comments" \
         --jq '[.[] | select(.body | contains("Cost Summary"))] | last | .body' \
         2>/dev/null || echo "")
-
     if [[ -n "$cost_comment" ]]; then
         cost=$(parse_cost_from_comment "$cost_comment")
         if [[ -n "$cost" && "$cost" != "0.00" ]]; then
             total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
             ((cost_count++)) || true
-            printf "  %-25s \$%s\n" "review" "$cost"
+            printf "  %-25s \$%s\n" "rf-resolve" "$cost"
         else
-            printf "  %-25s (no cost data)\n" "review"
+            printf "  %-25s (no cost data)\n" "rf-resolve"
         fi
     else
-        printf "  %-25s (no cost comment)\n" "review"
+        printf "  %-25s (no cost comment)\n" "rf-resolve"
+    fi
+fi
+
+# Collect costs from rf-review and rf-feedback (PR comments)
+if [[ -n "$RF_PR_NUM" ]]; then
+    cost_comment=$(gh api "repos/$TEST_REPO/issues/$RF_PR_NUM/comments" \
+        --jq '[.[] | select(.body | contains("Cost Summary"))] | last | .body' \
+        2>/dev/null || echo "")
+    if [[ -n "$cost_comment" ]]; then
+        cost=$(parse_cost_from_comment "$cost_comment")
+        if [[ -n "$cost" && "$cost" != "0.00" ]]; then
+            total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
+            ((cost_count++)) || true
+            printf "  %-25s \$%s\n" "rf-review+feedback" "$cost"
+        else
+            printf "  %-25s (no cost data)\n" "rf-review+feedback"
+        fi
+    else
+        printf "  %-25s (no cost comment)\n" "rf-review+feedback"
     fi
 fi
 
@@ -884,7 +1003,7 @@ log "  Total cost: \$$total_cost ($cost_count tests with cost data)"
 log ""
 log "========================================="
 log "  Resolve/Design: Pass: $pass  Fail: $fail  Timeout: $timeout_count"
-log "  Review:         Pass: $REVIEW_PASS  Fail: $REVIEW_FAIL"
+log "  Review+Feedback:  Pass: $RF_PASS  Fail: $RF_FAIL"
 log "  Timeout test:   Pass: $TIMEOUT_PHASE_PASS  Fail: $TIMEOUT_PHASE_FAIL"
 log "  Wrapup test:    Pass: $WRAPUP_PHASE_PASS  Fail: $WRAPUP_PHASE_FAIL"
 log "  Total cost:     \$$total_cost"

@@ -17,7 +17,6 @@ from lib.config import (
     parse_command,
     parse_invocation,
     resolve_config,
-    resolve_commit_trailer,
 )
 
 
@@ -158,13 +157,13 @@ def test_parse_command_case_insensitive_mixed():
 def test_normalize_arg_name_spaces():
     """Spaces should be converted to underscores."""
     assert normalize_arg_name("max iterations") == "max_iterations"
-    assert normalize_arg_name("context files") == "context_files"
+    assert normalize_arg_name("extra files") == "extra_files"
 
 
 def test_normalize_arg_name_dashes():
     """Dashes should be converted to underscores."""
     assert normalize_arg_name("max-iterations") == "max_iterations"
-    assert normalize_arg_name("context-files") == "context_files"
+    assert normalize_arg_name("extra-files") == "extra_files"
 
 
 def test_normalize_arg_name_mixed():
@@ -198,8 +197,14 @@ def test_parse_args_max_iterations():
     assert parse_args(["max_iterations=50"]) == {"max_iterations": 50}
 
 
-def test_parse_args_target_branch():
-    """target_branch should be parsed as str."""
+def test_parse_args_branch():
+    """branch should be parsed as str."""
+    assert parse_args(["branch = design/gemini"]) == {"branch": "design/gemini"}
+    assert parse_args(["branch = my-feature"]) == {"branch": "my-feature"}
+
+
+def test_parse_args_target_branch_backcompat():
+    """target_branch is still accepted as a BACKCOMPAT alias for branch."""
     assert parse_args(["target_branch = design/gemini"]) == {"target_branch": "design/gemini"}
     assert parse_args(["target branch = my-feature"]) == {"target_branch": "my-feature"}
 
@@ -219,7 +224,7 @@ def test_parse_args_multiple():
     ])
     assert result == {
         "max_iterations": 75,
-        "context_files": ["file1.txt", "file2.txt"],
+        "extra_files": ["file1.txt", "file2.txt"],
     }
 
 
@@ -234,7 +239,7 @@ def test_parse_args_skip_empty_lines():
     ])
     assert result == {
         "max_iterations": 75,
-        "context_files": ["file.txt"],
+        "extra_files": ["file.txt"],
     }
 
 
@@ -257,7 +262,7 @@ def test_parse_args_skip_lines_without_equals():
     ])
     assert result == {
         "max_iterations": 75,
-        "context_files": ["file.txt"],
+        "extra_files": ["file.txt"],
     }
 
 
@@ -334,7 +339,7 @@ def test_parse_invocation_with_model_and_args():
     mode, alias, args = parse_invocation(comment, KNOWN_MODES)
     assert mode == "resolve"
     assert alias == "claude-large"
-    assert args == {"max_iterations": 100, "context_files": ["file.txt"]}
+    assert args == {"max_iterations": 100, "extra_files": ["file.txt"]}
 
 
 def test_parse_invocation_dash_syntax():
@@ -343,7 +348,7 @@ def test_parse_invocation_dash_syntax():
     mode, alias, args = parse_invocation(comment, KNOWN_MODES)
     assert mode == "design"
     assert alias == "claude-small"
-    assert args == {"context_files": ["a.txt", "b.txt"]}
+    assert args == {"extra_files": ["a.txt", "b.txt"]}
 
 
 def test_parse_invocation_space_syntax():
@@ -423,7 +428,7 @@ def config_dir(tmp_path):
             "design": {
                 "action": "comment",
                 "default_model": "claude-small",
-                "additional_instructions": "Focus on scalability.",
+                "extra_instructions": "Focus on scalability.",
             },
             "review": {
                 "action": "review",
@@ -437,8 +442,7 @@ def config_dir(tmp_path):
                 "context_files": ["README.md", "AGENTS.md"],
             },
         },
-        "openhands": {
-            "version": "1.4.0",
+        "agent": {
             "max_iterations": 50,
             "pr_type": "ready",
         },
@@ -470,8 +474,8 @@ def test_resolve_config_design_mode(config_dir):
     assert result["mode"] == "design"
     assert result["action"] == "comment"
     assert result["alias"] == "claude-small"
-    assert "additional_instructions" in result
-    assert "scalability" in result["additional_instructions"]
+    assert "extra_instructions" in result
+    assert "scalability" in result["extra_instructions"]
 
 
 def test_resolve_config_design_with_model(config_dir):
@@ -547,7 +551,7 @@ def test_resolve_config_override_wins(config_dir):
         "modes": {
             "resolve": {"default_model": "gpt-small"},
         },
-        "openhands": {"max_iterations": 10},
+        "agent": {"max_iterations": 10},
     }
     with open(override_path, "w") as f:
         yaml.dump(override, f)
@@ -556,8 +560,6 @@ def test_resolve_config_override_wins(config_dir):
     assert result["alias"] == "gpt-small"
     assert result["model"] == "openai/gpt-5.1-codex-mini"
     assert result["max_iterations"] == 10
-    # Version should come from base (not overridden)
-    assert result["oh_version"] == "1.4.0"
     assert result["has_override"] is True
 
 
@@ -588,37 +590,37 @@ def test_resolve_config_mode_default_model_differs():
         os.unlink(path)
 
 
-def test_resolve_config_context_files_for_design(config_dir):
-    """Design mode should include context_files when configured."""
+def test_resolve_config_extra_files_for_design(config_dir):
+    """Design mode should include extra_files when configured."""
     tmp_path, base_path = config_dir
-    # Add context_files to the config
+    # Add extra_files to the config
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["modes"]["design"]["context_files"] = ["README.md", "AGENTS.md"]
+    config["modes"]["design"]["extra_files"] = ["README.md", "AGENTS.md"]
     with open(base_path, "w") as f:
         yaml.dump(config, f)
 
     result = resolve_config(base_path, "nonexistent.yaml", "design")
-    assert "context_files" in result
-    assert result["context_files"] == ["README.md", "AGENTS.md"]
+    assert "extra_files" in result
+    assert result["extra_files"] == ["README.md", "AGENTS.md"]
 
 
-def test_resolve_config_no_context_files_for_resolve(config_dir):
-    """Resolve mode should not have context_files."""
+def test_resolve_config_no_extra_files_for_resolve(config_dir):
+    """Resolve mode should not have extra_files."""
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
-    assert "context_files" not in result
+    assert "extra_files" not in result
 
 
-def test_resolve_config_no_additional_instructions_for_resolve(config_dir):
-    """Resolve mode should not have additional_instructions."""
+def test_resolve_config_no_extra_instructions_for_resolve(config_dir):
+    """Resolve mode should not have extra_instructions."""
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
-    assert "additional_instructions" not in result
+    assert "extra_instructions" not in result
 
 
-def test_resolve_config_openhands_defaults():
-    """When base config has no openhands section, defaults kick in."""
+def test_resolve_config_agent_defaults():
+    """When base config has no agent section, defaults kick in."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         yaml.dump(
             {
@@ -632,12 +634,33 @@ def test_resolve_config_openhands_defaults():
     try:
         result = resolve_config(path, "nonexistent.yaml", "resolve")
         assert result["max_iterations"] == 50
-        assert result["oh_version"] == "1.4.0"
         assert result["pr_type"] == "ready"
         assert result["on_failure"] == "comment"
         assert result["target_branch"] == "main"
         assert result["assign_issue"] is True
         assert result["assign_pr"] is True
+        assert "oh_version" not in result
+    finally:
+        os.unlink(path)
+
+
+def test_resolve_config_openhands_key_backcompat():
+    """Config using openhands: key (old name) still works — BACKCOMPAT."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(
+            {
+                "default_model": "m",
+                "models": {"m": {"id": "anthropic/test"}},
+                "modes": {"resolve": {"action": "pr"}},
+                "openhands": {"max_iterations": 42, "pr_type": "draft"},
+            },
+            f,
+        )
+        path = f.name
+    try:
+        result = resolve_config(path, "nonexistent.yaml", "resolve")
+        assert result["max_iterations"] == 42
+        assert result["pr_type"] == "draft"
     finally:
         os.unlink(path)
 
@@ -654,7 +677,7 @@ def test_resolve_config_on_failure_draft(config_dir):
     tmp_path, base_path = config_dir
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["openhands"]["on_failure"] = "draft"
+    config["agent"]["on_failure"] = "draft"
     with open(base_path, "w") as f:
         yaml.dump(config, f)
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
@@ -666,7 +689,7 @@ def test_resolve_config_on_failure_invalid(config_dir):
     tmp_path, base_path = config_dir
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["openhands"]["on_failure"] = "silently_explode"
+    config["agent"]["on_failure"] = "silently_explode"
     with open(base_path, "w") as f:
         yaml.dump(config, f)
     with pytest.raises(ValueError, match="on_failure"):
@@ -678,7 +701,7 @@ def test_resolve_config_on_failure_via_override(config_dir):
     tmp_path, base_path = config_dir
     override_path = str(tmp_path / "override.yaml")
     with open(override_path, "w") as f:
-        yaml.dump({"openhands": {"on_failure": "draft"}}, f)
+        yaml.dump({"agent": {"on_failure": "draft"}}, f)
     result = resolve_config(base_path, override_path, "resolve")
     assert result["on_failure"] == "draft"
 
@@ -690,12 +713,22 @@ def test_resolve_config_target_branch_default(config_dir):
     assert result["target_branch"] == "main"
 
 
-def test_resolve_config_target_branch_override(config_dir):
-    """target_branch can be overridden."""
+def test_resolve_config_branch_key(config_dir):
+    """branch key in agent: sets target_branch."""
     tmp_path, base_path = config_dir
     override_path = str(tmp_path / "override.yaml")
     with open(override_path, "w") as f:
-        yaml.dump({"openhands": {"target_branch": "master"}}, f)
+        yaml.dump({"agent": {"branch": "dev"}}, f)
+    result = resolve_config(base_path, override_path, "resolve")
+    assert result["target_branch"] == "dev"
+
+
+def test_resolve_config_target_branch_override_backcompat(config_dir):
+    """target_branch key in agent: still works — BACKCOMPAT."""
+    tmp_path, base_path = config_dir
+    override_path = str(tmp_path / "override.yaml")
+    with open(override_path, "w") as f:
+        yaml.dump({"agent": {"target_branch": "master"}}, f)
     result = resolve_config(base_path, override_path, "resolve")
     assert result["target_branch"] == "master"
 
@@ -712,7 +745,7 @@ def test_resolve_config_assign_issue_false(config_dir):
     tmp_path, base_path = config_dir
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["openhands"]["assign_issue"] = False
+    config["agent"]["assign_issue"] = False
     with open(base_path, "w") as f:
         yaml.dump(config, f)
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
@@ -724,7 +757,7 @@ def test_resolve_config_assign_issue_via_override(config_dir):
     tmp_path, base_path = config_dir
     override_path = str(tmp_path / "override.yaml")
     with open(override_path, "w") as f:
-        yaml.dump({"openhands": {"assign_issue": False}}, f)
+        yaml.dump({"agent": {"assign_issue": False}}, f)
     result = resolve_config(base_path, override_path, "resolve")
     assert result["assign_issue"] is False
 
@@ -741,7 +774,7 @@ def test_resolve_config_assign_pr_false(config_dir):
     tmp_path, base_path = config_dir
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["openhands"]["assign_pr"] = False
+    config["agent"]["assign_pr"] = False
     with open(base_path, "w") as f:
         yaml.dump(config, f)
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
@@ -753,7 +786,7 @@ def test_resolve_config_assign_pr_via_override(config_dir):
     tmp_path, base_path = config_dir
     override_path = str(tmp_path / "override.yaml")
     with open(override_path, "w") as f:
-        yaml.dump({"openhands": {"assign_pr": False}}, f)
+        yaml.dump({"agent": {"assign_pr": False}}, f)
     result = resolve_config(base_path, override_path, "resolve")
     assert result["assign_pr"] is False
 
@@ -969,9 +1002,9 @@ def test_resolve_config_local_wins_over_override(config_dir):
     local_path = str(tmp_path / "local.yaml")
 
     with open(override_path, "w") as f:
-        yaml.dump({"openhands": {"max_iterations": 10}}, f)
+        yaml.dump({"agent": {"max_iterations": 10}}, f)
     with open(local_path, "w") as f:
-        yaml.dump({"openhands": {"max_iterations": 99}}, f)
+        yaml.dump({"agent": {"max_iterations": 99}}, f)
 
     result = resolve_config(base_path, override_path, "resolve", local_path=local_path)
     assert result["max_iterations"] == 99
@@ -983,11 +1016,10 @@ def test_resolve_config_local_preserves_base_and_override(config_dir):
     local_path = str(tmp_path / "local.yaml")
 
     with open(local_path, "w") as f:
-        yaml.dump({"openhands": {"max_iterations": 5}}, f)
+        yaml.dump({"agent": {"max_iterations": 5}}, f)
 
     result = resolve_config(base_path, "nonexistent.yaml", "resolve", local_path=local_path)
     assert result["max_iterations"] == 5
-    assert result["oh_version"] == "1.4.0"   # preserved from base
     assert result["pr_type"] == "ready"       # preserved from base
 
 
@@ -1000,6 +1032,7 @@ def test_resolve_config_local_missing_is_noop(config_dir):
     )
     assert result_without["max_iterations"] == result_with["max_iterations"]
     assert result_without["model"] == result_with["model"]
+    assert "oh_version" not in result_with
 
 
 def test_resolve_config_local_none_is_noop(config_dir):
@@ -1009,22 +1042,23 @@ def test_resolve_config_local_none_is_noop(config_dir):
     assert result["mode"] == "resolve"
 
 
-def test_resolve_config_local_overrides_context_files(config_dir):
-    """local_path can replace design mode context_files (list replacement)."""
+def test_resolve_config_local_extra_files_appends_to_base(config_dir):
+    """local_path extra_files are appended to base extra_files, not replacing them."""
     tmp_path, base_path = config_dir
-    # Add context_files to base
+    # Add extra_files to base
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["modes"]["design"]["context_files"] = ["README.md", "AGENTS.md"]
+    config["modes"]["design"]["extra_files"] = ["README.md", "AGENTS.md"]
     with open(base_path, "w") as f:
         yaml.dump(config, f)
 
     local_path = str(tmp_path / "local.yaml")
     with open(local_path, "w") as f:
-        yaml.dump({"modes": {"design": {"context_files": ["README.md", "lib/config.py"]}}}, f)
+        yaml.dump({"modes": {"design": {"extra_files": ["README.md", "lib/config.py"]}}}, f)
 
     result = resolve_config(base_path, "nonexistent.yaml", "design", local_path=local_path)
-    assert result["context_files"] == ["README.md", "lib/config.py"]
+    # README.md deduplicated, AGENTS.md from base preserved, lib/config.py added
+    assert result["extra_files"] == ["README.md", "AGENTS.md", "lib/config.py"]
 
 
 # --- resolve_config with args ---
@@ -1094,7 +1128,7 @@ def test_resolve_config_timeout_yaml_default(config_dir):
     tmp_path, base_path = config_dir
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["openhands"]["timeout_minutes"] = 90
+    config["agent"]["timeout_minutes"] = 90
     with open(base_path, "w") as f:
         yaml.dump(config, f)
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
@@ -1106,7 +1140,7 @@ def test_resolve_config_timeout_per_invocation_overrides_yaml(config_dir):
     tmp_path, base_path = config_dir
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["openhands"]["timeout_minutes"] = 90
+    config["agent"]["timeout_minutes"] = 90
     with open(base_path, "w") as f:
         yaml.dump(config, f)
     result = resolve_config(base_path, "nonexistent.yaml", "resolve", timeout_minutes=240)
@@ -1138,32 +1172,41 @@ def test_resolve_config_args_max_iterations(config_dir):
     assert result["max_iterations"] == 75
 
 
-def test_resolve_config_args_context_files_no_mode_config(config_dir):
-    """args context_files used as-is when mode has no context_files."""
+def test_resolve_config_args_extra_files_no_mode_config(config_dir):
+    """args extra_files used as-is when mode has no extra_files."""
     tmp_path, base_path = config_dir
-    result = resolve_config(base_path, "nonexistent.yaml", "design", args={"context_files": ["custom.txt"]})
-    assert result["context_files"] == ["custom.txt"]
+    result = resolve_config(base_path, "nonexistent.yaml", "design", args={"extra_files": ["custom.txt"]})
+    assert result["extra_files"] == ["custom.txt"]
 
 
-def test_resolve_config_args_context_files_appends_to_mode_config(config_dir):
-    """args context_files should append to mode's context_files, not replace."""
+def test_resolve_config_args_extra_files_appends_to_mode_config(config_dir):
+    """args extra_files should append to mode's extra_files, not replace."""
     tmp_path, base_path = config_dir
-    # Add context_files to design mode
+    # Add extra_files to design mode
     with open(base_path) as f:
         config = yaml.safe_load(f)
-    config["modes"]["design"]["context_files"] = ["README.md", "AGENTS.md"]
+    config["modes"]["design"]["extra_files"] = ["README.md", "AGENTS.md"]
     with open(base_path, "w") as f:
         yaml.dump(config, f)
 
-    result = resolve_config(base_path, "nonexistent.yaml", "design", args={"context_files": ["custom.txt"]})
-    assert result["context_files"] == ["README.md", "AGENTS.md", "custom.txt"]
+    result = resolve_config(base_path, "nonexistent.yaml", "design", args={"extra_files": ["custom.txt"]})
+    assert result["extra_files"] == ["README.md", "AGENTS.md", "custom.txt"]
 
 
-def test_resolve_config_args_target_branch(config_dir):
-    """args can override target_branch."""
+def test_resolve_config_args_branch(config_dir):
+    """args can override branch (target branch)."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={"branch": "design/gemini"})
+    assert result["target_branch"] == "design/gemini"
+    assert result["target_branch_explicit"] is True
+
+
+def test_resolve_config_args_target_branch_backcompat(config_dir):
+    """args target_branch is accepted as BACKCOMPAT alias for branch."""
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={"target_branch": "design/gemini"})
     assert result["target_branch"] == "design/gemini"
+    assert result["target_branch_explicit"] is True
 
 
 def test_resolve_config_args_empty_dict(config_dir):
@@ -1209,10 +1252,13 @@ class TestConfigMain:
         content = self._call_main("resolve", tmp_path)
         for key in (
             "mode", "action", "model", "alias",
-            "max_iterations", "oh_version", "pr_type", "on_failure", "commit_trailer",
+            "max_iterations", "pr_type", "on_failure",
             "assign_issue", "assign_pr", "target_branch", "timeout_minutes",
         ):
             assert f"{key}=" in content, f"Missing key in GITHUB_OUTPUT: {key}"
+        # these keys must NOT be written — they've been removed
+        assert "oh_version=" not in content
+        assert "commit_trailer=" not in content
 
     def test_resolve_mode_and_action_values(self, tmp_path):
         content = self._call_main("resolve", tmp_path)
@@ -1225,17 +1271,17 @@ class TestConfigMain:
         assert "assign_issue=true\n" in content
         assert "assign_pr=true\n" in content
 
-    def test_resolve_omits_context_files(self, tmp_path):
-        """context_files is design-only and must not appear in resolve output."""
+    def test_resolve_omits_extra_files(self, tmp_path):
+        """extra_files is design-only and must not appear in resolve output."""
         content = self._call_main("resolve", tmp_path)
-        assert "context_files=" not in content
+        assert "extra_files=" not in content
 
-    def test_design_includes_context_files_as_json(self, tmp_path):
-        """Design mode writes context_files as a non-empty JSON array."""
+    def test_design_includes_extra_files_as_json(self, tmp_path):
+        """Design mode writes extra_files as a non-empty JSON array."""
         content = self._call_main("design", tmp_path)
-        assert "context_files=" in content
+        assert "extra_files=" in content
         for line in content.splitlines():
-            if line.startswith("context_files="):
+            if line.startswith("extra_files="):
                 files = json.loads(line.split("=", 1)[1])
                 assert isinstance(files, list) and len(files) > 0
                 break
@@ -1243,7 +1289,7 @@ class TestConfigMain:
     def test_design_mode_and_action_values(self, tmp_path):
         content = self._call_main("design", tmp_path)
         assert "mode=design\n" in content
-        assert "action=comment\n" in content
+        assert "action=design\n" in content
 
     def test_review_mode_and_action_values(self, tmp_path):
         content = self._call_main("review", tmp_path)
