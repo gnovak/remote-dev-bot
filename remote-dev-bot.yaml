@@ -2,8 +2,8 @@
 # Usage: /agent-<mode>[-<model>]
 #   /agent-resolve              — resolve issue, open PR (default model)
 #   /agent-resolve-claude-large — resolve issue with specific model
-#   /agent-design               — design discussion, post comment
-#   /agent-design-claude-large  — design discussion with specific model
+#   /agent-design               — design analysis, post comment
+#   /agent-design-claude-large  — design analysis with specific model
 #   /agent-review               — code review on a PR, post comment
 #   /agent-review-claude-large  — code review with specific model
 
@@ -12,10 +12,12 @@ default_model: claude-small
 # Modes define what the agent does. Each mode has an action and optional defaults.
 modes:
   resolve:
-    action: pr               # Run OpenHands, open a draft PR
+    action: pr               # Run agent loop, open a PR
   design:
-    action: comment           # Post analysis as an issue comment (no code changes)
-    context_files:
+    action: design            # Multi-round agentic loop with tool calling for design analysis
+    default_model: claude-small
+    max_iterations: 10        # Iteration limit for the agentic loop
+    extra_files:
       - README.md
       - CONTRIBUTING.md
       - AGENTS.md
@@ -29,33 +31,11 @@ modes:
     #   When analyzing issues, always consider the impact on our deploy pipeline.
 
   review:
-    action: review            # Run OpenHands on the PR, post review as a PR comment (no code changes)
-
-  explore:
-    action: explore           # Multi-round agentic loop with tool calling for design analysis
-    default_model: claude-small
-    max_iterations: 10        # Iteration limit for the agentic loop (not OpenHands iterations)
-    context_files:
-      - README.md
-      - CONTRIBUTING.md
+    action: review            # Lightweight agentic loop: review the PR diff, post as a PR comment (no code changes)
+    max_iterations: 10        # Iteration limit for the review loop
+    extra_files:
       - AGENTS.md
-      - CLAUDE.md
-      - .gemini/GEMINI.md
-      - .openhands/microagents/repo.md
-      - how-it-works.md
-    additional_instructions: >
-      You are analyzing this issue for design discussion using an agentic exploration loop.
-      You have access to tools to read files and search the codebase.
-      Use these tools to gather the information you need before providing your analysis.
-      When you have enough information, call submit_analysis with your final analysis.
-      Do NOT write code or open a PR. Instead, provide thoughtful
-      analysis, surface trade-offs, suggest approaches, and ask
-      clarifying questions.
-      IMPORTANT: Never begin your response with a slash command like /agent
-      or any text that could trigger another bot action.
-      Do NOT end your response with conversational invitations like
-      "Want me to elaborate?" or "Let me know if you have questions."
-      Your response is a design document, not a chat message.
+      - README.md
 
 models:
   claude-small:
@@ -90,7 +70,7 @@ agent:
   # PR type: "draft" or "ready"
   pr_type: ready
   # Target branch for PRs created by the agent
-  branch: main
+  branch: dev
   # What to do when the agent can't fully resolve the issue (success=False):
   #   comment — post a comment with the agent's evaluation, no PR (default)
   #   draft   — post the same comment AND open a draft PR with partial changes
@@ -99,23 +79,20 @@ agent:
   assign_issue: true
   # Assign the triggering user to the resulting PR
   assign_pr: true
-  # Watchdog timeout in minutes. The runner kills the OpenHands process after this
-  # many minutes, then cleanup steps (cost report, artifact upload) still run.
+  # Watchdog timeout in minutes. The runner kills the agent process after this
+  # many minutes, then cleanup steps (cost report) still run.
   # Override per-invocation with: timeout_minutes = 60 (inline arg in comment body)
   # Note: GitHub Actions has a hard 6-hour cap. If you need longer runs, set
   # timeout-minutes in your calling workflow's job definition.
   timeout_minutes: 60
   # Graceful wrap-up: inject instructions when approaching max iterations
   # This helps the agent commit partial work before hitting the limit
+  # Rolling status log: post a 1-2 sentence status update every N iterations
+  # as an issue comment. Set to 0 to disable.
+  status_log_interval: 5
   graceful_wrapup:
     # Enable/disable graceful wrap-up instructions
     enabled: true
     # Threshold as fraction of max_iterations (0.8 = 80%)
     # At this point, the agent receives instructions to wrap up
     threshold: 0.8
-  # Commit trailer appended to OpenHands commits (resolve mode only).
-  # Supported variables: {model_alias}, {model_id}, {oh_version}
-  # Set to empty string to disable.
-  # Note: the amend step does `git commit --amend` after OpenHands pushes,
-  # which requires a force-push to update the branch.
-  commit_trailer: "Model: {model_alias} ({model_id}), openhands-ai v{oh_version}"

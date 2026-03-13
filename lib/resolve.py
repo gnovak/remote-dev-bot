@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 import litellm
 from litellm import completion
@@ -31,10 +32,13 @@ ON_FAILURE = os.environ.get("ON_FAILURE", "comment")  # "comment" | "draft"
 MAX_ITERATIONS = int(os.environ.get("MAX_ITERATIONS", "50") or "50")
 WRAPUP_ENABLED = os.environ.get("WRAPUP_ENABLED", "true").lower() == "true"
 WRAPUP_ITERATION = int(os.environ.get("WRAPUP_ITERATION", "0") or "0")
+STATUS_LOG_INTERVAL = int(os.environ.get("STATUS_LOG_INTERVAL", "0") or "0")
 COMMIT_TRAILER = os.environ.get("COMMIT_TRAILER", "")
 ALIAS = os.environ.get("ALIAS", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
 EXTRA_FILES = json.loads(os.environ.get("EXTRA_FILES", "[]") or "[]")
+BASH_OUTPUT_LIMIT = int(os.environ.get("BASH_OUTPUT_LIMIT", "8000") or "8000")
+CONTEXT_KEEP_TOOL_RESULTS = int(os.environ.get("CONTEXT_KEEP_TOOL_RESULTS", "0") or "0")
 
 GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY", "")
@@ -44,6 +48,10 @@ GIT_USERNAME = (
     or "github-actions"
 )
 
+
+# Sentinels for top-level cleanup handler
+_branch_created: str | None = None  # set as soon as branch is known
+_pr_created: bool = False            # set when any PR (draft or real) is successfully created
 
 # --- Utilities ---
 
@@ -155,7 +163,15 @@ def execute_bash(command):
         output = (result.stdout or "") + (result.stderr or "")
         if result.returncode != 0:
             output = f"(exit code {result.returncode})\n" + output
-        return output or "(no output)"
+        output = output or "(no output)"
+        if BASH_OUTPUT_LIMIT > 0 and len(output) > BASH_OUTPUT_LIMIT:
+            half = BASH_OUTPUT_LIMIT // 2
+            output = (
+                output[:half]
+                + f"\n\n... [output truncated: {len(output)} chars total, showing first and last {half} chars] ...\n\n"
+                + output[-half:]
+            )
+        return output
     except subprocess.TimeoutExpired:
         return "Error: Command timed out after 30 seconds"
     except Exception as e:
@@ -459,11 +475,11 @@ Use the bash tool to edit files. Good approaches:
    git add <files>
    git commit -m "Clear description of what and why"
    ```
-3. Push to remote regularly:
+3. **Push immediately after every `git commit`:**
    ```
    git push origin HEAD
    ```
-   Push after each logical chunk of work — if you run out of iterations with uncommitted work, it is lost.
+   After every `git commit`, immediately run `git push origin HEAD` to preserve your work on the remote. This ensures progress is saved even if the run is interrupted before completion.
 
 ### Finishing
 - Before calling finish(), run `git status` to confirm all changes are committed and the working tree is clean.
@@ -491,17 +507,27 @@ def build_system_prompt(repo_context, issue_context_str):
     """Build the system prompt for the resolve agent."""
     wrapup_hint = ""
     if WRAPUP_ENABLED and WRAPUP_ITERATION > 0:
+        remaining = MAX_ITERATIONS - WRAPUP_ITERATION
         wrapup_hint = f"""
-## Iteration Budget
+## ⚠️ Iteration Budget — WRAP-UP REQUIRED
 
 This task has a budget of **{MAX_ITERATIONS} iterations**.
 
-When you reach iteration **{WRAPUP_ITERATION}**, begin wrapping up:
-1. Commit all changes you have made so far with a clear commit message
-2. If the task is not fully complete, add a brief TODO comment describing what remains
-3. Call `finish()` with your honest assessment of what was accomplished
+**When you reach iteration {WRAPUP_ITERATION}, you MUST begin wrapping up immediately.**
+At that point only {remaining} iteration(s) remain. Do NOT continue working toward a
+complete solution — partial work committed and pushed is far better than complete work
+that never ships.
 
-Do not start new work after iteration {WRAPUP_ITERATION}.
+You MUST take these steps at iteration {WRAPUP_ITERATION}:
+1. **Commit** whatever work exists, even if incomplete:
+   `git add -A && git commit -m "WIP: partial implementation"`
+2. **Push** immediately:
+   `git push origin HEAD`
+3. **Call `finish()`** with `success=False` if the task is incomplete, explaining
+   what was done and what still remains.
+
+Do NOT start new work after iteration {WRAPUP_ITERATION}. Do NOT wait until the work
+is complete before committing — call `finish()` now.
 """
 
     prompt = (
@@ -631,12 +657,98 @@ TOOLS = [
                             "to enable GitHub auto-close on merge."
                         ),
                     },
+                    "conversation_summary": {
+                        "type": "string",
+                        "description": (
+                            "3-5 sentence summary of the approach taken, key decisions made, "
+                            "any interesting paths explored or dead ends hit. "
+                            "This appears in the PR description."
+                        ),
+                    },
                 },
-                "required": ["success", "explanation"],
+                "required": ["success", "explanation", "conversation_summary"],
             },
         },
     },
 ]
+
+
+
+def trim_tool_results(messages, keep_n):
+    """Remove oldest tool call/result pairs, keeping the last keep_n pairs.
+
+    Preserves all assistant text content and the system prompt.
+    Operates on OpenAI-format messages where tool calls are in assistant messages
+    (role="assistant", tool_calls=[...]) and results are role="tool" messages.
+    """
+    if keep_n <= 0:
+        return messages
+
+    # Collect indices of all "tool" role messages (each is one tool result)
+    tool_result_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+
+    if len(tool_result_indices) <= keep_n:
+        return messages
+
+    # Number of pairs to drop
+    n_drop = len(tool_result_indices) - keep_n
+    indices_to_drop = set(tool_result_indices[:n_drop])
+
+    # Also find the assistant messages that contain tool_calls for the pairs we're dropping.
+    # Each assistant message with tool_calls is immediately followed by one or more tool messages.
+    # We scan backwards from each tool_result index to find its owning assistant message.
+    dropped_tool_call_ids = set()
+    for idx in indices_to_drop:
+        dropped_tool_call_ids.add(messages[idx].get("tool_call_id"))
+
+    new_messages = []
+    for i, msg in enumerate(messages):
+        role = msg.get("role")
+        if i in indices_to_drop:
+            # Drop this tool result message entirely
+            continue
+        if role == "assistant" and msg.get("tool_calls"):
+            # Filter out tool_calls whose IDs are being dropped
+            remaining_calls = [
+                tc for tc in msg["tool_calls"]
+                if tc.get("id") not in dropped_tool_call_ids
+            ]
+            dropped_calls = [
+                tc for tc in msg["tool_calls"]
+                if tc.get("id") in dropped_tool_call_ids
+            ]
+            if dropped_calls:
+                # Build a new assistant message: preserve content, replace dropped calls
+                # with a placeholder text note. Keep remaining tool calls if any.
+                n_omitted = len(dropped_calls)
+                placeholder_text = f"[{n_omitted} tool call(s) omitted for context]"
+                new_msg = dict(msg)
+                if remaining_calls:
+                    new_msg["tool_calls"] = remaining_calls
+                    # Prepend placeholder to content (content may be str or list or None)
+                    if new_msg.get("content") is None:
+                        new_msg["content"] = placeholder_text
+                    elif isinstance(new_msg["content"], str):
+                        new_msg["content"] = placeholder_text + "\n" + new_msg["content"]
+                    else:
+                        # list of content blocks — prepend text block
+                        new_msg["content"] = [{"type": "text", "text": placeholder_text}] + list(new_msg["content"])
+                else:
+                    # No remaining calls — strip tool_calls entirely, keep only content
+                    new_msg = {"role": "assistant"}
+                    if msg.get("content") is None or msg.get("content") == []:
+                        new_msg["content"] = placeholder_text
+                    elif isinstance(msg["content"], str):
+                        new_msg["content"] = (msg["content"] + "\n" + placeholder_text).strip()
+                    else:
+                        new_msg["content"] = list(msg["content"]) + [{"type": "text", "text": placeholder_text}]
+                new_messages.append(new_msg)
+            else:
+                new_messages.append(msg)
+        else:
+            new_messages.append(msg)
+
+    return new_messages
 
 
 def execute_tool(tool_name, arguments):
@@ -708,9 +820,11 @@ def write_usage(input_tokens, output_tokens, cost, iterations):
 # --- Main agent loop ---
 
 def main():
+    global _branch_created, _pr_created
     # Set up branch
     print(f"Setting up branch for {ISSUE_TYPE} #{ISSUE_NUMBER}...")
     branch = setup_branch()
+    _branch_created = branch
     print(f"Working on branch: {branch}")
 
     # Gather repository context
@@ -765,134 +879,227 @@ def main():
     finish_args = None
     last_iteration = 0
     no_tool_call_count = 0
+    status_log = []  # list of (iteration, status_text) tuples
 
-    for iteration in range(MAX_ITERATIONS):
-        last_iteration = iteration
-        print(f"=== Iteration {iteration + 1}/{MAX_ITERATIONS} ===")
+    rate_limit_retries = 0
+    MAX_RATE_LIMIT_RETRIES = 3
 
-        try:
-            response = completion(
-                model=LLM_MODEL,
-                messages=messages,
-                tools=TOOLS,
-                max_tokens=16384,
-            )
-        except litellm.exceptions.APIConnectionError as exc:
-            err_msg = str(exc)
-            if "max_output_tokens" in err_msg:
-                print(f"LiteLLM APIConnectionError (max_output_tokens): {exc}")
-                write_status(
-                    False,
-                    f"Model hit output token limit at iteration {iteration + 1} — context too large",
-                )
-            else:
-                print(f"LiteLLM APIConnectionError: {exc}")
-                write_status(
-                    False,
-                    f"API connection error at iteration {iteration + 1}: {exc}",
-                )
-            break
-        except litellm.exceptions.APIError as exc:
-            err_msg = str(exc)
-            if "max_output_tokens" in err_msg:
-                print(f"LiteLLM APIError (max_output_tokens): {exc}")
-                write_status(
-                    False,
-                    f"Model hit output token limit at iteration {iteration + 1} — context too large",
-                )
-            else:
-                print(f"LiteLLM APIError: {exc}")
-                write_status(
-                    False,
-                    f"API error at iteration {iteration + 1}: {exc}",
-                )
-            break
+    try:
+        for iteration in range(MAX_ITERATIONS):
+            last_iteration = iteration
+            print(f"=== Iteration {iteration + 1}/{MAX_ITERATIONS} ===")
 
-        # Track token usage
-        usage = getattr(response, "usage", None)
-        if usage:
-            total_input_tokens += getattr(usage, "prompt_tokens", 0)
-            total_output_tokens += getattr(usage, "completion_tokens", 0)
-        cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
-        if cost:
-            total_cost += cost
-
-        message = response.choices[0].message
-        tool_calls = getattr(message, "tool_calls", None)
-
-        if not tool_calls:
-            no_tool_call_count += 1
-            if no_tool_call_count >= 3:
-                print("No tool calls for 3 consecutive iterations — breaking")
-                break
-            print(f"No tool calls (attempt {no_tool_call_count}/3) — injecting recovery message")
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "Please continue working on the task using the tools available to you. "
-                        "You MUST call a tool in every response — do not describe what you would do, do it. "
-                        "If you believe the task is complete, call finish(). "
-                        "If you cannot proceed, call finish(success=False, explanation='...'). "
-                        "IMPORTANT: NEVER ask for human help. Use the tools to make progress or call finish() to stop."
-                    ),
-                }
-            )
-            continue
-
-        no_tool_call_count = 0
-
-        # Add assistant message to conversation
-        messages.append(
-            {
-                "role": "assistant",
-                "content": message.content,
-                "tool_calls": [tc.model_dump() for tc in tool_calls],
-            }
-        )
-
-        # Process tool calls
-        done = False
-        for tool_call in tool_calls:
-            tool_name = tool_call.function.name
             try:
-                arguments = json.loads(tool_call.function.arguments)
-            except json.JSONDecodeError:
-                arguments = {}
+                response = completion(
+                    model=LLM_MODEL,
+                    messages=messages,
+                    tools=TOOLS,
+                    max_tokens=16384,
+                )
+            except litellm.exceptions.RateLimitError as exc:
+                rate_limit_retries += 1
+                if rate_limit_retries <= MAX_RATE_LIMIT_RETRIES:
+                    wait_secs = 60 * rate_limit_retries
+                    print(f"Rate limit hit (retry {rate_limit_retries}/{MAX_RATE_LIMIT_RETRIES}), "
+                          f"waiting {wait_secs}s: {exc}")
+                    time.sleep(wait_secs)
+                    continue
+                else:
+                    print(f"Rate limit: exhausted {MAX_RATE_LIMIT_RETRIES} retries, treating as failure.")
+                    write_status(False, f"Rate limit error after {MAX_RATE_LIMIT_RETRIES} retries "
+                                 f"at iteration {iteration + 1}: {exc}")
+                    break
+            except litellm.exceptions.APIConnectionError as exc:
+                err_msg = str(exc)
+                if "max_output_tokens" in err_msg:
+                    print(f"LiteLLM APIConnectionError (max_output_tokens): {exc}")
+                    write_status(
+                        False,
+                        f"Model hit output token limit at iteration {iteration + 1} — context too large",
+                    )
+                else:
+                    print(f"LiteLLM APIConnectionError: {exc}")
+                    write_status(
+                        False,
+                        f"API connection error at iteration {iteration + 1}: {exc}",
+                    )
+                break
+            except litellm.exceptions.APIError as exc:
+                err_msg = str(exc)
+                if "max_output_tokens" in err_msg:
+                    print(f"LiteLLM APIError (max_output_tokens): {exc}")
+                    write_status(
+                        False,
+                        f"Model hit output token limit at iteration {iteration + 1} — context too large",
+                    )
+                else:
+                    print(f"LiteLLM APIError: {exc}")
+                    write_status(
+                        False,
+                        f"API error at iteration {iteration + 1}: {exc}",
+                    )
+                break
 
-            print(f"  Tool: {tool_name}({list(arguments.keys())})")
+            # Track token usage
+            usage = getattr(response, "usage", None)
+            if usage:
+                total_input_tokens += getattr(usage, "prompt_tokens", 0)
+                total_output_tokens += getattr(usage, "completion_tokens", 0)
+            cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
+            if cost:
+                total_cost += cost
+            rate_limit_retries = 0
 
-            if tool_name == "finish":
-                finish_args = arguments
-                done = True
-                tool_result = "finish() received. Task loop ending."
-            else:
-                tool_result = execute_tool(tool_name, arguments)
+            message = response.choices[0].message
+            tool_calls = getattr(message, "tool_calls", None)
 
+            if not tool_calls:
+                no_tool_call_count += 1
+                if no_tool_call_count >= 3:
+                    print("No tool calls for 3 consecutive iterations — breaking")
+                    break
+                print(f"No tool calls (attempt {no_tool_call_count}/3) — injecting recovery message")
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Please continue working on the task using the tools available to you. "
+                            "You MUST call a tool in every response — do not describe what you would do, do it. "
+                            "If you believe the task is complete, call finish(). "
+                            "If you cannot proceed, call finish(success=False, explanation='...'). "
+                            "IMPORTANT: NEVER ask for human help. Use the tools to make progress or call finish() to stop."
+                        ),
+                    }
+                )
+                continue
+
+            no_tool_call_count = 0
+
+            # Add assistant message to conversation
             messages.append(
                 {
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": tool_result,
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": [tc.model_dump() for tc in tool_calls],
                 }
             )
 
-        if done:
-            break
+            # Process tool calls
+            done = False
+            for tool_call in tool_calls:
+                tool_name = tool_call.function.name
+                try:
+                    arguments = json.loads(tool_call.function.arguments)
+                except json.JSONDecodeError:
+                    arguments = {}
 
-    # Write usage data
-    write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1)
+                print(f"  Tool: {tool_name}({list(arguments.keys())})")
+
+                if tool_name == "finish":
+                    finish_args = arguments
+                    done = True
+                    tool_result = "finish() received. Task loop ending."
+                else:
+                    tool_result = execute_tool(tool_name, arguments)
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": tool_result,
+                    }
+                )
+
+            # Trim old tool result pairs to manage context size
+            if CONTEXT_KEEP_TOOL_RESULTS > 0:
+                messages = trim_tool_results(messages, CONTEXT_KEEP_TOOL_RESULTS)
+
+            if done:
+                break
+
+            # Rolling status log: every STATUS_LOG_INTERVAL iterations, make a side-channel
+            # API call to ask the agent for a brief status update.
+            if STATUS_LOG_INTERVAL > 0 and (iteration + 1) % STATUS_LOG_INTERVAL == 0:
+                try:
+                    status_messages = messages + [
+                        {
+                            "role": "user",
+                            "content": (
+                                "STATUS CHECK: In 1-2 sentences, what are you currently doing "
+                                "and what is your immediate next step? "
+                                "(This is logged for the run summary — answer briefly then continue your work.)"
+                            ),
+                        }
+                    ]
+                    status_response = completion(
+                        model=LLM_MODEL,
+                        messages=status_messages,
+                        max_tokens=256,
+                    )
+                    status_text = ""
+                    if status_response.choices:
+                        sc = status_response.choices[0].message
+                        if hasattr(sc, "content") and sc.content:
+                            status_text = sc.content.strip()
+                    if status_text:
+                        status_log.append((iteration + 1, status_text))
+                        print(f"  [Status log iter {iteration + 1}]: {status_text[:100]}")
+                except Exception as e:
+                    print(f"  [Status log] failed at iteration {iteration + 1}: {e}")
+
+    # Write usage data (always, even on exception)
+    finally:
+        write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1)
+
+    # Post rolling status log as issue comment (if any entries were collected)
+    if status_log and ISSUE_NUMBER and GITHUB_REPO:
+        try:
+            log_text = "\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
+            comment_body = f"## Agent Status Log\n\n{log_text}"
+            comment_file = "/tmp/rdb_status_log_comment.txt"
+            with open(comment_file, "w") as f:
+                f.write(comment_body)
+            run(
+                f"gh issue comment {ISSUE_NUMBER} --repo {GITHUB_REPO} --body-file {comment_file}",
+                check=False,
+            )
+        except Exception as e:
+            print(f"Could not post status log comment: {e}")
 
     # Handle finish
     if finish_args is None:
         write_status(False, "Agent exhausted all iterations without calling finish()")
         print("Agent did not call finish() — treating as failure")
+        remote_branch_exists = bool(run(
+            f"git ls-remote --heads origin {branch}",
+            check=False, timeout=30
+        ).strip())
+        if ISSUE_TYPE == "issue" and remote_branch_exists:
+            try:
+                last_status = status_log[-1][1] if status_log else "No status recorded."
+                draft_body = (
+                    f"\u26a0\ufe0f **Partial work** \u2014 agent exhausted all {MAX_ITERATIONS} iterations "
+                    f"without completing the task.\n\n"
+                    f"This draft PR contains whatever was committed and pushed during the run. "
+                    f"To continue, trigger `/agent-resolve` as a comment on this PR and the "
+                    f"agent will pick up from this branch.\n\n"
+                    f"**Agent's last status:** {last_status}"
+                )
+                pr_url = create_pr(branch, f"WIP: partial work on #{ISSUE_NUMBER}", draft_body, draft=True)
+                print(f"Created draft PR for partial work: {pr_url}")
+                _pr_created = True
+            except Exception as e:
+                print(f"Could not create draft PR: {e}")
         return
 
     success = finish_args.get("success", False)
     explanation = finish_args.get("explanation", "")
     pr_title = finish_args.get("pr_title") or f"Fix for issue #{ISSUE_NUMBER}"
     pr_body = finish_args.get("pr_body") or ""
+
+    conv_summary = finish_args.get("conversation_summary", "")
+    if conv_summary:
+        pr_body = f"## Summary\n\n{conv_summary}\n\n---\n\n{pr_body}"
 
     write_status(success, explanation)
 
@@ -904,15 +1111,33 @@ def main():
                 pr_url = create_pr(branch, pr_title, pr_body, draft=draft)
                 print(f"PR created: {pr_url}")
                 write_pr_url(pr_url)
+                _pr_created = True
             except Exception as e:
                 print(f"PR creation failed: {e}", file=sys.stderr)
                 write_status(False, f"Agent completed work but PR creation failed: {e}")
                 return
         else:
-            # PR trigger: record the existing PR URL
+            # PR trigger: record the existing PR URL, convert draft→ready, post success comment
             pr_url = f"https://github.com/{GITHUB_REPO}/pull/{ISSUE_NUMBER}"
             write_pr_url(pr_url)
             print(f"PR trigger complete: {pr_url}")
+            try:
+                run(f"gh pr ready {ISSUE_NUMBER} --repo {GITHUB_REPO}", check=False, timeout=30)
+                print("Converted PR from draft to ready")
+            except Exception as e:
+                print(f"Could not convert PR to ready: {e}")
+            try:
+                comment_body = f"🤖 **Agent completed successfully.**\n\n{explanation}"
+                comment_file = "/tmp/rdb_success_comment.txt"
+                with open(comment_file, "w") as f:
+                    f.write(comment_body)
+                run(
+                    f"gh pr comment {ISSUE_NUMBER} --repo {GITHUB_REPO} --body-file {comment_file}",
+                    timeout=30,
+                )
+                print("Posted success comment")
+            except Exception as e:
+                print(f"Could not post success comment: {e}")
     else:
         print(f"Agent reported failure: {explanation}")
         if ON_FAILURE == "draft" and ISSUE_TYPE == "issue":
@@ -926,9 +1151,43 @@ def main():
                 )
                 write_pr_url(pr_url)
                 print(f"Draft PR created: {pr_url}")
+                _pr_created = True
             except Exception as e:
                 print(f"Failed to create draft PR: {e}", file=sys.stderr)
 
 
+def _cleanup():
+    """Best-effort: create draft PR if the agent terminated without creating one."""
+    if not _pr_created and _branch_created and ISSUE_TYPE == "issue":
+        try:
+            remote_exists = bool(run(
+                f"git ls-remote --heads origin {_branch_created}",
+                check=False, timeout=30
+            ).strip())
+            if remote_exists:
+                draft_body = (
+                    f"\u26a0\ufe0f **Partial work** \u2014 agent terminated unexpectedly before completing the task.\n\n"
+                    f"This draft PR contains whatever was committed and pushed during the run. "
+                    f"To continue, trigger `/agent-resolve` as a comment on this PR and the "
+                    f"agent will pick up from this branch."
+                )
+                pr_url = create_pr(
+                    _branch_created,
+                    f"WIP: partial work on #{ISSUE_NUMBER}",
+                    draft_body,
+                    draft=True
+                )
+                print(f"Cleanup handler: created draft PR {pr_url}")
+        except Exception as e:
+            print(f"Cleanup handler: could not create draft PR: {e}")
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        print(f"Unhandled exception in resolve.py: {e}")
+        traceback.print_exc()
+        write_status(False, f"Agent crashed: {e}")
+    finally:
+        _cleanup()

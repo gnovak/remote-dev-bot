@@ -12,7 +12,7 @@ Commands follow the pattern: /agent-<verb>[-<model>]
 Arguments can be passed on subsequent lines:
   /agent resolve
   max_iterations = 75
-  context_files = file1.txt file2.txt
+  extra_files = file1.txt file2.txt
   timeout_minutes = 60
 
 Argument names are normalized (spaces/dashes/underscores are equivalent).
@@ -53,10 +53,17 @@ DEFAULT_TIMEOUT_MINUTES = 120
 
 # Arguments that can be overridden via inline args (lines after the command)
 ALLOWED_ARGS = {
-    "max_iterations": int,  # openhands.max_iterations
-    "timeout_minutes": int,  # openhands.timeout_minutes
-    "context_files": list,  # mode's context_files
-    "target_branch": str,  # openhands.target_branch
+    "max_iterations": int,       # agent.max_iterations
+    "timeout_minutes": int,      # agent.timeout_minutes
+    "extra_files": list,         # mode's extra_files
+    "branch": str,               # agent.branch (target branch for PRs)
+    # BACKCOMPAT(v0→v1, 2026-03-05): target_branch accepted as alias for branch
+    "target_branch": str,
+    "status_log_interval": int,       # rolling status log interval (0 = disabled)
+    "bash_output_limit": int,          # agent bash output truncation
+    "context_keep_tool_results": int,  # how many tool result pairs to keep (resolve)
+    "design_context_keep_tool_results": int,  # how many tool result pairs to keep (design)
+    "review_context_keep_tool_results": int,  # how many tool result pairs to keep (review)
 }
 
 
@@ -86,10 +93,10 @@ def parse_args(lines):
     {'max_iterations': 75}
     >>> parse_args(["max-iterations = 100"])
     {'max_iterations': 100}
-    >>> parse_args(["context_files = file1.txt file2.txt"])
-    {'context_files': ['file1.txt', 'file2.txt']}
-    >>> parse_args(["context files = README.md"])
-    {'context_files': ['README.md']}
+    >>> parse_args(["extra_files = file1.txt file2.txt"])
+    {'extra_files': ['file1.txt', 'file2.txt']}
+    >>> parse_args(["extra files = README.md"])
+    {'extra_files': ['README.md']}
     >>> parse_args([])
     {}
     """
@@ -145,8 +152,8 @@ def parse_invocation(comment_body, known_modes, command_prefix="agent"):
     ('resolve', 'claude-large', {})
     >>> parse_invocation("/agent resolve\\nmax iterations = 75", {"resolve", "design"})
     ('resolve', '', {'max_iterations': 75})
-    >>> parse_invocation("/agent-design-claude-small\\ncontext_files = a.txt b.txt", {"resolve", "design"})
-    ('design', 'claude-small', {'context_files': ['a.txt', 'b.txt']})
+    >>> parse_invocation("/agent-design-claude-small\\nextra_files = a.txt b.txt", {"resolve", "design"})
+    ('design', 'claude-small', {'extra_files': ['a.txt', 'b.txt']})
     >>> parse_invocation("/dogfood resolve", {"resolve", "design"}, command_prefix="dogfood")
     ('resolve', '', {})
     """
@@ -246,20 +253,6 @@ def parse_command(command_string, known_modes):
     return verb, model_alias
 
 
-def resolve_commit_trailer(template, alias, model_id, oh_version):
-    """Resolve template variables in commit_trailer.
-
-    Supported variables: {model_alias}, {model_id}, {oh_version}
-    Returns empty string if template is empty/None.
-    """
-    if not template:
-        return ""
-    return template.format(
-        model_alias=alias,
-        model_id=model_id,
-        oh_version=oh_version,
-    )
-
 
 def resolve_config(base_path, override_path, command_string, local_path=None, timeout_minutes=None, args=None):
     """Load configs, merge, resolve mode + alias, return outputs dict.
@@ -346,6 +339,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     # Read agent settings (formerly openhands:)
     # BACKCOMPAT(v0→v1, 2026-03-05): accept openhands: as alias for agent:
     oh = config.get("agent", config.get("openhands", {}))
+    # max_iter: mode_config wins over global agent config (per-mode default),
+    # and inline arg wins over both (applied below after action is resolved).
     max_iter = oh.get("max_iterations", 50)
     pr_type = oh.get("pr_type", "ready")
     on_failure = oh.get("on_failure", "comment")
@@ -367,15 +362,6 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             f"agent.graceful_wrapup.threshold must be between 0 and 1, got: {wrapup_threshold}"
         )
 
-    # Graceful wrap-up settings
-    graceful_wrapup = oh.get("graceful_wrapup", {})
-    wrapup_enabled = graceful_wrapup.get("enabled", True)
-    wrapup_threshold = graceful_wrapup.get("threshold", 0.8)
-    if not (0 < wrapup_threshold <= 1):
-        raise ValueError(
-            f"openhands.graceful_wrapup.threshold must be between 0 and 1, got: {wrapup_threshold}"
-        )
-
     # Resolve timeout: per-invocation > yaml config > hardcoded default
     # Per-invocation can come from inline arg (timeout = N) or --timeout-minutes flag.
     # NOTE: GitHub Actions has a hard 6-hour limit. If a run legitimately needs
@@ -391,6 +377,12 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     # Mode settings
     action = mode_config.get("action", "pr")
 
+    # For agentic loop modes (design, review), the mode config can specify its own
+    # max_iterations as a per-mode default, overriding the global agent.max_iterations.
+    # Inline args win over both (applied below).
+    if action in ("design", "review") and "max_iterations" in mode_config:
+        max_iter = mode_config["max_iterations"]
+
     # Apply command-line arg overrides
     target_branch_explicit = False  # True only when set via inline arg
     if "max_iterations" in args:
@@ -405,8 +397,11 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         target_branch = args["target_branch"]
         target_branch_explicit = True
 
-    # Calculate the iteration warning threshold (iteration number at which to warn)
-    wrapup_iteration = int(max_iter * wrapup_threshold) if wrapup_enabled else 0
+    status_log_interval = args.get("status_log_interval", oh.get("status_log_interval", 5))
+    bash_output_limit = args.get("bash_output_limit", None)
+    context_keep_tool_results = args.get("context_keep_tool_results", None)
+    design_context_keep_tool_results = args.get("design_context_keep_tool_results", None)
+    review_context_keep_tool_results = args.get("review_context_keep_tool_results", None)
 
     # Calculate the iteration warning threshold (iteration number at which to warn)
     wrapup_iteration = int(max_iter * wrapup_threshold) if wrapup_enabled else 0
@@ -428,7 +423,17 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         "graceful_wrapup_threshold": wrapup_threshold,
         "graceful_wrapup_iteration": wrapup_iteration,
         "timeout_minutes": resolved_timeout,
+        "status_log_interval": status_log_interval,
     }
+
+    if bash_output_limit is not None:
+        result["bash_output_limit"] = bash_output_limit
+    if context_keep_tool_results is not None:
+        result["context_keep_tool_results"] = context_keep_tool_results
+    if design_context_keep_tool_results is not None:
+        result["design_context_keep_tool_results"] = design_context_keep_tool_results
+    if review_context_keep_tool_results is not None:
+        result["review_context_keep_tool_results"] = review_context_keep_tool_results
 
     # Include extra_instructions if the mode defines one (appended to canonical prompt)
     if "extra_instructions" in mode_config:
@@ -457,15 +462,14 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             print(f"  {key}: {value}")
         print()
 
-    # Include explore_max_iterations if the mode defines it (for explore mode)
-    if "max_iterations" in mode_config:
-        result["explore_max_iterations"] = mode_config["max_iterations"]
-
-    # Resolve commit_trailer template (for resolve mode) — lives under openhands:
-    commit_trailer_template = config.get("openhands", {}).get("commit_trailer", "")
-    result["commit_trailer"] = resolve_commit_trailer(
-        commit_trailer_template, alias, model_id, oh_version
-    )
+    # Include max_iterations for agentic loop modes (design and review).
+    # Use max_iter (already resolved, including any inline arg override) rather than
+    # mode_config["max_iterations"] so that e.g. `max_iterations = 20` in the comment
+    # body is honoured for design and review modes, not just for resolve.
+    if action == "design":
+        result["design_max_iterations"] = max_iter
+    if action == "review":
+        result["review_max_iterations"] = max_iter
 
     return result
 
@@ -560,14 +564,27 @@ def main():
             f.write(f"target_branch_explicit={str(result['target_branch_explicit']).lower()}\n")
             f.write(f"assign_issue={str(result['assign_issue']).lower()}\n")
             f.write(f"assign_pr={str(result['assign_pr']).lower()}\n")
-            if "context_files" in result:
-                f.write(f"context_files={json.dumps(result['context_files'])}\n")
-            if "explore_max_iterations" in result:
-                f.write(f"explore_max_iterations={result['explore_max_iterations']}\n")
-            f.write(f"commit_trailer={result['commit_trailer']}\n")
+            if "extra_instructions" in result:
+                f.write(f"extra_instructions={result['extra_instructions']}\n")
+            if "extra_files" in result:
+                f.write(f"extra_files={json.dumps(result['extra_files'])}\n")
+            if "design_max_iterations" in result:
+                f.write(f"design_max_iterations={result['design_max_iterations']}\n")
+            if "review_max_iterations" in result:
+                f.write(f"review_max_iterations={result['review_max_iterations']}\n")
+
             f.write(f"graceful_wrapup_enabled={str(result['graceful_wrapup_enabled']).lower()}\n")
             f.write(f"graceful_wrapup_iteration={result['graceful_wrapup_iteration']}\n")
             f.write(f"timeout_minutes={result['timeout_minutes']}\n")
+            f.write(f"status_log_interval={result['status_log_interval']}\n")
+            if "bash_output_limit" in result:
+                f.write(f"bash_output_limit={result['bash_output_limit']}\n")
+            if "context_keep_tool_results" in result:
+                f.write(f"context_keep_tool_results={result['context_keep_tool_results']}\n")
+            if "design_context_keep_tool_results" in result:
+                f.write(f"design_context_keep_tool_results={result['design_context_keep_tool_results']}\n")
+            if "review_context_keep_tool_results" in result:
+                f.write(f"review_context_keep_tool_results={result['review_context_keep_tool_results']}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"
