@@ -64,9 +64,8 @@ def test_parse_cost_typical_comment(parse_cost_from_comment):
 | Agent outcome | ✓ Completed |
 | Iterations | 5 / 50 |
 | Elapsed time | 2m 30s |
-| Input tokens | 10000 |
-| Output tokens | 5000 |
-| Total tokens | 15000 |
+| Input tokens | 10.0 k |
+| Output tokens | 5.0 k |
 | **Estimated cost** | **$1.23** |
 
 _Cost is estimated based on token usage and may vary from actual billing._"""
