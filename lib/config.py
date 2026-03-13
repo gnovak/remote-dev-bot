@@ -53,10 +53,11 @@ DEFAULT_TIMEOUT_MINUTES = 120
 
 # Arguments that can be overridden via inline args (lines after the command)
 ALLOWED_ARGS = {
-    "max_iterations": int,   # agent.max_iterations
-    "timeout_minutes": int,  # agent.timeout_minutes
-    "extra_files": list,     # mode's extra_files
-    "branch": str,           # agent.branch (target branch for PRs)
+    "max_iterations": int,      # agent.max_iterations
+    "timeout_minutes": int,     # agent.timeout_minutes
+    "extra_files": list,        # mode's extra_files
+    "branch": str,              # agent.branch (target branch for PRs)
+    "status_log_interval": int, # agent.status_log_interval
     # BACKCOMPAT(v0→v1, 2026-03-05): target_branch accepted as alias for branch
     "target_branch": str,
 }
@@ -346,6 +347,9 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             f"agent.on_failure must be 'comment' or 'draft', got: {on_failure!r}"
         )
 
+    # Status log interval (0 = disabled, N = post status every N iterations)
+    status_log_interval = oh.get("status_log_interval", 0)
+
     # Graceful wrap-up settings
     graceful_wrapup = oh.get("graceful_wrapup", {})
     wrapup_enabled = graceful_wrapup.get("enabled", True)
@@ -376,6 +380,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         max_iter = args["max_iterations"]
     if "timeout_minutes" in args:
         resolved_timeout = args["timeout_minutes"]
+    if "status_log_interval" in args:
+        status_log_interval = args["status_log_interval"]
     if "branch" in args:
         target_branch = args["branch"]
         target_branch_explicit = True
@@ -404,6 +410,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         "graceful_wrapup_threshold": wrapup_threshold,
         "graceful_wrapup_iteration": wrapup_iteration,
         "timeout_minutes": resolved_timeout,
+        "status_log_interval": status_log_interval,
     }
 
     # Include extra_instructions if the mode defines one (appended to canonical prompt)
@@ -544,6 +551,7 @@ def main():
             f.write(f"graceful_wrapup_enabled={str(result['graceful_wrapup_enabled']).lower()}\n")
             f.write(f"graceful_wrapup_iteration={result['graceful_wrapup_iteration']}\n")
             f.write(f"timeout_minutes={result['timeout_minutes']}\n")
+            f.write(f"status_log_interval={result['status_log_interval']}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"

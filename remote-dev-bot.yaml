@@ -70,7 +70,7 @@ agent:
   # PR type: "draft" or "ready"
   pr_type: ready
   # Target branch for PRs created by the agent
-  branch: main
+  branch: dev
   # What to do when the agent can't fully resolve the issue (success=False):
   #   comment — post a comment with the agent's evaluation, no PR (default)
   #   draft   — post the same comment AND open a draft PR with partial changes
@@ -87,6 +87,9 @@ agent:
   timeout_minutes: 60
   # Graceful wrap-up: inject instructions when approaching max iterations
   # This helps the agent commit partial work before hitting the limit
+  # Rolling status log: post a 1-2 sentence status update every N iterations
+  # as an issue comment. Set to 0 to disable.
+  status_log_interval: 5
   graceful_wrapup:
     # Enable/disable graceful wrap-up instructions
     enabled: true

@@ -67,6 +67,7 @@ jobs:
       graceful_wrapup_enabled: ${{ steps.parse.outputs.graceful_wrapup_enabled }}
       graceful_wrapup_iteration: ${{ steps.parse.outputs.graceful_wrapup_iteration }}
       timeout_minutes: ${{ steps.parse.outputs.timeout_minutes }}
+      status_log_interval: ${{ steps.parse.outputs.status_log_interval }}
 
     steps:
       - name: Generate app token
@@ -255,6 +256,7 @@ jobs:
           MAX_ITERATIONS: ${{ needs.parse.outputs.max_iterations }}
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
+          STATUS_LOG_INTERVAL: ${{ needs.parse.outputs.status_log_interval }}
           ALIAS: ${{ needs.parse.outputs.alias }}
           EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
         run: |
