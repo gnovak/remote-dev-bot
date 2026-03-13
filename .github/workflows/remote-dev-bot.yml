@@ -385,12 +385,24 @@ jobs:
               print(0, 0, 0, 0)
           ")
 
-          TOTAL_TOKENS=$((INPUT_TOKENS + OUTPUT_TOKENS))
           ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
           ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
 
           # Round UP to nearest penny — $0.00 means no cost data was available.
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
+
+          # Format token counts as human-readable (2 sig figs, k and M suffixes)
+          read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          def fmt(n):
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f'{round(v)} M' if v >= 10 else f'{round(v, 1)} M'
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
+              return str(n)
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}))
+          ")
 
           # Format cost comment
           {
@@ -407,9 +419,8 @@ jobs:
               echo "| Iterations | ${ITERATIONS} / ${MAX_ITER} |"
             fi
             echo "| Elapsed time | ${ELAPSED_FMT} |"
-            echo "| Input tokens | ${INPUT_TOKENS} |"
-            echo "| Output tokens | ${OUTPUT_TOKENS} |"
-            echo "| Total tokens | ${TOTAL_TOKENS} |"
+            echo "| Input tokens | ${INPUT_TOKENS_FMT} |"
+            echo "| Output tokens | ${OUTPUT_TOKENS_FMT} |"
             printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
             echo ""
             echo "_Cost is estimated based on token usage and may vary from actual billing._"
@@ -996,10 +1007,22 @@ jobs:
           else:
               print(0, 0, 0, 0)
           ")
-          TOTAL_TOKENS=$((INPUT_TOKENS + OUTPUT_TOKENS))
 
           # Round UP to nearest penny — $0.00 means no cost data was available.
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
+
+          # Format token counts as human-readable (2 sig figs, k and M suffixes)
+          read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          def fmt(n):
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f'{round(v)} M' if v >= 10 else f'{round(v, 1)} M'
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
+              return str(n)
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}))
+          ")
 
           # Format cost comment
           {
@@ -1013,9 +1036,8 @@ jobs:
             echo "| Metric | Value |"
             echo "|--------|-------|"
             echo "| Iterations | ${ITERATIONS} |"
-            echo "| Input tokens | ${INPUT_TOKENS} |"
-            echo "| Output tokens | ${OUTPUT_TOKENS} |"
-            echo "| Total tokens | ${TOTAL_TOKENS} |"
+            echo "| Input tokens | ${INPUT_TOKENS_FMT} |"
+            echo "| Output tokens | ${OUTPUT_TOKENS_FMT} |"
             printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
             echo ""
             echo "_Cost is estimated based on token usage and may vary from actual billing._"
@@ -1531,10 +1553,22 @@ jobs:
           else:
               print(0, 0, 0, 0)
           ")
-          TOTAL_TOKENS=$((INPUT_TOKENS + OUTPUT_TOKENS))
 
           # Round UP to nearest penny — $0.00 means no cost data was available.
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
+
+          # Format token counts as human-readable (2 sig figs, k and M suffixes)
+          read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          def fmt(n):
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f'{round(v)} M' if v >= 10 else f'{round(v, 1)} M'
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
+              return str(n)
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}))
+          ")
 
           # Format cost comment
           {
@@ -1548,9 +1582,8 @@ jobs:
             echo "| Metric | Value |"
             echo "|--------|-------|"
             echo "| Iterations | ${ITERATIONS} |"
-            echo "| Input tokens | ${INPUT_TOKENS} |"
-            echo "| Output tokens | ${OUTPUT_TOKENS} |"
-            echo "| Total tokens | ${TOTAL_TOKENS} |"
+            echo "| Input tokens | ${INPUT_TOKENS_FMT} |"
+            echo "| Output tokens | ${OUTPUT_TOKENS_FMT} |"
             printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
             echo ""
             echo "_Cost is estimated based on token usage and may vary from actual billing._"
