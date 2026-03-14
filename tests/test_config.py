@@ -998,6 +998,19 @@ def test_resolve_config_args_none(config_dir):
     assert result["max_iterations"] == 50  # default from config
 
 
+
+def test_resolve_config_bash_output_limit_from_yaml(config_dir):
+    """bash_output_limit is read from agent: yaml section when not in inline args."""
+    tmp_path, base_path = config_dir
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["agent"] = config.get("agent", {})
+    config["agent"]["bash_output_limit"] = 4000
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result.get("bash_output_limit") == 4000
+
 # --- main() — CLI entry point and GITHUB_OUTPUT writing ---
 
 

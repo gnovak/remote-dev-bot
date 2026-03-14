@@ -154,6 +154,11 @@ test_trigger_sanity() {
 
         while IFS= read -r row; do
             [[ -z "$row" ]] && continue
+            status=$(echo "$row" | jq -r '.status')
+            conclusion=$(echo "$row" | jq -r '.conclusion')
+            # A completed:failure run can be a workflow file error with no jobs — skip it.
+            # Only count runs that are queued/in_progress or completed:success as real triggers.
+            [[ "$status" == "completed" && "$conclusion" == "failure" ]] && continue
             display_title=$(echo "$row" | jq -r '.displayTitle')
             if [[ "$display_title" == *"$match_str"* ]]; then
                 rid=$(echo "$row" | jq -r '.databaseId')

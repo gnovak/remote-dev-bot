@@ -69,8 +69,6 @@ agent:
   max_iterations: 50
   # PR type: "draft" or "ready"
   pr_type: ready
-  # Target branch for PRs created by the agent
-  branch: dev
   # What to do when the agent can't fully resolve the issue (success=False):
   #   comment — post a comment with the agent's evaluation, no PR (default)
   #   draft   — post the same comment AND open a draft PR with partial changes
@@ -85,11 +83,19 @@ agent:
   # Note: GitHub Actions has a hard 6-hour cap. If you need longer runs, set
   # timeout-minutes in your calling workflow's job definition.
   timeout_minutes: 60
+  # Bash output truncation limit in characters. Long outputs are trimmed to
+  # first half + last half of this length to prevent context bloat.
+  # Set to 0 to disable truncation.
+  bash_output_limit: 8000
   # Graceful wrap-up: inject instructions when approaching max iterations
   # This helps the agent commit partial work before hitting the limit
   # Rolling status log: post a 1-2 sentence status update every N iterations
   # as an issue comment. Set to 0 to disable.
   status_log_interval: 5
+  # Number of recent tool call/result pairs to keep in context. Older pairs
+  # are replaced with a placeholder to prevent O(N²) token growth on long runs.
+  # Set to 0 to keep all tool results (not recommended for runs > ~20 iterations).
+  context_keep_tool_results: 10
   graceful_wrapup:
     # Enable/disable graceful wrap-up instructions
     enabled: true

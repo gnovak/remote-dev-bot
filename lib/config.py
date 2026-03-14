@@ -47,19 +47,59 @@ def deep_merge(base, override):
     return result
 
 
+def normalize_config(config):
+    """Normalize legacy config keys to their current names.
+
+    Must be called on each config layer before deep_merge so that
+    renamed keys from older configs contribute to the correct section
+    rather than being silently ignored when a newer layer defines the
+    replacement key.
+
+    Renames performed (all BACKCOMPAT, remove at v1.0):
+      openhands: → agent:          (top-level section rename)
+      mode.context_files: → mode.extra_files:
+      mode.additional_instructions: → mode.extra_instructions:
+    """
+    # BACKCOMPAT(v0→v1, 2026-03-05): rename top-level openhands: → agent:
+    # Must normalize per-layer before deep_merge; a fallback in resolve_config
+    # only works when agent: is absent from the entire merged config, which
+    # fails as soon as any layer (e.g. the base config) defines agent:.
+    if "openhands" in config:
+        if "agent" not in config:
+            config["agent"] = config.pop("openhands")
+        else:
+            # Both present: merge openhands into agent, agent wins on conflict
+            config["agent"] = deep_merge(config.pop("openhands"), config["agent"])
+
+    # BACKCOMPAT(v0→v1, 2026-03-05): rename mode-level context_files: → extra_files:
+    # and additional_instructions: → extra_instructions:
+    for mode_cfg in config.get("modes", {}).values():
+        if isinstance(mode_cfg, dict):
+            if "context_files" in mode_cfg and "extra_files" not in mode_cfg:
+                mode_cfg["extra_files"] = mode_cfg.pop("context_files")
+            if "additional_instructions" in mode_cfg and "extra_instructions" not in mode_cfg:
+                mode_cfg["extra_instructions"] = mode_cfg.pop("additional_instructions")
+
+    return config
+
+
 KNOWN_PROVIDERS = ("anthropic/", "openai/", "gemini/")
 
 DEFAULT_TIMEOUT_MINUTES = 120
 
 # Arguments that can be overridden via inline args (lines after the command)
 ALLOWED_ARGS = {
-    "max_iterations": int,      # agent.max_iterations
-    "timeout_minutes": int,     # agent.timeout_minutes
-    "extra_files": list,        # mode's extra_files
-    "branch": str,              # agent.branch (target branch for PRs)
-    "status_log_interval": int, # agent.status_log_interval
+    "max_iterations": int,       # agent.max_iterations
+    "timeout_minutes": int,      # agent.timeout_minutes
+    "extra_files": list,         # mode's extra_files
+    "branch": str,               # agent.branch (target branch for PRs)
     # BACKCOMPAT(v0→v1, 2026-03-05): target_branch accepted as alias for branch
     "target_branch": str,
+    "status_log_interval": int,       # rolling status log interval (0 = disabled)
+    "bash_output_limit": int,          # agent bash output truncation
+    "context_keep_tool_results": int,  # how many tool result pairs to keep (resolve)
+    "design_context_keep_tool_results": int,  # how many tool result pairs to keep (design)
+    "review_context_keep_tool_results": int,  # how many tool result pairs to keep (review)
 }
 
 
@@ -271,19 +311,19 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     base_config = {}
     if os.path.exists(base_path):
         with open(base_path) as f:
-            base_config = yaml.safe_load(f) or {}
+            base_config = normalize_config(yaml.safe_load(f) or {})
 
     # Read override config from target repo (if it exists)
     override_config = {}
     if os.path.exists(override_path):
         with open(override_path) as f:
-            override_config = yaml.safe_load(f) or {}
+            override_config = normalize_config(yaml.safe_load(f) or {})
 
     # Read local extension from target repo (if it exists)
     local_config = {}
     if local_path and os.path.exists(local_path):
         with open(local_path) as f:
-            local_config = yaml.safe_load(f) or {}
+            local_config = normalize_config(yaml.safe_load(f) or {})
 
     # Merge: base → override → local (each layer wins over the previous)
     config = deep_merge(deep_merge(base_config, override_config), local_config)
@@ -335,6 +375,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     # Read agent settings (formerly openhands:)
     # BACKCOMPAT(v0→v1, 2026-03-05): accept openhands: as alias for agent:
     oh = config.get("agent", config.get("openhands", {}))
+    # max_iter: mode_config wins over global agent config (per-mode default),
+    # and inline arg wins over both (applied below after action is resolved).
     max_iter = oh.get("max_iterations", 50)
     pr_type = oh.get("pr_type", "ready")
     on_failure = oh.get("on_failure", "comment")
@@ -346,9 +388,6 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         raise ValueError(
             f"agent.on_failure must be 'comment' or 'draft', got: {on_failure!r}"
         )
-
-    # Status log interval (0 = disabled, N = post status every N iterations)
-    status_log_interval = oh.get("status_log_interval", 0)
 
     # Graceful wrap-up settings
     graceful_wrapup = oh.get("graceful_wrapup", {})
@@ -374,14 +413,18 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     # Mode settings
     action = mode_config.get("action", "pr")
 
+    # For agentic loop modes (design, review), the mode config can specify its own
+    # max_iterations as a per-mode default, overriding the global agent.max_iterations.
+    # Inline args win over both (applied below).
+    if action in ("design", "review") and "max_iterations" in mode_config:
+        max_iter = mode_config["max_iterations"]
+
     # Apply command-line arg overrides
     target_branch_explicit = False  # True only when set via inline arg
     if "max_iterations" in args:
         max_iter = args["max_iterations"]
     if "timeout_minutes" in args:
         resolved_timeout = args["timeout_minutes"]
-    if "status_log_interval" in args:
-        status_log_interval = args["status_log_interval"]
     if "branch" in args:
         target_branch = args["branch"]
         target_branch_explicit = True
@@ -389,6 +432,12 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     elif "target_branch" in args:
         target_branch = args["target_branch"]
         target_branch_explicit = True
+
+    status_log_interval = args.get("status_log_interval", oh.get("status_log_interval", 5))
+    bash_output_limit = args.get("bash_output_limit", oh.get("bash_output_limit", None))
+    context_keep_tool_results = args.get("context_keep_tool_results", oh.get("context_keep_tool_results", None))
+    design_context_keep_tool_results = args.get("design_context_keep_tool_results", oh.get("design_context_keep_tool_results", None))
+    review_context_keep_tool_results = args.get("review_context_keep_tool_results", oh.get("review_context_keep_tool_results", None))
 
     # Calculate the iteration warning threshold (iteration number at which to warn)
     wrapup_iteration = int(max_iter * wrapup_threshold) if wrapup_enabled else 0
@@ -412,6 +461,15 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         "timeout_minutes": resolved_timeout,
         "status_log_interval": status_log_interval,
     }
+
+    if bash_output_limit is not None:
+        result["bash_output_limit"] = bash_output_limit
+    if context_keep_tool_results is not None:
+        result["context_keep_tool_results"] = context_keep_tool_results
+    if design_context_keep_tool_results is not None:
+        result["design_context_keep_tool_results"] = design_context_keep_tool_results
+    if review_context_keep_tool_results is not None:
+        result["review_context_keep_tool_results"] = review_context_keep_tool_results
 
     # Include extra_instructions if the mode defines one (appended to canonical prompt)
     if "extra_instructions" in mode_config:
@@ -440,11 +498,14 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             print(f"  {key}: {value}")
         print()
 
-    # Include max_iterations for agentic loop modes (design and review)
-    if action == "design" and "max_iterations" in mode_config:
-        result["design_max_iterations"] = mode_config["max_iterations"]
-    if action == "review" and "max_iterations" in mode_config:
-        result["review_max_iterations"] = mode_config["max_iterations"]
+    # Include max_iterations for agentic loop modes (design and review).
+    # Use max_iter (already resolved, including any inline arg override) rather than
+    # mode_config["max_iterations"] so that e.g. `max_iterations = 20` in the comment
+    # body is honoured for design and review modes, not just for resolve.
+    if action == "design":
+        result["design_max_iterations"] = max_iter
+    if action == "review":
+        result["review_max_iterations"] = max_iter
 
     return result
 
@@ -493,15 +554,15 @@ def main():
             base_config = {}
             if os.path.exists(base_path):
                 with open(base_path) as f:
-                    base_config = yaml.safe_load(f) or {}
+                    base_config = normalize_config(yaml.safe_load(f) or {})
             override_config = {}
             if os.path.exists(override_path):
                 with open(override_path) as f:
-                    override_config = yaml.safe_load(f) or {}
+                    override_config = normalize_config(yaml.safe_load(f) or {})
             local_config = {}
             if local_path and os.path.exists(local_path):
                 with open(local_path) as f:
-                    local_config = yaml.safe_load(f) or {}
+                    local_config = normalize_config(yaml.safe_load(f) or {})
             config = deep_merge(deep_merge(base_config, override_config), local_config)
             known_modes = set(config.get("modes", {}).keys())
 
@@ -552,6 +613,14 @@ def main():
             f.write(f"graceful_wrapup_iteration={result['graceful_wrapup_iteration']}\n")
             f.write(f"timeout_minutes={result['timeout_minutes']}\n")
             f.write(f"status_log_interval={result['status_log_interval']}\n")
+            if "bash_output_limit" in result:
+                f.write(f"bash_output_limit={result['bash_output_limit']}\n")
+            if "context_keep_tool_results" in result:
+                f.write(f"context_keep_tool_results={result['context_keep_tool_results']}\n")
+            if "design_context_keep_tool_results" in result:
+                f.write(f"design_context_keep_tool_results={result['design_context_keep_tool_results']}\n")
+            if "review_context_keep_tool_results" in result:
+                f.write(f"review_context_keep_tool_results={result['review_context_keep_tool_results']}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"

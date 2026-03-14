@@ -62,29 +62,30 @@ jobs:
       extra_files: ${{ steps.parse.outputs.extra_files }}
       assign_issue: ${{ steps.parse.outputs.assign_issue }}
       assign_pr: ${{ steps.parse.outputs.assign_pr }}
-      design_max_iterations: ${{ steps.parse.outputs.design_max_iterations }}
-      review_max_iterations: ${{ steps.parse.outputs.review_max_iterations }}
+      explore_max_iterations: ${{ steps.parse.outputs.explore_max_iterations }}
       graceful_wrapup_enabled: ${{ steps.parse.outputs.graceful_wrapup_enabled }}
       graceful_wrapup_iteration: ${{ steps.parse.outputs.graceful_wrapup_iteration }}
       timeout_minutes: ${{ steps.parse.outputs.timeout_minutes }}
       status_log_interval: ${{ steps.parse.outputs.status_log_interval }}
+      design_context_keep_tool_results: ${{ steps.parse.outputs.design_context_keep_tool_results }}
+      review_context_keep_tool_results: ${{ steps.parse.outputs.review_context_keep_tool_results }}
 
     steps:
       - name: Generate app token
         if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ vars.RDB_APP_ID }}
           private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Checkout remote-dev-bot config
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
@@ -96,7 +97,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -144,17 +145,17 @@ jobs:
     steps:
       - name: Generate app token
         if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ vars.RDB_APP_ID }}
           private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout remote-dev-bot lib
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
@@ -165,7 +166,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -234,6 +235,23 @@ jobs:
 
       - name: Install dependencies
         run: pip install PyYAML litellm
+
+      - name: Inject iteration budget hint
+        if: needs.parse.outputs.graceful_wrapup_enabled == 'true'
+        run: |
+          mkdir -p .openhands/microagents
+          cat >> .openhands/microagents/remote-dev-bot-wrapup.md << WRAPUP_EOF
+          # Iteration Budget (injected by remote-dev-bot)
+
+          This task has a budget of **${{ needs.parse.outputs.max_iterations }} iterations**.
+
+          When you reach iteration **${{ needs.parse.outputs.graceful_wrapup_iteration }}**, begin wrapping up:
+          1. Commit all changes you have made so far with a clear commit message
+          2. If the task is not fully complete, add a brief TODO comment or update the issue description with what remains
+          3. Call \`finish()\` with your honest assessment of what was accomplished
+
+          Do not start new work after iteration ${{ needs.parse.outputs.graceful_wrapup_iteration }}.
+          WRAPUP_EOF
 
       - name: Resolve issue
         env:
@@ -350,6 +368,38 @@ jobs:
           # Success case: PR was already created by resolve.py — no comment needed here
 
 
+      - name: Write step summary
+        if: always()
+        env:
+          ALIAS: ${{ needs.parse.outputs.alias }}
+          LLM_MODEL: ${{ needs.parse.outputs.model }}
+        run: |
+          if [ -f /tmp/llm_usage.json ]; then
+            cost=$(python3 -c "import json; d=json.load(open('/tmp/llm_usage.json')); print(f\"\${d.get('cost',0):.2f}\")")
+            iters=$(python3 -c "import json; d=json.load(open('/tmp/llm_usage.json')); print(d.get('iterations',0))")
+          else
+            cost="unknown"
+            iters="unknown"
+          fi
+          if [ -f /tmp/resolve_status.json ]; then
+            success=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('✅' if d.get('success') else '❌')")
+            explanation=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print(d.get('explanation','')[:200])")
+          else
+            success="❓"
+            explanation="No status recorded"
+          fi
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## Resolve Run Summary
+          | | |
+          |---|---|
+          | **Result** | $success |
+          | **Cost** | \$$cost |
+          | **Iterations** | $iters |
+          | **Model** | ${{ env.ALIAS }} (${{ env.LLM_MODEL }}) |
+
+          **Status:** $explanation
+          EOF
+
       - name: Assign triggerer to PR
         if: needs.parse.outputs.assign_pr == 'true'
         continue-on-error: true
@@ -394,7 +444,7 @@ jobs:
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
 
           # Format token counts as human-readable (2 sig figs, k and M suffixes)
-          read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
               if n >= 1_000_000:
                   v = n / 1_000_000
@@ -403,7 +453,7 @@ jobs:
                   v = n / 1_000
                   return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
               return str(n)
-          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}))
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
 
           # Format cost comment
@@ -443,19 +493,19 @@ jobs:
     steps:
       - name: Generate app token
         if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ vars.RDB_APP_ID }}
           private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Checkout remote-dev-bot config
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
@@ -467,7 +517,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -620,13 +670,19 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
           REVIEW_MAX_ITERATIONS: ${{ needs.parse.outputs.review_max_iterations }}
+          REVIEW_CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.review_context_keep_tool_results }}
+          REVIEW_WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
+          REVIEW_WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
         run: |
           python3 << 'PYEOF'
           import json
           import os
           import subprocess
+          import sys
           import yaml
 
+          sys.path.insert(0, ".remote-dev-bot/lib")
+          from context import trim_tool_results
           from litellm import completion
 
           model = "${{ needs.parse.outputs.model }}"
@@ -640,6 +696,14 @@ jobs:
 
           # Get max iterations from config (default 10)
           max_iterations = int(os.environ.get("REVIEW_MAX_ITERATIONS", "10") or "10")
+
+          # Graceful wrapup settings
+          wrapup_enabled = os.environ.get("REVIEW_WRAPUP_ENABLED", "true").lower() == "true"
+          wrapup_iteration = int(os.environ.get("REVIEW_WRAPUP_ITERATION", "0") or "0")
+          wrapup_injected = False
+
+          # Context trimming
+          context_keep_tool_results = int(os.environ.get("REVIEW_CONTEXT_KEEP_TOOL_RESULTS", "0") or "0")
 
           # Generate repository file listing (tracked files only — PR head branch)
           result = subprocess.run(
@@ -940,8 +1004,29 @@ jobs:
                       "content": result,
                   })
 
+              # Trim old tool result pairs to manage context size
+              if context_keep_tool_results > 0:
+                  messages = trim_tool_results(messages, context_keep_tool_results)
+
               if done:
                   break
+
+              # Graceful wrapup: at 80% of max_iterations, inject a user message
+              # telling the agent to wrap up and call submit_review with what it has.
+              if (wrapup_enabled and wrapup_iteration > 0
+                      and not wrapup_injected and iteration + 1 >= wrapup_iteration):
+                  remaining = max_iterations - (iteration + 1)
+                  messages.append({
+                      "role": "user",
+                      "content": (
+                          f"You have used {iteration + 1} of {max_iterations} iterations "
+                          f"({remaining} remaining). "
+                          "Please wrap up your review now and call submit_review with "
+                          "whatever analysis you have gathered so far. "
+                          "Do not start new lines of inquiry."
+                      ),
+                  })
+                  wrapup_injected = True
 
           # Save usage data for the cost comment step
           with open("/tmp/llm_usage.json", "w") as f:
@@ -1014,7 +1099,7 @@ jobs:
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
 
           # Format token counts as human-readable (2 sig figs, k and M suffixes)
-          read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
               if n >= 1_000_000:
                   v = n / 1_000_000
@@ -1023,7 +1108,7 @@ jobs:
                   v = n / 1_000
                   return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
               return str(n)
-          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}))
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
 
           # Format cost comment
@@ -1060,17 +1145,17 @@ jobs:
     steps:
       - name: Generate app token
         if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ vars.RDB_APP_ID }}
           private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout remote-dev-bot config
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
@@ -1082,7 +1167,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -1191,14 +1276,20 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
           DESIGN_MAX_ITERATIONS: ${{ needs.parse.outputs.design_max_iterations }}
+          DESIGN_CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.design_context_keep_tool_results }}
+          DESIGN_WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
+          DESIGN_WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
         run: |
           python3 << 'PYEOF'
           import json
           import os
           import re
           import subprocess
+          import sys
           import yaml
 
+          sys.path.insert(0, ".remote-dev-bot/lib")
+          from context import trim_tool_results
           from litellm import completion
 
           model = "${{ needs.parse.outputs.model }}"
@@ -1216,6 +1307,14 @@ jobs:
 
           # Get max iterations from config (default 10)
           max_iterations = int(os.environ.get("DESIGN_MAX_ITERATIONS", "10") or "10")
+
+          # Graceful wrapup settings
+          wrapup_enabled = os.environ.get("DESIGN_WRAPUP_ENABLED", "true").lower() == "true"
+          wrapup_iteration = int(os.environ.get("DESIGN_WRAPUP_ITERATION", "0") or "0")
+          wrapup_injected = False
+
+          # Context trimming
+          context_keep_tool_results = int(os.environ.get("DESIGN_CONTEXT_KEEP_TOOL_RESULTS", "0") or "0")
 
           # Generate repository file listing (tracked files only)
           result = subprocess.run(
@@ -1257,6 +1356,11 @@ jobs:
               "Use these tools to gather the information you need before providing your analysis. "
               "When you have enough information, call submit_analysis with your final analysis. "
               "Never begin your response with a slash command like /agent."
+              "\n\nBefore forming your analysis, explore the codebase thoroughly: read relevant source files, look for sample data or test fixtures, and examine existing patterns. Understand what is actually there before proposing what should be.\n\n"
+              "Calibrate your analysis to the level of abstraction signaled by the issue:\n\n"
+              "- **High-level design** (e.g. \"analyze the architecture\", \"what's the right approach\", \"design X\"): Stay at the boxes-and-arrows level. Focus on major components, data flow, key trade-offs, and alternatives considered. Keep it concise. Don't dig into file formats or implementation details unless they materially affect the design decision.\n\n"
+              "- **Implementation spec** (e.g. \"write an implementation spec\", \"spec out\", \"acceptance criteria\", \"how exactly should X work\"): Ground your analysis in real artifacts. Find and read sample data files in the repo — don't describe formats abstractly when you can examine them directly. Include: (1) a concrete input→output example using real data from the repo, (2) an \"Open Questions\" section listing anything genuinely unresolved or unspecified, and (3) acceptance criteria specific enough to verify programmatically.\n\n"
+              "If the issue doesn't clearly signal one or the other, default to high-level design."
               "\n\nLength: your analysis will be posted as a GitHub comment. "
               "Write a complete, self-contained analysis — do not truncate or trail off mid-sentence. "
               "If you need to be selective, prioritize the most important points over exhaustive coverage."
@@ -1474,8 +1578,29 @@ jobs:
                       "content": result,
                   })
 
+              # Trim old tool result pairs to manage context size
+              if context_keep_tool_results > 0:
+                  messages = trim_tool_results(messages, context_keep_tool_results)
+
               if done:
                   break
+
+              # Graceful wrapup: at 80% of max_iterations, inject a user message
+              # telling the agent to wrap up and call submit_analysis with what it has.
+              if (wrapup_enabled and wrapup_iteration > 0
+                      and not wrapup_injected and iteration + 1 >= wrapup_iteration):
+                  remaining = max_iterations - (iteration + 1)
+                  messages.append({
+                      "role": "user",
+                      "content": (
+                          f"You have used {iteration + 1} of {max_iterations} iterations "
+                          f"({remaining} remaining). "
+                          "Please wrap up your analysis now and call submit_analysis with "
+                          "whatever analysis you have gathered so far. "
+                          "Do not start new lines of inquiry."
+                      ),
+                  })
+                  wrapup_injected = True
 
           # Save usage data for the cost comment step
           with open("/tmp/llm_usage.json", "w") as f:
@@ -1560,7 +1685,7 @@ jobs:
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
 
           # Format token counts as human-readable (2 sig figs, k and M suffixes)
-          read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
               if n >= 1_000_000:
                   v = n / 1_000_000
@@ -1569,7 +1694,7 @@ jobs:
                   v = n / 1_000
                   return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
               return str(n)
-          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}))
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
 
           # Format cost comment
@@ -1579,6 +1704,470 @@ jobs:
             echo "### 💰 Cost Summary"
             echo ""
             echo "**Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+            echo "**Mode:** ${MODE}"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Input tokens | ${INPUT_TOKENS} |"
+            echo "| Output tokens | ${OUTPUT_TOKENS} |"
+            echo "| Total tokens | ${TOTAL_TOKENS} |"
+            printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
+            echo ""
+            echo "_Cost is estimated based on token usage and may vary from actual billing._"
+          } > /tmp/cost_comment.md
+
+          # Post comment
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --body-file /tmp/cost_comment.md
+
+  # --- Mode: explore (action=explore) — multi-round agentic loop with tool calling ---
+  explore:
+    needs: parse
+    if: needs.parse.outputs.action == 'explore'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Generate app token
+        if: vars.RDB_APP_ID != ''
+        uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ vars.RDB_APP_ID }}
+          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+
+      - name: Checkout target repository
+        uses: actions/checkout@v5
+
+      - name: Checkout remote-dev-bot config
+        uses: actions/checkout@v5
+        with:
+          repository: gnovak/remote-dev-bot
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          ref: ${{ inputs.rdb_ref }}
+          path: .remote-dev-bot
+          sparse-checkout: |
+            /remote-dev-bot.yaml
+            /lib/
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install PyYAML litellm
+
+      - name: Determine API key
+        id: apikey
+        run: |
+          # Select the correct API key based on the model's provider prefix.
+          # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
+          # GitHub Actions automatically masks secret values in logs — this does
+          # NOT print the key. The key is consumed by the next step as
+          # ${{ steps.apikey.outputs.key }} and never appears in plaintext output.
+          MODEL="${{ needs.parse.outputs.model }}"
+          if [[ "$MODEL" == anthropic/* ]]; then
+            echo "key=${{ secrets.ANTHROPIC_API_KEY }}" >> "$GITHUB_OUTPUT"
+          elif [[ "$MODEL" == openai/* ]]; then
+            echo "key=${{ secrets.OPENAI_API_KEY }}" >> "$GITHUB_OUTPUT"
+          elif [[ "$MODEL" == gemini/* ]]; then
+            echo "key=${{ secrets.GEMINI_API_KEY }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Unknown model provider for: $MODEL"
+            exit 1
+          fi
+
+      - name: Gather issue context
+        id: context
+        run: |
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+
+          # Fetch issue title and body
+          ISSUE_JSON=$(gh api repos/${{ github.repository }}/issues/${ISSUE_NUMBER})
+          ISSUE_TITLE=$(echo "$ISSUE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['title'])")
+          ISSUE_BODY=$(echo "$ISSUE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body','') or '')")
+
+          # Fetch all comments (up to 100 — GitHub API max per page)
+          COMMENTS_JSON=$(gh api "repos/${{ github.repository }}/issues/${ISSUE_NUMBER}/comments?per_page=100")
+          COMMENTS=$(echo "$COMMENTS_JSON" | python3 -c "
+          import sys, json
+          comments = json.load(sys.stdin)
+          for c in reversed(comments):
+              user = c['user']['login']
+              body = c.get('body','')
+              print(f'--- @{user} ---')
+              print(body)
+              print()
+          ")
+
+          # Write to files to avoid shell escaping issues
+          echo "$ISSUE_TITLE" > /tmp/issue_title.txt
+          echo "$ISSUE_BODY" > /tmp/issue_body.txt
+          echo "$COMMENTS" > /tmp/issue_comments.txt
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+
+      - name: Run explore loop
+        id: explore
+        env:
+          LLM_API_KEY: ${{ steps.apikey.outputs.key }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CONTEXT_FILES: ${{ needs.parse.outputs.extra_files }}
+          EXPLORE_MAX_ITERATIONS: ${{ needs.parse.outputs.explore_max_iterations }}
+        run: |
+          python3 << 'PYEOF'
+          import json
+          import os
+          import re
+          import subprocess
+          import yaml
+
+          from litellm import completion
+
+          model = "${{ needs.parse.outputs.model }}"
+
+          # Load prompt_prefix from config
+          prompt_prefix = ""
+          for path in ["remote-dev-bot.yaml", ".remote-dev-bot/remote-dev-bot.yaml"]:
+              if os.path.exists(path):
+                  with open(path) as f:
+                      cfg = yaml.safe_load(f) or {}
+                  mode_cfg = cfg.get("modes", {}).get("explore", {})
+                  if "prompt_prefix" in mode_cfg:
+                      prompt_prefix = mode_cfg["prompt_prefix"]
+                      break
+
+          # Get max iterations from config (default 10)
+          max_iterations = int(os.environ.get("EXPLORE_MAX_ITERATIONS", "10") or "10")
+
+          # Generate repository file listing (tracked files only)
+          result = subprocess.run(
+              ["git", "ls-files"],
+              capture_output=True, text=True
+          )
+          file_listing = result.stdout.strip()
+          repo_context = f"## Repository File Listing\n\n```\n{file_listing}\n```"
+
+          # Read repo context files (missing files are skipped gracefully)
+          context_files = json.loads(os.environ.get("CONTEXT_FILES", "[]") or "[]")
+          for filepath in context_files:
+              if os.path.exists(filepath):
+                  with open(filepath) as f:
+                      content = f.read().strip()
+                  if content:
+                      repo_context += f"\n\n## File: {filepath}\n\n{content}"
+
+          # Read issue context
+          with open("/tmp/issue_title.txt") as f:
+              title = f.read().strip()
+          with open("/tmp/issue_body.txt") as f:
+              body = f.read().strip()
+          with open("/tmp/issue_comments.txt") as f:
+              comments = f.read().strip()
+
+          # Build the user content
+          user_content = f"""## Issue: {title}
+
+          {body}
+
+          ## Discussion so far:
+          {comments}
+          """
+
+          system_prompt = prompt_prefix or (
+              "You are analyzing a GitHub issue for design discussion using an agentic exploration loop. "
+              "You have access to tools to read files and search the codebase. "
+              "Use these tools to gather the information you need before providing your analysis. "
+              "When you have enough information, call submit_analysis with your final analysis."
+          )
+
+          if repo_context:
+              system_prompt = "# Repository Context\n" + repo_context + "\n\n# Instructions\n\n" + system_prompt
+
+          # Define tools for the agentic loop
+          tools = [
+              {
+                  "type": "function",
+                  "function": {
+                      "name": "read_file",
+                      "description": "Read the contents of a file from the repository. Use this to examine source code, configuration files, or documentation.",
+                      "parameters": {
+                          "type": "object",
+                          "properties": {
+                              "path": {
+                                  "type": "string",
+                                  "description": "The path to the file relative to the repository root (e.g., 'src/main.py', 'README.md')"
+                              }
+                          },
+                          "required": ["path"]
+                      }
+                  }
+              },
+              {
+                  "type": "function",
+                  "function": {
+                      "name": "grep",
+                      "description": "Search for a pattern in files. Returns matching lines with file paths and line numbers.",
+                      "parameters": {
+                          "type": "object",
+                          "properties": {
+                              "pattern": {
+                                  "type": "string",
+                                  "description": "The search pattern (supports basic regex)"
+                              },
+                              "path": {
+                                  "type": "string",
+                                  "description": "Optional: limit search to a specific file or directory (e.g., 'src/', '*.py'). If not provided, searches all tracked files."
+                              }
+                          },
+                          "required": ["pattern"]
+                      }
+                  }
+              },
+              {
+                  "type": "function",
+                  "function": {
+                      "name": "submit_analysis",
+                      "description": "Submit your final design analysis. Call this when you have gathered enough information and are ready to provide your analysis. This will end the exploration loop.",
+                      "parameters": {
+                          "type": "object",
+                          "properties": {
+                              "analysis": {
+                                  "type": "string",
+                                  "description": "Your complete design analysis in markdown format, suitable for posting as a GitHub comment."
+                              }
+                          },
+                          "required": ["analysis"]
+                      }
+                  }
+              }
+          ]
+
+          def validate_path(path):
+              """Validate that a path is safe (no directory traversal, within repo)."""
+              # Normalize the path
+              normalized = os.path.normpath(path)
+              # Check for directory traversal
+              if normalized.startswith('..') or normalized.startswith('/'):
+                  return False, "Path must be relative to repository root and cannot use '..'"
+              # Check that the path doesn't escape the repo
+              abs_path = os.path.abspath(normalized)
+              repo_root = os.path.abspath('.')
+              if not abs_path.startswith(repo_root):
+                  return False, "Path must be within the repository"
+              return True, normalized
+
+          def execute_read_file(path):
+              """Execute the read_file tool."""
+              valid, result = validate_path(path)
+              if not valid:
+                  return f"Error: {result}"
+              if not os.path.exists(result):
+                  return f"Error: File not found: {path}"
+              if os.path.isdir(result):
+                  return f"Error: Path is a directory, not a file: {path}"
+              try:
+                  with open(result) as f:
+                      content = f.read()
+                  # Limit content size to avoid token explosion
+                  if len(content) > 50000:
+                      content = content[:50000] + "\n\n... (file truncated, showing first 50000 characters)"
+                  return content
+              except Exception as e:
+                  return f"Error reading file: {e}"
+
+          def execute_grep(pattern, path=None):
+              """Execute the grep tool."""
+              try:
+                  cmd = ["git", "grep", "-n", "--no-color", pattern]
+                  if path:
+                      valid, validated_path = validate_path(path)
+                      if not valid:
+                          return f"Error: {validated_path}"
+                      cmd.append("--")
+                      cmd.append(validated_path)
+                  result = subprocess.run(
+                      cmd,
+                      capture_output=True,
+                      text=True,
+                      timeout=30
+                  )
+                  output = result.stdout.strip()
+                  if not output:
+                      return "No matches found."
+                  # Limit output size
+                  lines = output.split('\n')
+                  if len(lines) > 100:
+                      output = '\n'.join(lines[:100]) + f"\n\n... ({len(lines) - 100} more matches truncated)"
+                  return output
+              except subprocess.TimeoutExpired:
+                  return "Error: Search timed out"
+              except Exception as e:
+                  return f"Error executing grep: {e}"
+
+          def execute_tool(tool_name, arguments):
+              """Execute a tool and return the result."""
+              if tool_name == "read_file":
+                  return execute_read_file(arguments.get("path", ""))
+              elif tool_name == "grep":
+                  return execute_grep(arguments.get("pattern", ""), arguments.get("path"))
+              elif tool_name == "submit_analysis":
+                  return arguments.get("analysis", "")
+              else:
+                  return f"Error: Unknown tool: {tool_name}"
+
+          # Initialize conversation
+          messages = [
+              {"role": "system", "content": system_prompt},
+              {"role": "user", "content": user_content},
+          ]
+
+          # Track token usage across all calls
+          total_input_tokens = 0
+          total_output_tokens = 0
+          total_cost = 0.0
+
+          final_analysis = None
+          last_response = None
+
+          for iteration in range(max_iterations):
+              print(f"=== Iteration {iteration + 1}/{max_iterations} ===")
+
+              response = completion(
+                  model=model,
+                  messages=messages,
+                  tools=tools,
+                  max_tokens=4096,
+              )
+
+              # Track token usage
+              usage = getattr(response, 'usage', None)
+              if usage:
+                  total_input_tokens += getattr(usage, 'prompt_tokens', 0)
+                  total_output_tokens += getattr(usage, 'completion_tokens', 0)
+              cost = getattr(response, '_hidden_params', {}).get('response_cost', None)
+              if cost:
+                  total_cost += cost
+
+              message = response.choices[0].message
+              last_response = message.content
+
+              # Check if the model wants to call tools
+              tool_calls = getattr(message, 'tool_calls', None)
+
+              if not tool_calls:
+                  # No tool calls — model is done or gave up without submitting
+                  print("No tool calls — stopping loop")
+                  break
+
+              # Add assistant message with tool calls to conversation
+              messages.append({
+                  "role": "assistant",
+                  "content": message.content,
+                  "tool_calls": [tc.dict() for tc in tool_calls],
+              })
+
+              # Process each tool call and add results to conversation
+              done = False
+              for tool_call in tool_calls:
+                  tool_name = tool_call.function.name
+                  try:
+                      arguments = json.loads(tool_call.function.arguments)
+                  except json.JSONDecodeError:
+                      arguments = {}
+
+                  print(f"  Tool: {tool_name}({list(arguments.keys())})")
+                  result = execute_tool(tool_name, arguments)
+
+                  # submit_analysis signals end of exploration — capture and break
+                  if tool_name == "submit_analysis":
+                      final_analysis = result
+                      done = True
+
+                  messages.append({
+                      "role": "tool",
+                      "tool_call_id": tool_call.id,
+                      "content": result,
+                  })
+
+              if done:
+                  break
+
+          # Save usage data for the cost comment step
+          with open("/tmp/llm_usage.json", "w") as f:
+              json.dump({
+                  "input_tokens": total_input_tokens,
+                  "output_tokens": total_output_tokens,
+                  "cost": total_cost,
+                  "iterations": (iteration + 1) if max_iterations > 0 else 0,
+              }, f)
+
+          # Write analysis for the post-comment step (prefer submit_analysis, fall back to last response)
+          analysis = final_analysis or last_response or ""
+          if analysis:
+              with open("/tmp/explore_analysis.txt", "w") as f:
+                  f.write(analysis)
+          PYEOF
+
+      - name: Post analysis comment
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          MODEL="${{ needs.parse.outputs.model }}"
+
+          if [ -f /tmp/explore_analysis.txt ]; then
+            {
+              cat /tmp/explore_analysis.txt
+              echo ""
+              echo "---"
+              echo "_Exploration by \`/agent-explore-${ALIAS}\` (${MODEL})_"
+            } > /tmp/analysis_comment.md
+
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/analysis_comment.md
+          else
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body "⚠️ **Exploration did not produce an analysis.** The agent may have exhausted all iterations without calling \`submit_analysis\`. See the [workflow run logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+          fi
+
+      - name: Post cost comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          MODEL="${{ needs.parse.outputs.model }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          MODE="${{ needs.parse.outputs.mode }}"
+
+          # Read usage data — default to 0 if file missing (shows $0.00, signals no data)
+          read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
+          import json, os
+          if os.path.exists('/tmp/llm_usage.json'):
+              d = json.load(open('/tmp/llm_usage.json'))
+              print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
+          else:
+              print(0, 0, 0, 0)
+          ")
+          TOTAL_TOKENS=$((INPUT_TOKENS + OUTPUT_TOKENS))
+
+          # Round UP to nearest penny — $0.00 means no cost data was available.
+          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
+
+          # Format cost comment
+          {
+            echo "### 💰 Cost Summary"
+            echo ""
+            echo "**Model:** \`${ALIAS}\` (${MODEL})"
             echo "**Mode:** ${MODE}"
             echo ""
             echo "| Metric | Value |"

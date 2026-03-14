@@ -55,23 +55,12 @@ Three separate GitHub identities are used so each role is cleanly separated:
 - When used, the bot posts as `remote-dev-bot[bot]` — a clearly distinct
   identity from the repo owner
 - App ID: `2895037`
-- Installed on all `gnovak` repos (blanket install). Only repos with
-  `RDB_APP_PRIVATE_KEY` secret actually use it. Currently configured on:
-  `gnovak/remote-dev-bot`, `gnovak/remote-dev-bot-test`
-- Permissions (all Read & write): Contents, Issues, Pull Requests, Workflows,
-  Actions, Checks
-  - **Workflows** is included because this app devs rdb itself, so the agent may
-    need to modify `.github/workflows/` files. Regular rdb users should _not_
-    grant this — the runbook intentionally omits it.
-  - **Actions + Checks** are included so the agent can inspect CI logs and check
-    run results when debugging ("PR XYZ is failing, dig into the logs"). The
-    OpenHands sandbox has `gh` CLI and GitHub API access, so these work. Regular
-    rdb users don't need these unless they specifically want the agent to debug
-    CI.
-- Webhooks: inactive (tokens are generated on-demand via
-  `actions/create-github-app-token`)
-- Private key stored as `RDB_APP_PRIVATE_KEY` secret; App ID stored as
-  `RDB_APP_ID` variable
+- Installed on all `gnovak` repos (blanket install). Only repos with `RDB_APP_PRIVATE_KEY` secret actually use it. Currently configured on: `gnovak/remote-dev-bot`, `gnovak/remote-dev-bot-test`
+- Permissions (all Read & write): Contents, Issues, Pull Requests, Workflows, Actions, Checks
+  - **Workflows** is included because this app devs rdb itself, so the agent may need to modify `.github/workflows/` files. Regular rdb users should *not* grant this — the runbook intentionally omits it.
+  - **Actions + Checks** are included so the agent can inspect CI logs and check run results when debugging ("PR XYZ is failing, dig into the logs"). The OpenHands sandbox has `gh` CLI and GitHub API access, so these work. Regular rdb users don't need these unless they specifically want the agent to debug CI.
+- Webhooks: inactive (tokens are generated on-demand via `actions/create-github-app-token`)
+- Private key stored as `RDB_APP_PRIVATE_KEY` secret; App ID stored as `RDB_APP_ID` variable
 
 ### GitHub username: `remote-dev-bot`
 
@@ -85,40 +74,39 @@ Three separate GitHub identities are used so each role is cleanly separated:
 
 Secrets stored on `gnovak/remote-dev-bot`:
 
-| Secret                              | What it is                                                                                                                 |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`                 | Anthropic API key (for Claude models)                                                                                      |
-| `OPENAI_API_KEY`                    | OpenAI API key (for GPT models)                                                                                            |
-| `GEMINI_API_KEY`                    | Google AI API key (for Gemini models)                                                                                      |
-| `RDB_APP_PRIVATE_KEY`               | GitHub App private key, for bot identity on comments/PRs.                                                                  |
-| `RDB_TESTER_PAT_TOKEN`              | PAT for `remote-dev-bot` account (collaborator on rdb-test). Used by e2e tests to post authorized trigger comments.        |
+| Secret | What it is |
+|--------|-----------|
+| `ANTHROPIC_API_KEY` | Anthropic API key (for Claude models) |
+| `OPENAI_API_KEY` | OpenAI API key (for GPT models) |
+| `GEMINI_API_KEY` | Google AI API key (for Gemini models) |
+| `RDB_APP_PRIVATE_KEY` | GitHub App private key, for bot identity on comments/PRs. |
+| `RDB_TESTER_PAT_TOKEN` | PAT for `remote-dev-bot` account (collaborator on rdb-test). Used by e2e tests to post authorized trigger comments. |
 | `RDB_TESTER_UNAUTHORIZED_PAT_TOKEN` | PAT for `remote-dev-bot-tester` (not a collaborator). Used by security e2e tests to verify unauthorized users are blocked. |
 
 Variables stored on `gnovak/remote-dev-bot`:
 
-| Variable     | Value     | What it is                                                                                                                                                                                                                                                              |
-| ------------ | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Variable | Value | What it is |
+|----------|-------|-----------|
 | `RDB_APP_ID` | `2895037` | GitHub App ID for the "remote-dev-bot" app. Used with `RDB_APP_PRIVATE_KEY` to generate a short-lived token so the bot posts as `remote-dev-bot[bot]`. This is a variable (not a secret) because app IDs are public. Set on `remote-dev-bot` and `remote-dev-bot-test`. |
 
 Secrets stored on `gnovak/remote-dev-bot-test`:
 
-| Secret              | What it is                                                                                                                                                                                                                                                                           |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ANTHROPIC_API_KEY` | Same key as above (shared)                                                                                                                                                                                                                                                           |
-| `OPENAI_API_KEY`    | Same key as above (shared)                                                                                                                                                                                                                                                           |
-| `GEMINI_API_KEY`    | Same key as above (shared)                                                                                                                                                                                                                                                           |
-| `E2E_TEST_TOKEN`    | Canary secret used by security e2e tests. The test prompts the agent to exfiltrate env vars and checks the output doesn't contain this value. Current canary: `Uh_Oh_c7f3a9b2e1d8k4m6p0q5r2w8`. Must match `CANARY_VALUE` in `tests/e2e-security.sh`. If you rotate it, update both. |
+| Secret | What it is |
+|--------|-----------|
+| `ANTHROPIC_API_KEY` | Same key as above (shared) |
+| `OPENAI_API_KEY` | Same key as above (shared) |
+| `GEMINI_API_KEY` | Same key as above (shared) |
+| `E2E_TEST_TOKEN` | Canary secret used by security e2e tests. The test prompts the agent to exfiltrate env vars and checks the output doesn't contain this value. Current canary: `Uh_Oh_c7f3a9b2e1d8k4m6p0q5r2w8`. Must match `CANARY_VALUE` in `tests/e2e-security.sh`. If you rotate it, update both. |
 
 ## Config Layering
 
-rdb uses a three-layer config merge plus optional per-invocation runtime args
-(each layer is optional, deeper layers win):
+rdb uses a three-layer config merge plus optional per-invocation runtime args (each layer is optional, deeper layers win):
 
-| Layer        | Path / Source                                      | Notes                                                            |
-| ------------ | -------------------------------------------------- | ---------------------------------------------------------------- |
-| Base         | `.remote-dev-bot/remote-dev-bot.yaml`              | rdb repo, via sparse-checkout                                    |
-| Override     | `remote-dev-bot.yaml`                              | Target repo (user's settings)                                    |
-| Local        | `remote-dev-bot.local.yaml`                        | Target repo (deepest override; gitignored)                       |
+| Layer | Path / Source | Notes |
+|-------|---------------|-------|
+| Base | `.remote-dev-bot/remote-dev-bot.yaml` | rdb repo, via sparse-checkout |
+| Override | `remote-dev-bot.yaml` | Target repo (user's settings) |
+| Local | `remote-dev-bot.local.yaml` | Target repo (deepest override; gitignored) |
 | Runtime args | Inline `name = value` lines in the trigger comment | Override for a single run; see `ALLOWED_ARGS` in `lib/config.py` |
 
 All merges are deep (leaf-level), so overriding `modes.design.max_iterations`
@@ -265,63 +253,37 @@ sequential execution, or run individual workflows one at a time.
 
 ## Release Procedure
 
-Releases distribute three compiled workflows (`agent-resolve.yml`,
-`agent-design.yml`, `agent-review.yml`) that users download into their repos.
+Releases distribute three compiled workflows (`agent-resolve.yml`, `agent-design.yml`, `agent-review.yml`) that users download into their repos.
 
-E2E tests cost real money (they invoke LLM APIs), so the full test suite is not
-automated. Run it manually before each release. The key rule: **test on `dev`
-before merging to `main`** — once something is on `main` it's live for users.
+E2E tests cost real money (they invoke LLM APIs), so the full test suite is not automated. Run it manually before each release. The key rule: **test on `dev` before merging to `main`** — once something is on `main` it's live for users.
 
 ### Steps
 
 1. **Ensure `dev` is ready**: all intended PRs merged to `dev`, unit CI green.
 
-2. **Run the full test suite on `dev`** via GitHub Actions → Full Test Suite →
-   Run workflow (branch: **dev**).
-   - This runs unit tests → e2e shim (all models) → e2e compiled (all models) →
-     e2e security, sequentially.
-   - Do not trigger other e2e workflows while this is running — they share the
-     test repo and will interfere.
-   - If it fails, debug using targeted e2e triggers (one at a time), fix on a
-     branch, merge to `dev`, and re-run.
+2. **Run the full test suite on `dev`** via GitHub Actions → Full Test Suite → Run workflow (branch: **dev**).
+   - This runs unit tests → e2e shim (all models) → e2e compiled (all models) → e2e security, sequentially.
+   - Do not trigger other e2e workflows while this is running — they share the test repo and will interfere.
+   - If it fails, debug using targeted e2e triggers (one at a time), fix on a branch, merge to `dev`, and re-run.
 
 3. **Merge `dev` → `main`** once the full test suite passes:
-
    ```bash
    git checkout main && git merge --ff-only dev && git push
    ```
 
-4. **Update `CHANGELOG.md`** with a new version section summarizing new
-   features, improvements, and breaking changes. Open a release-prep PR and
-   merge it before tagging:
-
-   ```bash
-   git checkout -b release/vX.Y.Z origin/main
-   # edit CHANGELOG.md
-   git add CHANGELOG.md && git commit -m "Release vX.Y.Z: update changelog"
-   git push -u origin release/vX.Y.Z
-   gh pr create --title "Release vX.Y.Z" --body "Changelog update for vX.Y.Z."
-   # merge the PR, then pull main before tagging
-   git checkout main && git pull origin main
-   ```
-
-5. **Compile the release artifacts** (on `main`):
-
+4. **Compile the release artifacts** (on `main`):
    ```bash
    python scripts/compile.py
    ```
+   This writes `dist/agent-resolve.yml`, `dist/agent-design.yml`, and `dist/agent-review.yml`. Commit the updated dist files if they changed.
 
-   This writes `dist/agent-resolve.yml`, `dist/agent-design.yml`, and
-   `dist/agent-review.yml`. Dist files are gitignored — no need to commit them.
-
-6. **Tag the release**:
-
+5. **Tag the release**:
    ```bash
    git tag -a vX.Y.Z -m "Release vX.Y.Z: summary of changes"
    git push origin vX.Y.Z
    ```
 
-7. **Create the GitHub release** with compiled workflows:
+6. **Create the GitHub release** with compiled workflows:
    ```bash
    gh release create vX.Y.Z dist/agent-resolve.yml dist/agent-design.yml dist/agent-review.yml \
      --title "vX.Y.Z" \
@@ -330,11 +292,6 @@ before merging to `main`** — once something is on `main` it's live for users.
 
 ### What goes in a release
 
-- Three compiled workflow files: `agent-resolve.yml` (issue resolution),
-  `agent-design.yml` (design analysis), `agent-review.yml` (code review). All
-  are self-contained with inlined config, model aliases, and security
-  guardrails.
-- Users who installed via compiled workflows get updates by downloading the new
-  release.
-- Users who installed via the shim get updates automatically when `main` is
-  updated (the shim calls `remote-dev-bot.yml@main`).
+- Three compiled workflow files: `agent-resolve.yml` (issue resolution), `agent-design.yml` (design analysis), `agent-review.yml` (code review). All are self-contained with inlined config, model aliases, and security guardrails.
+- Users who installed via compiled workflows get updates by downloading the new release.
+- Users who installed via the shim get updates automatically when `main` is updated (the shim calls `remote-dev-bot.yml@main`).

@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.7.0 — Reliability, observability, and context management (Mar 2026)
+
+- **Rolling status log**: Every N iterations the agent posts a brief status
+  comment on the issue, so you can see what it's doing without tailing logs.
+  Configure with `status_log_interval` in the `agent:` section (default: 5).
+- **PR summary**: The agent writes a `## Summary` section at the top of every
+  PR describing its approach and key decisions.
+- **Actions job summary**: Cost, token counts, and result are now written to
+  the GitHub Actions run page — no log-diving needed.
+- **Bash output truncation**: Runaway command output no longer blows up the
+  context window. Configurable via `bash_output_limit` (default: 8000 chars,
+  head + tail). See `debug.md` for tuning options.
+- **Reliability improvements**: Rate limit retry with backoff; work is pushed
+  to the remote after every commit so nothing is lost if a run is interrupted;
+  better wrapup instructions reduce stalled runs.
+- **`on_failure: draft` expanded**: Now also opens a draft PR when the agent
+  exhausts its iteration budget or crashes mid-run with committed work.
+- **Improved design prompt**: Exploration-first, better abstraction calibration.
+
+**Breaking changes:** None.
+
 ## v0.6.0 — Custom LiteLLM agent loop, OpenHands removed (Mar 2026)
 
 OpenHands has been replaced with a custom LiteLLM agent loop (`lib/resolve.py`),

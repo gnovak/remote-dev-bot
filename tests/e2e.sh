@@ -148,6 +148,11 @@ else
         "Discuss the design trade-offs of storing configuration in YAML vs TOML vs JSON for a developer tooling project." \
         "/agent-design" "all" "design"
 
+    # Explore mode smoke test (dev-only feature)
+    add_test "explore" "Test: explore analysis" \
+        "Discuss the design trade-offs of storing configuration in YAML vs TOML vs JSON for a developer tooling project." \
+        "/agent-explore" "all" "explore"
+
     # Inline args smoke test: pass max_iterations as inline arg
     add_test "inline-args" "Test: inline max_iterations" \
         "Create a file inline_test.py with a stub function stub() that returns None." \
@@ -669,6 +674,17 @@ for pos in "${!issue_nums[@]}"; do
                 status="PASS (no comment found)"
             fi
             ((pass++)) || true
+        elif [[ "$test_type" == "explore" ]]; then
+            # Explore mode: check if an analysis comment was posted
+            comment_count=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
+                --jq '[.[] | select(.body | contains("Exploration by"))] | length' \
+                2>/dev/null || echo "0")
+            if [[ "$comment_count" -gt 0 ]]; then
+                status="PASS (analysis posted)"
+            else
+                status="PASS (no analysis found)"
+            fi
+            ((pass++)) || true
         else
             # Resolve mode: check if a PR was created
             pr_count=$(gh pr list --repo "$TEST_REPO" \
@@ -754,28 +770,6 @@ else
 fi
 printf "  %-25s %-30s PR #%-5s  %s\n" "rf-review" "$rf_review_status" "$rf_pr_ref" "$rf_review_url"
 
-# rf-feedback result
-rf_feedback_url=""
-[[ -n "$RF_FEEDBACK_RUN_ID" ]] && rf_feedback_url="https://github.com/$TEST_REPO/actions/runs/$RF_FEEDBACK_RUN_ID"
-if [[ "$RF_REVIEW_RESULT" != "success" || -z "$RF_PR_NUM" ]]; then
-    rf_feedback_status="FAIL (review didn't complete)"
-    ((RF_FAIL++)) || true
-elif [[ -z "$RF_FEEDBACK_RESULT" ]]; then
-    rf_feedback_status="TIMEOUT"
-    ((RF_FAIL++)) || true
-elif [[ "$RF_FEEDBACK_RESULT" == "success" ]]; then
-    if [[ -n "$RF_FEEDBACK_NEW_SHA" && -n "$RF_INITIAL_SHA" && "$RF_FEEDBACK_NEW_SHA" != "$RF_INITIAL_SHA" ]]; then
-        rf_feedback_status="PASS (new commit on branch)"
-    else
-        rf_feedback_status="PASS (no new commit detected)"
-    fi
-    ((RF_PASS++)) || true
-else
-    rf_feedback_status="FAIL ($RF_FEEDBACK_RESULT)"
-    ((RF_FAIL++)) || true
-fi
-printf "  %-25s %-30s PR #%-5s  %s\n" "rf-feedback" "$rf_feedback_status" "$rf_pr_ref" "$rf_feedback_url"
-
 # --- Timeout test result ---
 log ""
 log "--- Timeout Test ---"
@@ -810,12 +804,73 @@ fi
 
 printf "  %-25s %-30s issue #%-5s %s\n" "timeout" "$timeout_status" "$timeout_issue_num" "$timeout_log_url"
 
-# --- Graceful wrapup test result ---
-log ""
-log "--- Graceful Wrapup Test ---"
+# --- Phase 4: Graceful wrapup test ---
+# Verifies that approaching max_iterations triggers wrapup instructions.
+# Uses a low max_iterations that the agent is unlikely to complete in — the
+# workflow should still complete cleanly and post a failure comment.
+# Uses the inline max_iterations arg — this phase is dev-only.
 
 WRAPUP_PHASE_PASS=0
 WRAPUP_PHASE_FAIL=0
+
+log ""
+log "Phase 4: Graceful wrapup test — verifying wrapup at iteration budget"
+
+wrapup_ts=$(date +%s)
+wrapup_title="Test: graceful wrapup (e2e-wrapup-$wrapup_ts)"
+wrapup_issue_url=$(gh issue create --repo "$TEST_REPO" \
+    --title "$wrapup_title" \
+    --body "Implement a comprehensive test suite with 20+ test cases for all Python files in this repository. Include edge cases, error paths, and integration tests.")
+wrapup_issue_num="${wrapup_issue_url##*/}"
+cleanup_issues+=("$wrapup_issue_num")
+
+log "  Issue #$wrapup_issue_num. Posting /agent-resolve with max_iterations = 4..."
+gh issue comment "$wrapup_issue_num" --repo "$TEST_REPO" \
+    --body $'/agent-resolve\nmax_iterations = 4'
+
+log "  Waiting 15s for workflow to start..."
+sleep 15
+
+WRAPUP_RUN_ID=""
+WRAPUP_RESULT=""
+WRAPUP_WAIT=1200  # 20 minutes
+wrapup_elapsed=0
+
+while [[ $wrapup_elapsed -lt $WRAPUP_WAIT ]]; do
+    run_json=$(gh run list --repo "$TEST_REPO" \
+        --limit 50 \
+        --json databaseId,status,conclusion,displayTitle 2>/dev/null || echo "[]")
+
+    while IFS= read -r row; do
+        [[ -z "$row" ]] && continue
+        display_title=$(echo "$row" | jq -r '.displayTitle')
+        status=$(echo "$row" | jq -r '.status')
+        conclusion=$(echo "$row" | jq -r '.conclusion')
+        run_id=$(echo "$row" | jq -r '.databaseId')
+        [[ "$conclusion" == "skipped" ]] && continue
+
+        if [[ "$display_title" == *"e2e-wrapup-$wrapup_ts"* ]]; then
+            WRAPUP_RUN_ID="$run_id"
+            if [[ "$status" == "completed" ]]; then
+                WRAPUP_RESULT="$conclusion"
+                log "  wrapup-test: $conclusion (run $run_id)"
+            else
+                log "  wrapup-test: $status (run $run_id)"
+            fi
+            break
+        fi
+    done <<< "$(echo "$run_json" | jq -c '.[]')"
+
+    [[ -n "$WRAPUP_RESULT" ]] && break
+    log "  Waiting... (${wrapup_elapsed}s elapsed)"
+    sleep 60
+    wrapup_elapsed=$((wrapup_elapsed + 60))
+done
+
+log ""
+log "========================================="
+log "  Phase 4: Graceful Wrapup Test"
+log "========================================="
 
 wrapup_log_url=""
 [[ -n "$WRAPUP_RUN_ID" ]] && wrapup_log_url="https://github.com/$TEST_REPO/actions/runs/$WRAPUP_RUN_ID"
@@ -826,14 +881,14 @@ if [[ -z "$WRAPUP_RESULT" ]]; then
 elif [[ "$WRAPUP_RESULT" == "success" ]]; then
     # Check for either a PR (agent finished) or a failure comment (wrapup triggered)
     pr_count=$(gh pr list --repo "$TEST_REPO" \
-        --search "head:rdb-fix-issue-$wrapup_issue_num" \
+        --search "head:openhands-fix-issue-$wrapup_issue_num" \
         --json number --jq 'length' 2>/dev/null || echo "0")
     comment_count=$(gh api "repos/$TEST_REPO/issues/$wrapup_issue_num/comments" \
         --jq '[.[] | select(.body | contains("could not fully resolve"))] | length' \
         2>/dev/null || echo "0")
     if [[ "$pr_count" -gt 0 ]]; then
         wrapup_status="PASS (agent finished — PR created)"
-        cleanup_branches+=("rdb-fix-issue-$wrapup_issue_num")
+        cleanup_branches+=("openhands-fix-issue-$wrapup_issue_num")
         ((WRAPUP_PHASE_PASS++)) || true
     elif [[ "$comment_count" -gt 0 ]]; then
         wrapup_status="PASS (wrapup triggered — failure comment posted)"

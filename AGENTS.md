@@ -4,32 +4,21 @@ Project conventions for AI coding agents working on this repository.
 
 ## Project
 
-Remote Dev Bot — a GitHub Action that triggers an AI agent to resolve issues
-and create PRs, controlled via `/agent-resolve`, `/agent-design`, and
-`/agent-review` comments on GitHub issues and PRs.
+Remote Dev Bot — a GitHub Action that triggers an AI agent (OpenHands) to resolve issues and create PRs, controlled via `/agent-resolve`, `/agent-design`, and `/agent-review` comments on GitHub issues and PRs.
 
 ### How It Works
-
-1. User comments `/agent-resolve[-<model>]`, `/agent-design[-<model>]`, or
-   `/agent-review[-<model>]` on a GitHub issue or PR
+1. User comments `/agent-resolve[-<model>]`, `/agent-design[-<model>]`, or `/agent-review[-<model>]` on a GitHub issue or PR
 2. Target repo's shim workflow calls `remote-dev-bot.yml` from this repo
 3. Reusable workflow parses the mode and model, dispatches to the right job
-4. Resolve mode: agent loop runs (`lib/resolve.py`), edits code, opens a PR.
-   Design mode: LLM analyzes the issue, posts a comment. Review mode: LLM
-   reviews a PR, posts a code review comment.
-5. Iterative: comment `/agent-resolve` again on the PR with feedback for another
-   pass
+4. Resolve mode: OpenHands runs, edits code, opens a PR. Design mode: LLM analyzes the issue, posts a comment. Review mode: LLM reviews a PR, posts a code review comment.
+5. Iterative: comment `/agent-resolve` again on the PR with feedback for another pass
 
 ### Key Files
 
 **Workflows** (`.github/workflows/`):
-
-- `remote-dev-bot.yml` — the reusable workflow; all real logic; jobs: `parse`,
-  `resolve`, `design`, `review`, `explore` (`explore` is dev-only, not yet released to `main`)
-- `agent.yml` — thin shim users copy into their repos; calls
-  `remote-dev-bot.yml@main`
-- `dogfood.yml` — internal shim for rdb self-dev; fires on `/dogfood` comments;
-  calls `remote-dev-bot.yml@dev`
+- `remote-dev-bot.yml` — the reusable workflow; all real logic; jobs: `parse`, `resolve`, `design`, `review`, `explore` (`explore` is dev-only, not yet released to `main`)
+- `agent.yml` — thin shim users copy into their repos; calls `remote-dev-bot.yml@main`
+- `dogfood.yml` — internal shim for rdb self-dev; fires on `/dogfood` comments; calls `remote-dev-bot.yml@dev`
 - `test.yml` — CI: runs pytest on PRs to main
 - `e2e.yml` — manual trigger for E2E tests against `remote-dev-bot-test`
 - `e2e-security.yml` — manual trigger for security E2E tests (verifies
@@ -37,14 +26,9 @@ and create PRs, controlled via `/agent-resolve`, `/agent-design`, and
 - `full-test-suite.yml` — runs unit tests + all E2E tests together
 
 **Python**:
-
-- `lib/config.py` — config parsing: `parse_invocation`, `parse_args`,
-  `resolve_config`, `ALLOWED_ARGS`; called by the workflow and unit tests
-- `lib/feedback.py` — install feedback collection: `InstallReport`,
-  `InstallProblem`, `report_problems`; used during runbook execution
-- `scripts/compile.py` — compiles `remote-dev-bot.yml` →
-  `dist/agent-resolve.yml`, `dist/agent-design.yml`, `dist/agent-review.yml`;
-  finds steps by **name** not index
+- `lib/config.py` — config parsing: `parse_invocation`, `parse_args`, `resolve_config`, `ALLOWED_ARGS`; called by the workflow and unit tests
+- `lib/feedback.py` — install feedback collection: `InstallReport`, `InstallProblem`, `report_problems`; used during runbook execution
+- `scripts/compile.py` — compiles `remote-dev-bot.yml` → `dist/agent-resolve.yml`, `dist/agent-design.yml`, `dist/agent-review.yml`; finds steps by **name** not index
 
 **Tests** (`tests/`):
 
@@ -132,6 +116,13 @@ pytest --doctest-modules lib/config.py
    `agent.yml` and `dogfood.yml`
 5. Update the runbook.md to mention the new provider as an option
 
+### Adding a new model provider (e.g., a new LLM vendor)
+1. Add the provider prefix to `KNOWN_PROVIDERS` in `lib/config.py` (e.g., `"newvendor/"`)
+2. Add an API key check in the "Determine API key" step of `.github/workflows/remote-dev-bot.yml` — there are four copies (resolve, design, review, explore); update all of them
+3. Add model aliases under `models:` in `remote-dev-bot.yaml` with IDs using the new prefix
+4. Add the API key secret (`NEWVENDOR_API_KEY`) to the secrets passed through in `agent.yml` and `dogfood.yml`
+5. Update the runbook.md to mention the new provider as an option
+
 ### Changing the cost/metrics step
 
 The cost step in `remote-dev-bot.yml` reads `/tmp/llm_usage.json` (written by
@@ -164,10 +155,7 @@ target branch = design/gemini
 
 ## compile.py: Three-File Output
 
-`scripts/compile.py` inlines config parsing and selected steps from
-`remote-dev-bot.yml` into three standalone files: `dist/agent-resolve.yml`,
-`dist/agent-design.yml`, and `dist/agent-review.yml`. It finds steps by **name**
-(not index), so reordering steps is safe as long as step names don't change.
+`scripts/compile.py` inlines config parsing and selected steps from `remote-dev-bot.yml` into three standalone files: `dist/agent-resolve.yml`, `dist/agent-design.yml`, and `dist/agent-review.yml`. It finds steps by **name** (not index), so reordering steps is safe as long as step names don't change.
 
 **Rule: if you add, remove, or rename a step in remote-dev-bot.yml, update
 compile.py to match**, then run `pytest tests/test_compile.py -v`. The
