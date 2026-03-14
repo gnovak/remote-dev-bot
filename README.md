@@ -86,18 +86,22 @@ the command:
 /agent resolve
 max iterations = 75
 branch = feature/my-branch
-context = extra-context.md
+extra_files = extra-context.md
 ```
 
-| Argument          | Type    | Description                                                      |
-| ----------------- | ------- | ---------------------------------------------------------------- |
-| `max iterations`  | integer | Override the iteration limit for this run                        |
-| `timeout minutes` | integer | Override the watchdog timeout in minutes for this run            |
-| `branch`          | string  | Target branch for the PR (default: `main`)                       |
-| `context`         | list    | Additional context files for the agent to read (space-separated) |
+| Argument           | Type    | Description                                                      |
+| ------------------ | ------- | ---------------------------------------------------------------- |
+| `max iterations`   | integer | Override the iteration limit for this run                        |
+| `timeout minutes`  | integer | Override the watchdog timeout in minutes for this run            |
+| `branch`           | string  | Target branch for the PR (default: `main`)                       |
+| `extra files`      | list    | Additional context files for the agent to read (space-separated) |
+| `bash output limit`| integer | Max bash output chars kept (first half + last half, middle dropped; default: 8000) |
 
 Argument names are flexible: `max iterations`, `max-iterations`, and
 `max_iterations` all work.
+
+For tuning and observability options (`status_log_interval`,
+`context_keep_tool_results`, etc.) see [debug.md](debug.md).
 
 ### Understanding Model Names
 
@@ -250,8 +254,8 @@ happens next:
 
 | Value               | Behaviour                                                                                                                                                          |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `comment` (default) | Posts a comment with the agent's evaluation and a link to the run logs. No PR is created.                                                                          |
-| `draft`             | Posts the same comment **and** opens a draft PR with whatever changes the agent made. Draft PRs cannot be merged until explicitly converted to "ready for review". |
+| `comment` (default) | Posts a comment with the agent's evaluation and a link to the run logs. No PR is created.                                                                                                                       |
+| `draft`             | Posts the same comment **and** opens a draft PR with whatever changes the agent made. Also creates a draft PR if the agent exhausts its iteration budget or crashes mid-run with committed work on the branch. |
 
 ```yaml
 agent:
@@ -278,6 +282,12 @@ agent:
   # Watchdog timeout in minutes — kills the agent after this many minutes
   # so cost report and artifact upload steps still run (default: 120)
   timeout_minutes: 120
+
+  # Bash output truncation limit in characters. Outputs longer than this are
+  # trimmed to the first 4k + last 4k chars (middle dropped) to prevent context
+  # bloat. The agent is told how many chars were dropped. Set to 0 to disable.
+  # (default: 8000)
+  bash_output_limit: 8000
 ```
 
 You can also override `max_iterations`, `branch`, and `context` on a

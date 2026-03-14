@@ -1074,7 +1074,7 @@ def main():
             f"git ls-remote --heads origin {branch}",
             check=False, timeout=30
         ).strip())
-        if ISSUE_TYPE == "issue" and remote_branch_exists:
+        if ISSUE_TYPE == "issue" and remote_branch_exists and ON_FAILURE == "draft":
             try:
                 last_status = status_log[-1][1] if status_log else "No status recorded."
                 draft_body = (
@@ -1157,8 +1157,10 @@ def main():
 
 
 def _cleanup():
-    """Best-effort: create draft PR if the agent terminated without creating one."""
-    if not _pr_created and _branch_created and ISSUE_TYPE == "issue":
+    """Best-effort: create draft PR if the agent terminated without creating one.
+
+    Only runs when on_failure: draft is set."""
+    if not _pr_created and _branch_created and ISSUE_TYPE == "issue" and ON_FAILURE == "draft":
         try:
             remote_exists = bool(run(
                 f"git ls-remote --heads origin {_branch_created}",
