@@ -793,8 +793,9 @@ jobs:
               "Do NOT begin your response with a slash command like /agent. "
               "Your only output is the review submitted via submit_review."
               "\n\nLength: your review will be posted as a GitHub comment. "
-              "Write a complete, self-contained review — do not truncate or trail off mid-sentence. "
-              "If you need to be selective, prioritize the most important points over exhaustive coverage."
+              "Aim for complete but concise — not exhaustive or verbose. "
+              "Cover what matters most; skip minor nits unless they are pervasive. "
+              "Do not truncate or trail off mid-sentence."
           )
 
           if extra_instructions:
