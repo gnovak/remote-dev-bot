@@ -2,66 +2,22 @@
 
 ## v0.7.0 — Reliability, observability, and context management (Mar 2026)
 
-### Reliability
-
-- **Rate limit retry**: The agent now catches `RateLimitError` from the API
-  and retries with exponential backoff, rather than crashing the run.
-- **Always push after commit**: Every `git commit` is immediately followed by
-  a `git push`, so partial work is preserved if a run is interrupted before
-  `finish()` is called.
-- **Strengthened wrapup instruction**: The agent receives an explicit
-  commit → push → finish sequence in its wrapup prompt, reducing runs that
-  stall without persisting work.
-- **Draft PR on exhaustion or crash**: When `on_failure: draft` is set,
-  a draft PR is opened both when the agent exhausts its iteration budget and
-  when it terminates unexpectedly (crash or top-level exception). Previously
-  the draft was opened unconditionally on exhaustion; crash coverage is new,
-  and both paths are now gated on the config flag.
-
-### Observability
-
-- **Rolling status log**: Every N iterations (configurable via
-  `status_log_interval` in the `agent:` config section; default 5) the agent
-  posts an updated status comment with iteration count and latest activity.
-- **Conversation summary in PR body**: The `finish()` call now accepts a
-  `conversation_summary` field that is rendered as a `## Summary` section in
-  the opened PR body.
-- **GITHUB_STEP_SUMMARY table**: Token and cost metrics are written to the
-  GitHub Actions job summary as a formatted table, visible directly in the
-  workflow run UI.
-- **`debug.md`**: New documentation file covering observability and
-  performance-tuning arguments (`status_log_interval`, `bash_output_limit`,
-  `context_keep_tool_results`, etc.).
-
-### Context management
-
-- **Bash output truncation**: Long bash output is now truncated to keep the
-  context window manageable. The limit is set via `bash_output_limit` in the
-  `agent:` config section (previously only available as an inline debug arg).
-  Truncation uses head + tail to preserve both the start and end of output.
-- **Context tool result trimming**: `context_keep_tool_results` (inline arg)
-  controls how many tool results are retained in the rolling context window,
-  trimming older results to reduce token usage.
-- **Unified context management for design and review**: Both modes now share
-  a single context-management path, giving consistent trimming behavior across
-  all agent modes.
-
-### Design prompt improvements
-
-- The design prompt has been updated to encourage exploration-first thinking
-  and to calibrate the abstraction level of the analysis to the scope of the
-  question being asked.
-
-### Fixes
-
-- **PR-trigger observability**: Fixed a bug where the model label was printed
-  twice in PR-triggered runs, and status-log comments were not being posted
-  correctly for PR triggers.
-- **Token count formatting**: Token counts in cost summaries are now formatted
-  as human-readable values (`1.2k`, `3.4M`) and the redundant "Total tokens"
-  row has been removed.
-- **Install prompt framing**: Fixed framing in the install prompt that was
-  causing the agent to misinterpret the setup context.
+- **Rolling status log**: Every N iterations the agent posts a brief status
+  comment on the issue, so you can see what it's doing without tailing logs.
+  Configure with `status_log_interval` in the `agent:` section (default: 5).
+- **PR summary**: The agent writes a `## Summary` section at the top of every
+  PR describing its approach and key decisions.
+- **Actions job summary**: Cost, token counts, and result are now written to
+  the GitHub Actions run page — no log-diving needed.
+- **Bash output truncation**: Runaway command output no longer blows up the
+  context window. Configurable via `bash_output_limit` (default: 8000 chars,
+  head + tail). See `debug.md` for tuning options.
+- **Reliability improvements**: Rate limit retry with backoff; work is pushed
+  to the remote after every commit so nothing is lost if a run is interrupted;
+  better wrapup instructions reduce stalled runs.
+- **`on_failure: draft` expanded**: Now also opens a draft PR when the agent
+  exhausts its iteration budget or crashes mid-run with committed work.
+- **Improved design prompt**: Exploration-first, better abstraction calibration.
 
 **Breaking changes:** None.
 
