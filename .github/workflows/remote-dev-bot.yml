@@ -73,19 +73,19 @@ jobs:
     steps:
       - name: Generate app token
         if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ vars.RDB_APP_ID }}
           private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Checkout remote-dev-bot config
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
@@ -97,7 +97,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -145,17 +145,17 @@ jobs:
     steps:
       - name: Generate app token
         if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ vars.RDB_APP_ID }}
           private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout remote-dev-bot lib
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
@@ -166,7 +166,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -493,19 +493,19 @@ jobs:
     steps:
       - name: Generate app token
         if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ vars.RDB_APP_ID }}
           private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Checkout remote-dev-bot config
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
@@ -517,7 +517,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -1145,17 +1145,17 @@ jobs:
     steps:
       - name: Generate app token
         if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ vars.RDB_APP_ID }}
           private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout remote-dev-bot config
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
@@ -1167,7 +1167,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -1731,17 +1731,17 @@ jobs:
     steps:
       - name: Generate app token
         if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ vars.RDB_APP_ID }}
           private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 
       - name: Checkout target repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout remote-dev-bot config
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: gnovak/remote-dev-bot
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
@@ -1753,7 +1753,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
