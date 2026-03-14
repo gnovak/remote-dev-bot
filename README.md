@@ -89,12 +89,13 @@ branch = feature/my-branch
 context = extra-context.md
 ```
 
-| Argument          | Type    | Description                                                      |
-| ----------------- | ------- | ---------------------------------------------------------------- |
-| `max iterations`  | integer | Override the iteration limit for this run                        |
-| `timeout minutes` | integer | Override the watchdog timeout in minutes for this run            |
-| `branch`          | string  | Target branch for the PR (default: `main`)                       |
-| `context`         | list    | Additional context files for the agent to read (space-separated) |
+| Argument           | Type    | Description                                                      |
+| ------------------ | ------- | ---------------------------------------------------------------- |
+| `max iterations`   | integer | Override the iteration limit for this run                        |
+| `timeout minutes`  | integer | Override the watchdog timeout in minutes for this run            |
+| `branch`           | string  | Target branch for the PR (default: `main`)                       |
+| `context`          | list    | Additional context files for the agent to read (space-separated) |
+| `bash output limit`| integer | Override bash output truncation limit in characters (default: 8000) |
 
 Argument names are flexible: `max iterations`, `max-iterations`, and
 `max_iterations` all work.
@@ -278,6 +279,11 @@ agent:
   # Watchdog timeout in minutes — kills the agent after this many minutes
   # so cost report and artifact upload steps still run (default: 120)
   timeout_minutes: 120
+
+  # Bash output truncation limit in characters. Long outputs are trimmed to
+  # the first half + last half of this length to prevent context bloat.
+  # Set to 0 to disable truncation (default: 8000)
+  bash_output_limit: 8000
 ```
 
 You can also override `max_iterations`, `branch`, and `context` on a
