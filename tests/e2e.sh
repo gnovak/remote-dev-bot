@@ -1006,7 +1006,7 @@ log "  Total cost:     \$$total_cost"
 log "========================================="
 
 # Exit with failure if any test didn't pass
-total_fail=$((fail + timeout_count + REVIEW_FAIL + TIMEOUT_PHASE_FAIL + WRAPUP_PHASE_FAIL))
+total_fail=$((fail + timeout_count + RF_FAIL + TIMEOUT_PHASE_FAIL + WRAPUP_PHASE_FAIL))
 if [[ $total_fail -gt 0 ]]; then
     exit 1
 fi
