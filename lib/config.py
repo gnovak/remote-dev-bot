@@ -399,9 +399,9 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
 
     status_log_interval = args.get("status_log_interval", oh.get("status_log_interval", 5))
     bash_output_limit = args.get("bash_output_limit", oh.get("bash_output_limit", None))
-    context_keep_tool_results = args.get("context_keep_tool_results", None)
-    design_context_keep_tool_results = args.get("design_context_keep_tool_results", None)
-    review_context_keep_tool_results = args.get("review_context_keep_tool_results", None)
+    context_keep_tool_results = args.get("context_keep_tool_results", oh.get("context_keep_tool_results", None))
+    design_context_keep_tool_results = args.get("design_context_keep_tool_results", oh.get("design_context_keep_tool_results", None))
+    review_context_keep_tool_results = args.get("review_context_keep_tool_results", oh.get("review_context_keep_tool_results", None))
 
     # Calculate the iteration warning threshold (iteration number at which to warn)
     wrapup_iteration = int(max_iter * wrapup_threshold) if wrapup_enabled else 0

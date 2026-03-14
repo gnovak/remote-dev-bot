@@ -94,6 +94,10 @@ agent:
   # Rolling status log: post a 1-2 sentence status update every N iterations
   # as an issue comment. Set to 0 to disable.
   status_log_interval: 5
+  # Number of recent tool call/result pairs to keep in context. Older pairs
+  # are replaced with a placeholder to prevent O(N²) token growth on long runs.
+  # Set to 0 to keep all tool results (not recommended for runs > ~20 iterations).
+  context_keep_tool_results: 10
   graceful_wrapup:
     # Enable/disable graceful wrap-up instructions
     enabled: true

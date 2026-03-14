@@ -32,10 +32,11 @@ truncation.
 
 Number of recent tool call/result pairs to keep in the conversation context.
 Older pairs are replaced with a placeholder. This prevents O(N²) context growth
-over long runs. Set to `0` to keep all tool results (default behavior).
+over long runs. Set to `0` to keep all tool results.
 
-- **Default:** `0` (keep all)
-- **Suggested starting point:** `20` (keeps the last 20 tool interactions)
+Configurable in `remote-dev-bot.yaml` under `agent:`, or as an inline arg.
+
+- **Default:** `10`
 - **Lower values:** Smaller context, lower cost, but agent may "forget" earlier work
 - **Higher values / 0:** Full history; safe but expensive on long runs
 
