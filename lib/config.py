@@ -47,6 +47,42 @@ def deep_merge(base, override):
     return result
 
 
+def normalize_config(config):
+    """Normalize legacy config keys to their current names.
+
+    Must be called on each config layer before deep_merge so that
+    renamed keys from older configs contribute to the correct section
+    rather than being silently ignored when a newer layer defines the
+    replacement key.
+
+    Renames performed (all BACKCOMPAT, remove at v1.0):
+      openhands: → agent:          (top-level section rename)
+      mode.context_files: → mode.extra_files:
+      mode.additional_instructions: → mode.extra_instructions:
+    """
+    # BACKCOMPAT(v0→v1, 2026-03-05): rename top-level openhands: → agent:
+    # Must normalize per-layer before deep_merge; a fallback in resolve_config
+    # only works when agent: is absent from the entire merged config, which
+    # fails as soon as any layer (e.g. the base config) defines agent:.
+    if "openhands" in config:
+        if "agent" not in config:
+            config["agent"] = config.pop("openhands")
+        else:
+            # Both present: merge openhands into agent, agent wins on conflict
+            config["agent"] = deep_merge(config.pop("openhands"), config["agent"])
+
+    # BACKCOMPAT(v0→v1, 2026-03-05): rename mode-level context_files: → extra_files:
+    # and additional_instructions: → extra_instructions:
+    for mode_cfg in config.get("modes", {}).values():
+        if isinstance(mode_cfg, dict):
+            if "context_files" in mode_cfg and "extra_files" not in mode_cfg:
+                mode_cfg["extra_files"] = mode_cfg.pop("context_files")
+            if "additional_instructions" in mode_cfg and "extra_instructions" not in mode_cfg:
+                mode_cfg["extra_instructions"] = mode_cfg.pop("additional_instructions")
+
+    return config
+
+
 KNOWN_PROVIDERS = ("anthropic/", "openai/", "gemini/")
 
 DEFAULT_TIMEOUT_MINUTES = 120
@@ -275,19 +311,19 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     base_config = {}
     if os.path.exists(base_path):
         with open(base_path) as f:
-            base_config = yaml.safe_load(f) or {}
+            base_config = normalize_config(yaml.safe_load(f) or {})
 
     # Read override config from target repo (if it exists)
     override_config = {}
     if os.path.exists(override_path):
         with open(override_path) as f:
-            override_config = yaml.safe_load(f) or {}
+            override_config = normalize_config(yaml.safe_load(f) or {})
 
     # Read local extension from target repo (if it exists)
     local_config = {}
     if local_path and os.path.exists(local_path):
         with open(local_path) as f:
-            local_config = yaml.safe_load(f) or {}
+            local_config = normalize_config(yaml.safe_load(f) or {})
 
     # Merge: base → override → local (each layer wins over the previous)
     config = deep_merge(deep_merge(base_config, override_config), local_config)
@@ -518,15 +554,15 @@ def main():
             base_config = {}
             if os.path.exists(base_path):
                 with open(base_path) as f:
-                    base_config = yaml.safe_load(f) or {}
+                    base_config = normalize_config(yaml.safe_load(f) or {})
             override_config = {}
             if os.path.exists(override_path):
                 with open(override_path) as f:
-                    override_config = yaml.safe_load(f) or {}
+                    override_config = normalize_config(yaml.safe_load(f) or {})
             local_config = {}
             if local_path and os.path.exists(local_path):
                 with open(local_path) as f:
-                    local_config = yaml.safe_load(f) or {}
+                    local_config = normalize_config(yaml.safe_load(f) or {})
             config = deep_merge(deep_merge(base_config, override_config), local_config)
             known_modes = set(config.get("modes", {}).keys())
 
