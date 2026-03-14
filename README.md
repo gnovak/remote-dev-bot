@@ -288,6 +288,11 @@ agent:
   # bloat. The agent is told how many chars were dropped. Set to 0 to disable.
   # (default: 8000)
   bash_output_limit: 8000
+
+  # Number of recent tool call/result pairs kept in context. Older pairs are
+  # replaced with a placeholder to prevent O(N²) token growth on long runs.
+  # Set to 0 to keep all results. (default: 10)
+  context_keep_tool_results: 10
 ```
 
 You can also override `max_iterations`, `branch`, and `context` on a

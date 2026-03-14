@@ -38,7 +38,7 @@ ALIAS = os.environ.get("ALIAS", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
 EXTRA_FILES = json.loads(os.environ.get("EXTRA_FILES", "[]") or "[]")
 BASH_OUTPUT_LIMIT = int(os.environ.get("BASH_OUTPUT_LIMIT", "8000") or "8000")
-CONTEXT_KEEP_TOOL_RESULTS = int(os.environ.get("CONTEXT_KEEP_TOOL_RESULTS", "0") or "0")
+CONTEXT_KEEP_TOOL_RESULTS = int(os.environ.get("CONTEXT_KEEP_TOOL_RESULTS", "10") or "10")
 
 GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY", "")
@@ -1021,7 +1021,15 @@ def main():
             # API call to ask the agent for a brief status update.
             if STATUS_LOG_INTERVAL > 0 and (iteration + 1) % STATUS_LOG_INTERVAL == 0:
                 try:
-                    status_messages = messages + [
+                    # Strip tool-call messages — the status check call omits
+                    # tools=TOOLS, so Anthropic rejects history containing
+                    # tool_calls/tool roles. Keep only text turns.
+                    text_messages = [
+                        m for m in messages
+                        if m.get("role") in ("system", "user")
+                        or (m.get("role") == "assistant" and not m.get("tool_calls"))
+                    ]
+                    status_messages = text_messages + [
                         {
                             "role": "user",
                             "content": (
