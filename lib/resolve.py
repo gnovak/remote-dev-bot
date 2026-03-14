@@ -503,6 +503,27 @@ Use the bash tool to edit files. Good approaches:
 """
 
 
+
+READING_THE_TASK = """
+## Reading the Task
+
+The task below contains an issue title, the original issue body, and the full
+discussion thread (## Discussion).
+
+**Read the entire discussion, not just the issue body.** Comments often contain
+concrete, actionable implementation details that supersede the abstract issue
+description.
+
+- If the discussion includes a design analysis or implementation suggestions
+  (e.g., from a prior `/agent-design` run), treat those suggestions as the spec
+  — they define *what* to build.
+- The issue body gives background context; the most recent concrete, actionable
+  description in the comments is the actual work to do.
+- Look for the latest comment that describes a specific plan or set of changes,
+  and implement that.
+"""
+
+
 def build_system_prompt(repo_context, issue_context_str):
     """Build the system prompt for the resolve agent."""
     wrapup_hint = ""
@@ -534,6 +555,7 @@ is complete before committing — call `finish()` now.
         AGENT_ROLE
         + f"\n# Repository Context\n\n{repo_context}\n\n"
         + WORKFLOW
+        + READING_THE_TASK
         + f"# Task\n\n{issue_context_str}\n"
         + GIT_INSTRUCTIONS
         + EFFICIENCY
