@@ -85,6 +85,10 @@ agent:
   # Note: GitHub Actions has a hard 6-hour cap. If you need longer runs, set
   # timeout-minutes in your calling workflow's job definition.
   timeout_minutes: 60
+  # Bash output truncation limit in characters. Long outputs are trimmed to
+  # first half + last half of this length to prevent context bloat.
+  # Set to 0 to disable truncation.
+  bash_output_limit: 8000
   # Graceful wrap-up: inject instructions when approaching max iterations
   # This helps the agent commit partial work before hitting the limit
   # Rolling status log: post a 1-2 sentence status update every N iterations
