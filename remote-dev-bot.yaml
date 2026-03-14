@@ -69,8 +69,6 @@ agent:
   max_iterations: 50
   # PR type: "draft" or "ready"
   pr_type: ready
-  # Target branch for PRs created by the agent
-  branch: dev
   # What to do when the agent can't fully resolve the issue (success=False):
   #   comment — post a comment with the agent's evaluation, no PR (default)
   #   draft   — post the same comment AND open a draft PR with partial changes
