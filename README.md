@@ -95,7 +95,7 @@ context = extra-context.md
 | `timeout minutes`  | integer | Override the watchdog timeout in minutes for this run            |
 | `branch`           | string  | Target branch for the PR (default: `main`)                       |
 | `context`          | list    | Additional context files for the agent to read (space-separated) |
-| `bash output limit`| integer | Override bash output truncation limit in characters (default: 8000) |
+| `bash output limit`| integer | Max bash output chars kept (first half + last half, middle dropped; default: 8000) |
 
 Argument names are flexible: `max iterations`, `max-iterations`, and
 `max_iterations` all work.
@@ -280,9 +280,10 @@ agent:
   # so cost report and artifact upload steps still run (default: 120)
   timeout_minutes: 120
 
-  # Bash output truncation limit in characters. Long outputs are trimmed to
-  # the first half + last half of this length to prevent context bloat.
-  # Set to 0 to disable truncation (default: 8000)
+  # Bash output truncation limit in characters. Outputs longer than this are
+  # trimmed to the first 4k + last 4k chars (middle dropped) to prevent context
+  # bloat. The agent is told how many chars were dropped. Set to 0 to disable.
+  # (default: 8000)
   bash_output_limit: 8000
 ```
 
