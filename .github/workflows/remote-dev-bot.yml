@@ -444,7 +444,7 @@ jobs:
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
 
           # Format token counts as human-readable (2 sig figs, k and M suffixes)
-          read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
               if n >= 1_000_000:
                   v = n / 1_000_000
@@ -453,7 +453,7 @@ jobs:
                   v = n / 1_000
                   return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
               return str(n)
-          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}))
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
 
           # Format cost comment
@@ -1099,7 +1099,7 @@ jobs:
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
 
           # Format token counts as human-readable (2 sig figs, k and M suffixes)
-          read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
               if n >= 1_000_000:
                   v = n / 1_000_000
@@ -1108,7 +1108,7 @@ jobs:
                   v = n / 1_000
                   return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
               return str(n)
-          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}))
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
 
           # Format cost comment
@@ -1685,7 +1685,7 @@ jobs:
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
 
           # Format token counts as human-readable (2 sig figs, k and M suffixes)
-          read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
               if n >= 1_000_000:
                   v = n / 1_000_000
@@ -1694,7 +1694,7 @@ jobs:
                   v = n / 1_000
                   return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
               return str(n)
-          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}))
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
 
           # Format cost comment
