@@ -1817,7 +1817,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          CONTEXT_FILES: ${{ needs.parse.outputs.context_files }}
+          CONTEXT_FILES: ${{ needs.parse.outputs.extra_files }}
           EXPLORE_MAX_ITERATIONS: ${{ needs.parse.outputs.explore_max_iterations }}
         run: |
           python3 << 'PYEOF'
