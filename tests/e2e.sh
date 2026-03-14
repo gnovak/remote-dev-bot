@@ -770,10 +770,6 @@ else
 fi
 printf "  %-25s %-30s PR #%-5s  %s\n" "rf-review" "$rf_review_status" "$rf_pr_ref" "$rf_review_url"
 
-
-review_ref="${REVIEW_PR_NUM:-N/A}"
-printf "  %-25s %-30s PR #%-5s  %s\n" "review" "$review_status" "$review_ref" "$review_log_url"
-
 # --- Timeout test result ---
 log ""
 log "--- Timeout Test ---"
