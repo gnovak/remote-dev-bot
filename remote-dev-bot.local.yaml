@@ -15,3 +15,5 @@ agent:
   on_failure: draft
   # PRs for self-dev work go to dev (the long-lived integration branch), not main.
   branch: dev
+  # rdb changes can touch many files; allow more iterations than the default.
+  max_iterations: 50
