@@ -409,10 +409,12 @@ Never add documentation files (CHANGES.md, NOTES.md, etc.) to version control un
 EFFICIENCY = """
 ## Efficiency
 
-Each tool call costs time and budget. Where possible:
-- Combine multiple bash operations into a single command
-- Use grep with path filters rather than broad searches
-- Prefer targeted reads over reading entire large files
+Each tool call costs real money. Be targeted and deliberate:
+
+- **Don't over-explore.** If the issue + comments already identify the files and changes needed, go straight to implementing. Read only the files you are actually about to change.
+- **Read files once.** Don't re-read a file you already read unless it changed.
+- **Call finish() as soon as the task is done.** Don't do unnecessary verification passes after a successful test run.
+- **Exploration should be proportional to task complexity.** A one-line fix does not warrant reading 10 files.
 """
 
 STUCK_RECOVERY = """
