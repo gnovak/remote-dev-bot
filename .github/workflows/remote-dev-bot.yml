@@ -418,102 +418,141 @@ jobs:
           gh pr edit "$PR_NUMBER" --repo "${{ github.repository }}" \
             --add-assignee "${{ github.event.comment.user.login }}"
 
-      - name: Calculate and post cost
+      - name: Append cost to PR
         if: always()
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
+          # If the agent created a PR, append the cost table to its body.
+          # Write /tmp/cost_embedded as sentinel so the fallback step skips.
+          PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
+          if [ -z "$PR_URL" ]; then
+            echo "No PR URL found — fallback step will handle cost reporting"
+            exit 0
+          fi
+
+          # Generate cost table
+          python3 << 'PYEOF'
+          import json, math, os, gzip, time
+          def _fmt_tok(n):
+              n = int(n)
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f"{round(v)}M" if v >= 10 else f"{round(v, 1)}M"
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f"{round(v)}K" if v >= 10 else f"{round(v, 1)}K"
+              return str(n)
+          def _fmt_ela(s):
+              s = int(s)
+              return f"{s // 60}m {s % 60}s" if s >= 60 else f"{s}s"
+          def _fmt_bpd(text, cost):
+              if cost <= 0: return 'N/A'
+              data = text.encode('utf-8') if isinstance(text, str) else text
+              bpd = (len(gzip.compress(data)) * 8) / cost
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} MB/$"
+              return f"{bpd / 1_000:.1f} KB/$"
+          if os.path.exists("/tmp/llm_usage.json"):
+              _d = json.load(open("/tmp/llm_usage.json"))
+              input_tokens = _d.get('input_tokens', 0)
+              output_tokens = _d.get('output_tokens', 0)
+              cost = float(_d.get('cost') or 0)
+          else:
+              input_tokens = output_tokens = 0; cost = 0.0
+          try:
+              _st = int(open('/tmp/start_time').read().strip())
+          except Exception:
+              _st = int(time.time())
+          elapsed = int(time.time()) - _st
+          output_text = open("/tmp/spr_output.log").read() if os.path.exists("/tmp/spr_output.log") else ""
+          import subprocess as _sp, re as _re
+          _dp = _sp.run('git diff $(git merge-base HEAD origin/main) HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
+          diff_text = _dp.stdout or ''
+          _ss = _sp.run('git diff --shortstat $(git merge-base HEAD origin/main) HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
+          shortstat = _ss.stdout.strip()
+          loc_changed = 0
+          _m = _re.search(r"(\d+) insertion", shortstat)
+          if _m: loc_changed += int(_m.group(1))
+          _m = _re.search(r"(\d+) deletion", shortstat)
+          if _m: loc_changed += int(_m.group(1))
+          bits_text = diff_text
+          extra_rows = [('Diff', shortstat if shortstat else 'N/A'), ('LOC/$', f'{loc_changed / cost:,.0f} loc/$' if cost > 0 and loc_changed > 0 else 'N/A')]
+          rounded = math.ceil(cost * 100) / 100
+          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bits/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
+          _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
+          _tbl += [f'| {k} | {v} |' for k, v in rows]
+          open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
+          PYEOF
+
+          if [ ! -f /tmp/cost_table.txt ]; then
+            echo "Cost table generation failed — fallback step will handle it"
+            exit 0
+          fi
+
+          # Read current PR body and append cost table
+          CURRENT_BODY=$(gh pr view "$PR_URL" --json body --jq '.body' 2>/dev/null || echo "")
+          COST_TABLE=$(cat /tmp/cost_table.txt)
+          printf '%s\n\n%s\n' "$CURRENT_BODY" "$COST_TABLE" > /tmp/pr_new_body.txt
+
+          gh pr edit "$PR_URL" --body-file /tmp/pr_new_body.txt
+          echo "cost embedded" > /tmp/cost_embedded
+          echo "Cost table appended to PR $PR_URL"
+
+      - name: Post cost comment (fallback)
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          # Sentinel: if cost was embedded in PR body, skip
+          if [ -f /tmp/cost_embedded ]; then
+            echo "Cost already embedded in main comment — skipping fallback"
+            exit 0
+          fi
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           MODEL="${{ needs.parse.outputs.model }}"
           ALIAS="${{ needs.parse.outputs.alias }}"
-          MODE="${{ needs.parse.outputs.mode }}"
-          MAX_ITER="${{ needs.parse.outputs.max_iterations }}"
-
-          # Read usage data written by resolve.py — default to 0 if missing
-          read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
-          import json, os
-          if os.path.exists('/tmp/llm_usage.json'):
-              d = json.load(open('/tmp/llm_usage.json'))
-              print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
-          else:
-              print(0, 0, 0, 0)
-          ")
-
           ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
           ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
-
-          # Round UP to nearest penny — $0.00 means no cost data was available.
+          if [ -f /tmp/llm_usage.json ]; then
+            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
+          import json
+          d = json.load(open('/tmp/llm_usage.json'))
+          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
+          ")
+          else
+            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
+          fi
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
-
-          # Format token counts as human-readable (2 sig figs, k and M suffixes)
           IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
               if n >= 1_000_000:
                   v = n / 1_000_000
-                  return f'{round(v)} M' if v >= 10 else f'{round(v, 1)} M'
+                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
               elif n >= 1_000:
                   v = n / 1_000
-                  return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
+                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
               return str(n)
           print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
-
-          # Compute diff shortstat and lines-per-dollar
-          TARGET_BRANCH="${{ needs.parse.outputs.target_branch }}"
-          SHORTSTAT=$(git diff --shortstat "origin/${TARGET_BRANCH}..HEAD" 2>/dev/null || true)
-          LINES_PER_DOLLAR=""
-          if [[ -n "$SHORTSTAT" && "${COST:-0}" != "0" ]]; then
-            LINES_PER_DOLLAR=$(python3 -c "
-          import re, math
-          s = '''${SHORTSTAT}'''
-          ins = int(m.group(1)) if (m := re.search(r'(\d+) insertion', s)) else 0
-          dels = int(m.group(1)) if (m := re.search(r'(\d+) deletion', s)) else 0
-          lines = ins + dels
-          c = float('${COST}')
-          print(f'{lines / c:.0f}' if c > 0 and lines > 0 else 'N/A')
-          " 2>/dev/null || true)
-          fi
-
-          # Format cost comment
           {
+            echo "⚠️ Agent did not complete — partial cost:"
+            echo ""
             echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
-            echo "### 💰 Cost Summary"
+            echo "---"
             echo ""
-            echo "**Mode:** ${MODE}"
+            echo "### 💰 Cost"
             echo ""
             echo "| Metric | Value |"
             echo "|--------|-------|"
-            if [[ -n "$ITERATIONS" && "$ITERATIONS" != "0" ]]; then
-              echo "| Iterations | ${ITERATIONS} / ${MAX_ITER} |"
-            fi
-            echo "| Elapsed time | ${ELAPSED_FMT} |"
-            echo "| Input tokens | ${INPUT_TOKENS_FMT} |"
-            echo "| Output tokens | ${OUTPUT_TOKENS_FMT} |"
-            printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
-            if [[ -n "$SHORTSTAT" ]]; then
-              echo "| Diff | \`${SHORTSTAT}\` |"
-            fi
-            if [[ -n "$LINES_PER_DOLLAR" && "$LINES_PER_DOLLAR" != "N/A" ]]; then
-              echo "| Lines per dollar | ${LINES_PER_DOLLAR} |"
-            fi
-            echo ""
-            echo "_Cost is estimated based on token usage and may vary from actual billing._"
-          } > /tmp/cost_comment.md
-
-          # Post comment
+            echo "| Time | ${ELAPSED_FMT} |"
+            echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+            echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+            printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+          } > /tmp/cost_comment_fallback.md
           gh issue comment "$ISSUE_NUMBER" \
             --repo "${{ github.repository }}" \
-            --body-file /tmp/cost_comment.md
-
-  # --- Mode: review (action=review) — lightweight agentic loop to review a PR ---
-  review:
-    needs: parse
-    if: needs.parse.outputs.action == 'review'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
+            --body-file /tmp/cost_comment_fallback.md
       - name: Generate app token
         if: vars.RDB_APP_ID != ''
         uses: actions/create-github-app-token@v3
@@ -697,6 +736,7 @@ jobs:
           REVIEW_WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           REVIEW_WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
         run: |
+          date +%s > /tmp/start_time
           python3 << 'PYEOF'
           import json
           import os
@@ -1079,6 +1119,49 @@ jobs:
           MODEL="${{ needs.parse.outputs.model }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
+          # Generate cost table (writes /tmp/cost_table.txt)
+          python3 << 'PYEOF'
+          import json, math, os, gzip, time
+          def _fmt_tok(n):
+              n = int(n)
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f"{round(v)}M" if v >= 10 else f"{round(v, 1)}M"
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f"{round(v)}K" if v >= 10 else f"{round(v, 1)}K"
+              return str(n)
+          def _fmt_ela(s):
+              s = int(s)
+              return f"{s // 60}m {s % 60}s" if s >= 60 else f"{s}s"
+          def _fmt_bpd(text, cost):
+              if cost <= 0: return 'N/A'
+              data = text.encode('utf-8') if isinstance(text, str) else text
+              bpd = (len(gzip.compress(data)) * 8) / cost
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} MB/$"
+              return f"{bpd / 1_000:.1f} KB/$"
+          if os.path.exists("/tmp/llm_usage.json"):
+              _d = json.load(open("/tmp/llm_usage.json"))
+              input_tokens = _d.get('input_tokens', 0)
+              output_tokens = _d.get('output_tokens', 0)
+              cost = float(_d.get('cost') or 0)
+          else:
+              input_tokens = output_tokens = 0; cost = 0.0
+          try:
+              _st = int(open('/tmp/start_time').read().strip())
+          except Exception:
+              _st = int(time.time())
+          elapsed = int(time.time()) - _st
+          output_text = open("/tmp/review_result.txt").read() if os.path.exists("/tmp/review_result.txt") else ""
+          bits_text = output_text
+          extra_rows = []
+          rounded = math.ceil(cost * 100) / 100
+          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bits/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
+          _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
+          _tbl += [f'| {k} | {v} |' for k, v in rows]
+          open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
+          PYEOF
+
           if [ -f /tmp/review_result.txt ]; then
             {
               echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
@@ -1087,11 +1170,16 @@ jobs:
               echo ""
               echo "---"
               echo "_Code review by \`/agent-review-${ALIAS}\` (\`${MODEL}\`)_"
+              if [ -f /tmp/cost_table.txt ]; then
+                echo ""
+                cat /tmp/cost_table.txt
+              fi
             } > /tmp/review_comment.md
 
             gh pr comment "$PR_NUMBER" \
               --repo "${{ github.repository }}" \
               --body-file /tmp/review_comment.md
+            echo "cost embedded" > /tmp/cost_embedded
           else
             MODEL_HEADER="🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             NO_OUTPUT_WARNING="⚠️ **Review did not produce output.** The agent may have exhausted all iterations without calling \`submit_review\`. See the [workflow run logs]($RUN_URL) for details."
@@ -1101,83 +1189,61 @@ jobs:
               --body-file /tmp/review_no_output.md
           fi
 
-      - name: Post cost comment
+      - name: Post cost comment (fallback)
         if: always()
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
+          # Sentinel: if cost was embedded in main comment, skip
+          if [ -f /tmp/cost_embedded ]; then
+            echo "Cost already embedded in main comment — skipping fallback"
+            exit 0
+          fi
           PR_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           MODEL="${{ needs.parse.outputs.model }}"
           ALIAS="${{ needs.parse.outputs.alias }}"
-          MODE="${{ needs.parse.outputs.mode }}"
-
-          # Read usage data — default to 0 if file missing (shows $0.00, signals no data)
-          read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
-          import json, os
-          if os.path.exists('/tmp/llm_usage.json'):
-              d = json.load(open('/tmp/llm_usage.json'))
-              print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
-          else:
-              print(0, 0, 0, 0)
+          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
+          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
+          if [ -f /tmp/llm_usage.json ]; then
+            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
+          import json
+          d = json.load(open('/tmp/llm_usage.json'))
+          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
           ")
-
-          # Round UP to nearest penny — $0.00 means no cost data was available.
+          else
+            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
+          fi
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
-
-          # Format token counts as human-readable (2 sig figs, k and M suffixes)
           IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
               if n >= 1_000_000:
                   v = n / 1_000_000
-                  return f'{round(v)} M' if v >= 10 else f'{round(v, 1)} M'
+                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
               elif n >= 1_000:
                   v = n / 1_000
-                  return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
+                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
               return str(n)
           print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
-
-          # Compute bits-per-dollar from compressed review output
-          BITS_PER_DOLLAR=""
-          if [[ -f /tmp/review_result.txt && "${COST:-0}" != "0" ]]; then
-            BITS_PER_DOLLAR=$(python3 -c "
-          import zlib, math
-          data = open('/tmp/review_result.txt', 'rb').read()
-          bits = len(zlib.compress(data)) * 8
-          c = float('${COST}')
-          if c > 0 and bits > 0:
-              bpd = bits / c
-              if bpd >= 1_000_000: print(f'{bpd/1_000_000:.1f} Mb/\$')
-              elif bpd >= 1_000: print(f'{bpd/1_000:.0f} kb/\$')
-              else: print(f'{bpd:.0f} b/\$')
-          " 2>/dev/null || true)
-          fi
-
-          # Format cost comment
           {
+            echo "⚠️ Agent did not complete — partial cost:"
+            echo ""
             echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
-            echo "### 💰 Cost Summary"
+            echo "---"
             echo ""
-            echo "**Mode:** ${MODE}"
+            echo "### 💰 Cost"
             echo ""
             echo "| Metric | Value |"
             echo "|--------|-------|"
-            echo "| Iterations | ${ITERATIONS} |"
-            echo "| Input tokens | ${INPUT_TOKENS_FMT} |"
-            echo "| Output tokens | ${OUTPUT_TOKENS_FMT} |"
-            printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
-            if [[ -n "$BITS_PER_DOLLAR" ]]; then
-              echo "| Bits per dollar | ${BITS_PER_DOLLAR} |"
-            fi
-            echo ""
-            echo "_Cost is estimated based on token usage and may vary from actual billing._"
-          } > /tmp/cost_comment.md
-
-          # Post comment
-          gh issue comment "$PR_NUMBER" \
+            echo "| Time | ${ELAPSED_FMT} |"
+            echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+            echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+            printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+          } > /tmp/cost_comment_fallback.md
+          gh pr comment "$PR_NUMBER" \
             --repo "${{ github.repository }}" \
-            --body-file /tmp/cost_comment.md
+            --body-file /tmp/cost_comment_fallback.md
 
   # --- Mode: design (action=design) — multi-round agentic loop with tool calling ---
   design:
@@ -1324,6 +1390,7 @@ jobs:
           DESIGN_WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           DESIGN_WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
         run: |
+          date +%s > /tmp/start_time
           python3 << 'PYEOF'
           import json
           import os
@@ -1680,6 +1747,49 @@ jobs:
           MODEL="${{ needs.parse.outputs.model }}"
           MODEL_HEADER="🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
 
+          # Generate cost table (writes /tmp/cost_table.txt)
+          python3 << 'PYEOF'
+          import json, math, os, gzip, time
+          def _fmt_tok(n):
+              n = int(n)
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f"{round(v)}M" if v >= 10 else f"{round(v, 1)}M"
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f"{round(v)}K" if v >= 10 else f"{round(v, 1)}K"
+              return str(n)
+          def _fmt_ela(s):
+              s = int(s)
+              return f"{s // 60}m {s % 60}s" if s >= 60 else f"{s}s"
+          def _fmt_bpd(text, cost):
+              if cost <= 0: return 'N/A'
+              data = text.encode('utf-8') if isinstance(text, str) else text
+              bpd = (len(gzip.compress(data)) * 8) / cost
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} MB/$"
+              return f"{bpd / 1_000:.1f} KB/$"
+          if os.path.exists("/tmp/llm_usage.json"):
+              _d = json.load(open("/tmp/llm_usage.json"))
+              input_tokens = _d.get('input_tokens', 0)
+              output_tokens = _d.get('output_tokens', 0)
+              cost = float(_d.get('cost') or 0)
+          else:
+              input_tokens = output_tokens = 0; cost = 0.0
+          try:
+              _st = int(open('/tmp/start_time').read().strip())
+          except Exception:
+              _st = int(time.time())
+          elapsed = int(time.time()) - _st
+          output_text = open("/tmp/design_analysis.txt").read() if os.path.exists("/tmp/design_analysis.txt") else ""
+          bits_text = output_text
+          extra_rows = []
+          rounded = math.ceil(cost * 100) / 100
+          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bits/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
+          _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
+          _tbl += [f'| {k} | {v} |' for k, v in rows]
+          open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
+          PYEOF
+
           if [ -f /tmp/llm_blocked ]; then
             LOOP_BLOCKED_WARNING="⚠️ **Agent loop blocked!** The design analysis response contained \`/agent\` command(s) which could trigger a recursive agent loop. The response has been blocked for safety."
             printf '%s\n\n%s\n' "${MODEL_HEADER}" "${LOOP_BLOCKED_WARNING}" > /tmp/loop_blocked_comment.md
@@ -1694,11 +1804,16 @@ jobs:
               echo ""
               echo "---"
               echo "_Design analysis by \`/agent-design-${ALIAS}\` (\`${MODEL}\`)_"
+              if [ -f /tmp/cost_table.txt ]; then
+                echo ""
+                cat /tmp/cost_table.txt
+              fi
             } > /tmp/analysis_comment.md
 
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body-file /tmp/analysis_comment.md
+            echo "cost embedded" > /tmp/cost_embedded
           else
             NO_ANALYSIS_WARNING="⚠️ **Exploration did not produce an analysis.** The agent may have exhausted all iterations without calling \`submit_analysis\`. See the [workflow run logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
             printf '%s\n\n%s\n' "${MODEL_HEADER}" "${NO_ANALYSIS_WARNING}" > /tmp/no_analysis_comment.md
@@ -1707,82 +1822,61 @@ jobs:
               --body-file /tmp/no_analysis_comment.md
           fi
 
-      - name: Post cost comment
+      - name: Post cost comment (fallback)
         if: always()
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
+          # Sentinel: if cost was embedded in main comment, skip
+          if [ -f /tmp/cost_embedded ]; then
+            echo "Cost already embedded in main comment — skipping fallback"
+            exit 0
+          fi
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           MODEL="${{ needs.parse.outputs.model }}"
           ALIAS="${{ needs.parse.outputs.alias }}"
-          MODE="${{ needs.parse.outputs.mode }}"
-
-          # Read usage data — default to 0 if file missing (shows $0.00, signals no data)
-          read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
-          import json, os
-          if os.path.exists('/tmp/llm_usage.json'):
-              d = json.load(open('/tmp/llm_usage.json'))
-              print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
-          else:
-              print(0, 0, 0, 0)
+          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
+          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
+          if [ -f /tmp/llm_usage.json ]; then
+            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
+          import json
+          d = json.load(open('/tmp/llm_usage.json'))
+          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
           ")
-
-          # Round UP to nearest penny — $0.00 means no cost data was available.
+          else
+            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
+          fi
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
-
-          # Format token counts as human-readable (2 sig figs, k and M suffixes)
           IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
               if n >= 1_000_000:
                   v = n / 1_000_000
-                  return f'{round(v)} M' if v >= 10 else f'{round(v, 1)} M'
+                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
               elif n >= 1_000:
                   v = n / 1_000
-                  return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
+                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
               return str(n)
           print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
-
-          # Compute bits-per-dollar from compressed design analysis output
-          BITS_PER_DOLLAR=""
-          if [[ -f /tmp/design_analysis.txt && "${COST:-0}" != "0" ]]; then
-            BITS_PER_DOLLAR=$(python3 -c "
-          import zlib, math
-          data = open('/tmp/design_analysis.txt', 'rb').read()
-          bits = len(zlib.compress(data)) * 8
-          c = float('${COST}')
-          if c > 0 and bits > 0:
-              bpd = bits / c
-              if bpd >= 1_000_000: print(f'{bpd/1_000_000:.1f} Mb/\$')
-              elif bpd >= 1_000: print(f'{bpd/1_000:.0f} kb/\$')
-              else: print(f'{bpd:.0f} b/\$')
-          " 2>/dev/null || true)
-          fi
-
-          # Format cost comment
           {
+            echo "⚠️ Agent did not complete — partial cost:"
+            echo ""
             echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
-            echo "### 💰 Cost Summary"
+            echo "---"
             echo ""
-            echo "**Mode:** ${MODE}"
+            echo "### 💰 Cost"
             echo ""
             echo "| Metric | Value |"
             echo "|--------|-------|"
-            echo "| Input tokens | ${INPUT_TOKENS_FMT} |"
-            echo "| Output tokens | ${OUTPUT_TOKENS_FMT} |"
-            printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
-            if [[ -n "$BITS_PER_DOLLAR" ]]; then
-              echo "| Bits per dollar | ${BITS_PER_DOLLAR} |"
-            fi
-            echo ""
-            echo "_Cost is estimated based on token usage and may vary from actual billing._"
-          } > /tmp/cost_comment.md
-
-          # Post comment
+            echo "| Time | ${ELAPSED_FMT} |"
+            echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+            echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+            printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+          } > /tmp/cost_comment_fallback.md
           gh issue comment "$ISSUE_NUMBER" \
             --repo "${{ github.repository }}" \
-            --body-file /tmp/cost_comment.md
+            --body-file /tmp/cost_comment_fallback.md
 
   # --- Mode: explore (action=explore) — multi-round agentic loop with tool calling ---
   explore:
@@ -1883,6 +1977,7 @@ jobs:
           CONTEXT_FILES: ${{ needs.parse.outputs.extra_files }}
           EXPLORE_MAX_ITERATIONS: ${{ needs.parse.outputs.explore_max_iterations }}
         run: |
+          date +%s > /tmp/start_time
           python3 << 'PYEOF'
           import json
           import os
@@ -2185,81 +2280,126 @@ jobs:
           ALIAS="${{ needs.parse.outputs.alias }}"
           MODEL="${{ needs.parse.outputs.model }}"
 
+          # Generate cost table (writes /tmp/cost_table.txt)
+          python3 << 'PYEOF'
+          import json, math, os, gzip, time
+          def _fmt_tok(n):
+              n = int(n)
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f"{round(v)}M" if v >= 10 else f"{round(v, 1)}M"
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f"{round(v)}K" if v >= 10 else f"{round(v, 1)}K"
+              return str(n)
+          def _fmt_ela(s):
+              s = int(s)
+              return f"{s // 60}m {s % 60}s" if s >= 60 else f"{s}s"
+          def _fmt_bpd(text, cost):
+              if cost <= 0: return 'N/A'
+              data = text.encode('utf-8') if isinstance(text, str) else text
+              bpd = (len(gzip.compress(data)) * 8) / cost
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} MB/$"
+              return f"{bpd / 1_000:.1f} KB/$"
+          if os.path.exists("/tmp/llm_usage.json"):
+              _d = json.load(open("/tmp/llm_usage.json"))
+              input_tokens = _d.get('input_tokens', 0)
+              output_tokens = _d.get('output_tokens', 0)
+              cost = float(_d.get('cost') or 0)
+          else:
+              input_tokens = output_tokens = 0; cost = 0.0
+          try:
+              _st = int(open('/tmp/start_time').read().strip())
+          except Exception:
+              _st = int(time.time())
+          elapsed = int(time.time()) - _st
+          output_text = open("/tmp/explore_analysis.txt").read() if os.path.exists("/tmp/explore_analysis.txt") else ""
+          bits_text = output_text
+          extra_rows = []
+          rounded = math.ceil(cost * 100) / 100
+          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bits/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
+          _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
+          _tbl += [f'| {k} | {v} |' for k, v in rows]
+          open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
+          PYEOF
+
           if [ -f /tmp/explore_analysis.txt ]; then
             {
               cat /tmp/explore_analysis.txt
               echo ""
               echo "---"
               echo "_Exploration by \`/agent-explore-${ALIAS}\` (${MODEL})_"
+              if [ -f /tmp/cost_table.txt ]; then
+                echo ""
+                cat /tmp/cost_table.txt
+              fi
             } > /tmp/analysis_comment.md
 
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body-file /tmp/analysis_comment.md
+            echo "cost embedded" > /tmp/cost_embedded
           else
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body "⚠️ **Exploration did not produce an analysis.** The agent may have exhausted all iterations without calling \`submit_analysis\`. See the [workflow run logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
           fi
 
-      - name: Post cost comment
+      - name: Post cost comment (fallback)
         if: always()
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
+          # Sentinel: if cost was embedded in main comment, skip
+          if [ -f /tmp/cost_embedded ]; then
+            echo "Cost already embedded in main comment — skipping fallback"
+            exit 0
+          fi
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           MODEL="${{ needs.parse.outputs.model }}"
           ALIAS="${{ needs.parse.outputs.alias }}"
-          MODE="${{ needs.parse.outputs.mode }}"
-
-          # Read usage data — default to 0 if file missing (shows $0.00, signals no data)
-          read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
-          import json, os
-          if os.path.exists('/tmp/llm_usage.json'):
-              d = json.load(open('/tmp/llm_usage.json'))
-              print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
-          else:
-              print(0, 0, 0, 0)
+          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
+          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
+          if [ -f /tmp/llm_usage.json ]; then
+            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
+          import json
+          d = json.load(open('/tmp/llm_usage.json'))
+          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
           ")
-
-          # Round UP to nearest penny — $0.00 means no cost data was available.
+          else
+            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
+          fi
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
-
-          # Format token counts as human-readable (2 sig figs, k and M suffixes)
           IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
               if n >= 1_000_000:
                   v = n / 1_000_000
-                  return f'{round(v)} M' if v >= 10 else f'{round(v, 1)} M'
+                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
               elif n >= 1_000:
                   v = n / 1_000
-                  return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
+                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
               return str(n)
           print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
-
-          # Format cost comment
           {
+            echo "⚠️ Agent did not complete — partial cost:"
+            echo ""
             echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
-            echo "### 💰 Cost Summary"
+            echo "---"
             echo ""
-            echo "**Mode:** ${MODE}"
+            echo "### 💰 Cost"
             echo ""
             echo "| Metric | Value |"
             echo "|--------|-------|"
-            echo "| Iterations | ${ITERATIONS} |"
-            echo "| Input tokens | ${INPUT_TOKENS_FMT} |"
-            echo "| Output tokens | ${OUTPUT_TOKENS_FMT} |"
-            printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
-            echo ""
-            echo "_Cost is estimated based on token usage and may vary from actual billing._"
-          } > /tmp/cost_comment.md
-
-          # Post comment
+            echo "| Time | ${ELAPSED_FMT} |"
+            echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+            echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+            printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+          } > /tmp/cost_comment_fallback.md
           gh issue comment "$ISSUE_NUMBER" \
             --repo "${{ github.repository }}" \
-            --body-file /tmp/cost_comment.md
+            --body-file /tmp/cost_comment_fallback.md
 
   # --- Mode: workshop (action=workshop) — multi-model design council with human checkpoints ---
   workshop:
