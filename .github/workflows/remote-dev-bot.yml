@@ -456,13 +456,28 @@ jobs:
           print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
 
+          # Compute diff shortstat and lines-per-dollar
+          TARGET_BRANCH="${{ needs.parse.outputs.target_branch }}"
+          SHORTSTAT=$(git diff --shortstat "origin/${TARGET_BRANCH}..HEAD" 2>/dev/null || true)
+          LINES_PER_DOLLAR=""
+          if [[ -n "$SHORTSTAT" && "${COST:-0}" != "0" ]]; then
+            LINES_PER_DOLLAR=$(python3 -c "
+import re, math
+s = '''${SHORTSTAT}'''
+ins = int(m.group(1)) if (m := re.search(r'(\d+) insertion', s)) else 0
+dels = int(m.group(1)) if (m := re.search(r'(\d+) deletion', s)) else 0
+lines = ins + dels
+c = float('${COST}')
+print(f'{lines / c:.0f}' if c > 0 and lines > 0 else 'N/A')
+" 2>/dev/null || true)
+          fi
+
           # Format cost comment
           {
             echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
             echo "### 💰 Cost Summary"
             echo ""
-            echo "**Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo "**Mode:** ${MODE}"
             echo ""
             echo "| Metric | Value |"
@@ -474,6 +489,12 @@ jobs:
             echo "| Input tokens | ${INPUT_TOKENS_FMT} |"
             echo "| Output tokens | ${OUTPUT_TOKENS_FMT} |"
             printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
+            if [[ -n "$SHORTSTAT" ]]; then
+              echo "| Diff | \`${SHORTSTAT}\` |"
+            fi
+            if [[ -n "$LINES_PER_DOLLAR" && "$LINES_PER_DOLLAR" != "N/A" ]]; then
+              echo "| Lines per dollar | ${LINES_PER_DOLLAR} |"
+            fi
             echo ""
             echo "_Cost is estimated based on token usage and may vary from actual billing._"
           } > /tmp/cost_comment.md
@@ -1112,13 +1133,28 @@ jobs:
           print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
 
+          # Compute bits-per-dollar from compressed review output
+          BITS_PER_DOLLAR=""
+          if [[ -f /tmp/review_result.txt && "${COST:-0}" != "0" ]]; then
+            BITS_PER_DOLLAR=$(python3 -c "
+import zlib, math
+data = open('/tmp/review_result.txt', 'rb').read()
+bits = len(zlib.compress(data)) * 8
+c = float('${COST}')
+if c > 0 and bits > 0:
+    bpd = bits / c
+    if bpd >= 1_000_000: print(f'{bpd/1_000_000:.1f} Mb/\$')
+    elif bpd >= 1_000: print(f'{bpd/1_000:.0f} kb/\$')
+    else: print(f'{bpd:.0f} b/\$')
+" 2>/dev/null || true)
+          fi
+
           # Format cost comment
           {
             echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
             echo "### 💰 Cost Summary"
             echo ""
-            echo "**Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo "**Mode:** ${MODE}"
             echo ""
             echo "| Metric | Value |"
@@ -1127,6 +1163,9 @@ jobs:
             echo "| Input tokens | ${INPUT_TOKENS_FMT} |"
             echo "| Output tokens | ${OUTPUT_TOKENS_FMT} |"
             printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
+            if [[ -n "$BITS_PER_DOLLAR" ]]; then
+              echo "| Bits per dollar | ${BITS_PER_DOLLAR} |"
+            fi
             echo ""
             echo "_Cost is estimated based on token usage and may vary from actual billing._"
           } > /tmp/cost_comment.md
@@ -1698,21 +1737,38 @@ jobs:
           print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
 
+          # Compute bits-per-dollar from compressed design analysis output
+          BITS_PER_DOLLAR=""
+          if [[ -f /tmp/design_analysis.txt && "${COST:-0}" != "0" ]]; then
+            BITS_PER_DOLLAR=$(python3 -c "
+import zlib, math
+data = open('/tmp/design_analysis.txt', 'rb').read()
+bits = len(zlib.compress(data)) * 8
+c = float('${COST}')
+if c > 0 and bits > 0:
+    bpd = bits / c
+    if bpd >= 1_000_000: print(f'{bpd/1_000_000:.1f} Mb/\$')
+    elif bpd >= 1_000: print(f'{bpd/1_000:.0f} kb/\$')
+    else: print(f'{bpd:.0f} b/\$')
+" 2>/dev/null || true)
+          fi
+
           # Format cost comment
           {
             echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
             echo "### 💰 Cost Summary"
             echo ""
-            echo "**Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo "**Mode:** ${MODE}"
             echo ""
             echo "| Metric | Value |"
             echo "|--------|-------|"
-            echo "| Input tokens | ${INPUT_TOKENS} |"
-            echo "| Output tokens | ${OUTPUT_TOKENS} |"
-            echo "| Total tokens | ${TOTAL_TOKENS} |"
+            echo "| Input tokens | ${INPUT_TOKENS_FMT} |"
+            echo "| Output tokens | ${OUTPUT_TOKENS_FMT} |"
             printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
+            if [[ -n "$BITS_PER_DOLLAR" ]]; then
+              echo "| Bits per dollar | ${BITS_PER_DOLLAR} |"
+            fi
             echo ""
             echo "_Cost is estimated based on token usage and may vary from actual billing._"
           } > /tmp/cost_comment.md
@@ -2159,16 +2215,29 @@ jobs:
           else:
               print(0, 0, 0, 0)
           ")
-          TOTAL_TOKENS=$((INPUT_TOKENS + OUTPUT_TOKENS))
 
           # Round UP to nearest penny — $0.00 means no cost data was available.
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
 
+          # Format token counts as human-readable (2 sig figs, k and M suffixes)
+          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          def fmt(n):
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f'{round(v)} M' if v >= 10 else f'{round(v, 1)} M'
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
+              return str(n)
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
+          ")
+
           # Format cost comment
           {
+            echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+            echo ""
             echo "### 💰 Cost Summary"
             echo ""
-            echo "**Model:** \`${ALIAS}\` (${MODEL})"
             echo "**Mode:** ${MODE}"
             echo ""
             echo "| Metric | Value |"
