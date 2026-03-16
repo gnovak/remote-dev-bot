@@ -435,37 +435,6 @@ If tests keep failing after multiple attempts:
 Do not repeat the same failing approach more than twice.
 """
 
-WORKED_EXAMPLE = """
-## Example Interaction
-
-The following shows the expected pattern — one tool call per turn, explore before implement, commit before finish.
-
-**Turn 1** — explore:
-```
-bash(command="grep -rn 'def paginate' src/ | head -20")
-```
-
-**Turn 2** — read the relevant file:
-```
-read_file(path="src/pagination.py")
-```
-
-**Turn 3** — implement the fix, commit, and push in one turn:
-```
-bash(command="sed -i 's/page_size - 1/page_size/' src/pagination.py && git add src/pagination.py && git commit -m 'Fix off-by-one error in paginate()' && git push origin HEAD")
-```
-
-**Turn 4** — verify and finish:
-```
-bash(command="git status && python -m pytest tests/test_pagination.py -q")
-```
-
-**Turn 5** — call finish:
-```
-finish(success=True, pr_title="Fix off-by-one error in pagination", pr_body="Fixes #42\n\nRoot cause: paginate() subtracted 1 from page_size incorrectly, causing the last item on each page to be dropped. Fix: removed the erroneous subtraction in src/pagination.py.")
-```
-"""
-
 GIT_INSTRUCTIONS = """
 ## Working in the Repository
 
@@ -569,7 +538,6 @@ is complete before committing — call `finish()` now.
         + GIT_INSTRUCTIONS
         + EFFICIENCY
         + STUCK_RECOVERY
-        + WORKED_EXAMPLE
         + SECURITY_RULES
     )
     if wrapup_hint:
