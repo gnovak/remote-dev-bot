@@ -1057,9 +1057,11 @@ def main():
                         {
                             "role": "user",
                             "content": (
-                                "STATUS CHECK: In 1-2 sentences, what are you currently doing "
-                                "and what is your immediate next step? "
-                                "(This is logged for the run summary — answer briefly then continue your work.)"
+                                "STATUS CHECK: One sentence only — what specific files/components "
+                                "have you modified so far, and what are you currently doing? "
+                                "Be concrete (e.g. 'Updated lib/config.py and remote-dev-bot.yaml, "
+                                "now adding the workshop job to the workflow.'), not high-level "
+                                "(e.g. 'Implementing the feature for issue N.'). No preamble."
                             ),
                         }
                     ]

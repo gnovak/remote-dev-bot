@@ -89,9 +89,9 @@ agent:
   bash_output_limit: 8000
   # Graceful wrap-up: inject instructions when approaching max iterations
   # This helps the agent commit partial work before hitting the limit
-  # Rolling status log: post a 1-2 sentence status update every N iterations
-  # as an issue comment. Set to 0 to disable.
-  status_log_interval: 5
+  # Rolling status log: post a one-sentence status update every N iterations
+  # as an issue comment. Set to 0 to disable (default — enable per-repo).
+  status_log_interval: 0
   # Number of recent tool call/result pairs to keep in context. Older pairs
   # are replaced with a placeholder to prevent O(N²) token growth on long runs.
   # Set to 0 to keep all tool results (not recommended for runs > ~20 iterations).
