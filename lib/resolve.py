@@ -483,6 +483,14 @@ Use the bash tool to edit files. Good approaches:
    ```
    After every `git commit`, immediately run `git push origin HEAD` to preserve your work on the remote. This ensures progress is saved even if the run is interrupted before completion.
 
+**Commit frequently — after each meaningful unit of work.** Don't accumulate all changes into one commit at the end. Good commit points:
+- A new file is created and working
+- A function or class is complete
+- Tests are passing for a component
+- A logical sub-task is done (e.g., config parsing added, now starting workflow changes)
+
+Each commit message should describe what that unit of work does — treat them as a work log, not a polished history.
+
 ### Finishing
 - Before calling finish(), run `git status` to confirm all changes are committed and the working tree is clean.
 - Do not call finish(success=True) if git status shows uncommitted changes — commit them first.
@@ -912,6 +920,26 @@ def main():
         for iteration in range(MAX_ITERATIONS):
             last_iteration = iteration
             print(f"=== Iteration {iteration + 1}/{MAX_ITERATIONS} ===")
+
+            # Inject live wrapup message when the threshold is reached.
+            # This is more effective than the system prompt hint alone — the agent
+            # is deep in context by this point and needs a fresh, visible reminder.
+            if WRAPUP_ENABLED and WRAPUP_ITERATION > 0 and iteration + 1 == WRAPUP_ITERATION:
+                remaining = MAX_ITERATIONS - WRAPUP_ITERATION
+                print(f"  [Wrapup] Injecting wrapup message at iteration {iteration + 1}")
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"⚠️ WRAP UP NOW — iteration {iteration + 1} of {MAX_ITERATIONS}. "
+                        f"Only {remaining} iteration(s) remain after this one.\n\n"
+                        "Commit whatever work exists, push, then call finish():\n"
+                        "1. `git add -A && git commit -m \"WIP: partial implementation\"`\n"
+                        "2. `git push origin HEAD`\n"
+                        "3. Call `finish(success=False, explanation=\"...\")` describing "
+                        "what was done and what remains.\n\n"
+                        "Do NOT start any new work. Commit and finish now."
+                    ),
+                })
 
             try:
                 response = completion(
