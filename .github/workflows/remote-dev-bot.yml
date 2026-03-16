@@ -464,14 +464,14 @@ jobs:
           LINES_PER_DOLLAR=""
           if [[ -n "$SHORTSTAT" && "${COST:-0}" != "0" ]]; then
             LINES_PER_DOLLAR=$(python3 -c "
-import re, math
-s = '''${SHORTSTAT}'''
-ins = int(m.group(1)) if (m := re.search(r'(\d+) insertion', s)) else 0
-dels = int(m.group(1)) if (m := re.search(r'(\d+) deletion', s)) else 0
-lines = ins + dels
-c = float('${COST}')
-print(f'{lines / c:.0f}' if c > 0 and lines > 0 else 'N/A')
-" 2>/dev/null || true)
+          import re, math
+          s = '''${SHORTSTAT}'''
+          ins = int(m.group(1)) if (m := re.search(r'(\d+) insertion', s)) else 0
+          dels = int(m.group(1)) if (m := re.search(r'(\d+) deletion', s)) else 0
+          lines = ins + dels
+          c = float('${COST}')
+          print(f'{lines / c:.0f}' if c > 0 and lines > 0 else 'N/A')
+          " 2>/dev/null || true)
           fi
 
           # Format cost comment
@@ -1141,16 +1141,16 @@ print(f'{lines / c:.0f}' if c > 0 and lines > 0 else 'N/A')
           BITS_PER_DOLLAR=""
           if [[ -f /tmp/review_result.txt && "${COST:-0}" != "0" ]]; then
             BITS_PER_DOLLAR=$(python3 -c "
-import zlib, math
-data = open('/tmp/review_result.txt', 'rb').read()
-bits = len(zlib.compress(data)) * 8
-c = float('${COST}')
-if c > 0 and bits > 0:
-    bpd = bits / c
-    if bpd >= 1_000_000: print(f'{bpd/1_000_000:.1f} Mb/\$')
-    elif bpd >= 1_000: print(f'{bpd/1_000:.0f} kb/\$')
-    else: print(f'{bpd:.0f} b/\$')
-" 2>/dev/null || true)
+          import zlib, math
+          data = open('/tmp/review_result.txt', 'rb').read()
+          bits = len(zlib.compress(data)) * 8
+          c = float('${COST}')
+          if c > 0 and bits > 0:
+              bpd = bits / c
+              if bpd >= 1_000_000: print(f'{bpd/1_000_000:.1f} Mb/\$')
+              elif bpd >= 1_000: print(f'{bpd/1_000:.0f} kb/\$')
+              else: print(f'{bpd:.0f} b/\$')
+          " 2>/dev/null || true)
           fi
 
           # Format cost comment
@@ -1747,16 +1747,16 @@ if c > 0 and bits > 0:
           BITS_PER_DOLLAR=""
           if [[ -f /tmp/design_analysis.txt && "${COST:-0}" != "0" ]]; then
             BITS_PER_DOLLAR=$(python3 -c "
-import zlib, math
-data = open('/tmp/design_analysis.txt', 'rb').read()
-bits = len(zlib.compress(data)) * 8
-c = float('${COST}')
-if c > 0 and bits > 0:
-    bpd = bits / c
-    if bpd >= 1_000_000: print(f'{bpd/1_000_000:.1f} Mb/\$')
-    elif bpd >= 1_000: print(f'{bpd/1_000:.0f} kb/\$')
-    else: print(f'{bpd:.0f} b/\$')
-" 2>/dev/null || true)
+          import zlib, math
+          data = open('/tmp/design_analysis.txt', 'rb').read()
+          bits = len(zlib.compress(data)) * 8
+          c = float('${COST}')
+          if c > 0 and bits > 0:
+              bpd = bits / c
+              if bpd >= 1_000_000: print(f'{bpd/1_000_000:.1f} Mb/\$')
+              elif bpd >= 1_000: print(f'{bpd/1_000:.0f} kb/\$')
+              else: print(f'{bpd:.0f} b/\$')
+          " 2>/dev/null || true)
           fi
 
           # Format cost comment
