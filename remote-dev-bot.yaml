@@ -37,6 +37,24 @@ modes:
       - AGENTS.md
       - README.md
 
+  workshop:
+    action: workshop          # Multi-model design council with human checkpoints
+    default_model: claude-small  # Model for design stage (Stage 1)
+    max_iterations: 15        # Iteration limit for the design loop
+    extra_files:
+      - README.md
+      - CONTRIBUTING.md
+      - AGENTS.md
+      - CLAUDE.md
+      - .gemini/GEMINI.md
+      - how-it-works.md
+    # Council: models that review the design. Defaults to all configured models
+    # (excluding the design model) if not specified.
+    # council:
+    #   - claude-small
+    #   - gpt-small
+    #   - gemini-small
+
 models:
   claude-small:
     id: anthropic/claude-sonnet-4-6

@@ -153,6 +153,12 @@ else
         "Discuss the design trade-offs of storing configuration in YAML vs TOML vs JSON for a developer tooling project." \
         "/agent-explore" "all" "explore"
 
+    # Workshop mode smoke test: cheap council model, low iterations
+    add_test "workshop" "Test: workshop design council" \
+        "Add a docstring to the \`estimate_tokens\` function in lib/context.py" \
+        $'/agent-workshop\ncouncil = claude-small\nmax_iterations = 5' \
+        "claude" "workshop"
+
     # Inline args smoke test: pass max_iterations as inline arg
     add_test "inline-args" "Test: inline max_iterations" \
         "Create a file inline_test.py with a stub function stub() that returns None." \
@@ -690,6 +696,17 @@ for pos in "${!issue_nums[@]}"; do
                 status="PASS (analysis posted)"
             else
                 status="PASS (no analysis found)"
+            fi
+            ((pass++)) || true
+        elif [[ "$test_type" == "workshop" ]]; then
+            # Workshop mode: check if a Stage 2 summary comment was posted (no PR)
+            comment_count=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
+                --jq '[.[] | select(.body | contains("Workshop Stage 2 complete") or contains("Workshop Stage 1"))] | length' \
+                2>/dev/null || echo "0")
+            if [[ "$comment_count" -gt 0 ]]; then
+                status="PASS (workshop comments posted)"
+            else
+                status="PASS (no workshop comment found)"
             fi
             ((pass++)) || true
         else

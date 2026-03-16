@@ -1327,3 +1327,129 @@ def test_parse_args_compaction_invalid_float():
     """Non-float value for compaction param raises ValueError."""
     with pytest.raises(ValueError, match="must be a number"):
         parse_args(["compaction_coverage = not_a_number"])
+
+
+# --- Workshop mode config tests ---
+
+
+class TestWorkshopConfig:
+    """Tests for workshop mode configuration."""
+
+    @pytest.fixture
+    def workshop_config_dir(self, tmp_path):
+        """Create a temp dir with config that includes workshop mode."""
+        config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "claude-large": {"id": "anthropic/claude-opus-4-6"},
+                "gpt-small": {"id": "openai/gpt-4o-mini"},
+                "gemini-small": {"id": "gemini/gemini-2.5-flash"},
+            },
+            "modes": {
+                "resolve": {"action": "pr"},
+                "workshop": {
+                    "action": "workshop",
+                    "default_model": "claude-large",
+                    "max_iterations": 15,
+                },
+            },
+            "agent": {
+                "max_iterations": 50,
+                "pr_type": "ready",
+            },
+        }
+        base_path = str(tmp_path / "base.yaml")
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        return tmp_path, base_path
+
+    def test_workshop_mode_basic(self, workshop_config_dir):
+        """Workshop mode is recognized with correct action and defaults."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        assert result["mode"] == "workshop"
+        assert result["action"] == "workshop"
+        assert result["alias"] == "claude-large"
+        assert result["model"] == "anthropic/claude-opus-4-6"
+
+    def test_workshop_mode_with_model(self, workshop_config_dir):
+        """Workshop mode accepts explicit model alias."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop-claude-small")
+        assert result["mode"] == "workshop"
+        assert result["alias"] == "claude-small"
+
+    def test_workshop_max_iterations(self, workshop_config_dir):
+        """Workshop mode uses its own max_iterations."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        assert result["workshop_max_iterations"] == 15
+
+    def test_workshop_max_iterations_override_via_args(self, workshop_config_dir):
+        """Inline args override workshop max_iterations."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "workshop",
+            args={"max_iterations": 25},
+        )
+        assert result["workshop_max_iterations"] == 25
+
+    def test_workshop_default_council_excludes_design_model(self, workshop_config_dir):
+        """Default council (no explicit list) excludes the design model."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        council = result["council_models"]
+        aliases = [m["alias"] for m in council]
+        # design model is claude-large (default_model for workshop mode)
+        assert "claude-large" not in aliases
+        assert "claude-small" in aliases
+        assert "gpt-small" in aliases
+        assert "gemini-small" in aliases
+
+    def test_workshop_default_council_with_explicit_model(self, workshop_config_dir):
+        """Default council excludes the explicit model when user specifies one."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop-claude-small")
+        council = result["council_models"]
+        aliases = [m["alias"] for m in council]
+        # design model is now claude-small (explicitly specified)
+        assert "claude-small" not in aliases
+        assert "claude-large" in aliases
+
+    def test_workshop_explicit_council(self, workshop_config_dir):
+        """Explicit council list uses exactly those models."""
+        tmp_path, base_path = workshop_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["workshop"]["council"] = ["claude-small", "gpt-small"]
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        council = result["council_models"]
+        aliases = [m["alias"] for m in council]
+        assert aliases == ["claude-small", "gpt-small"]
+
+    def test_workshop_explicit_council_can_include_design_model(self, workshop_config_dir):
+        """Explicit council can include the design model (self-review)."""
+        tmp_path, base_path = workshop_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["workshop"]["council"] = ["claude-large", "gpt-small"]
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        council = result["council_models"]
+        aliases = [m["alias"] for m in council]
+        assert "claude-large" in aliases  # design model explicitly included
+
+    def test_workshop_council_models_have_id(self, workshop_config_dir):
+        """Each council model entry has both alias and id."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        for m in result["council_models"]:
+            assert "alias" in m
+            assert "id" in m
+            assert m["id"]  # not empty

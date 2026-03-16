@@ -421,10 +421,10 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     # Mode settings
     action = mode_config.get("action", "pr")
 
-    # For agentic loop modes (design, review), the mode config can specify its own
-    # max_iterations as a per-mode default, overriding the global agent.max_iterations.
-    # Inline args win over both (applied below).
-    if action in ("design", "review") and "max_iterations" in mode_config:
+    # For agentic loop modes (design, review, workshop), the mode config can specify
+    # its own max_iterations as a per-mode default, overriding the global
+    # agent.max_iterations. Inline args win over both (applied below).
+    if action in ("design", "review", "workshop") and "max_iterations" in mode_config:
         max_iter = mode_config["max_iterations"]
 
     # Apply command-line arg overrides
@@ -526,7 +526,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             print(f"  {key}: {value}")
         print()
 
-    # Include max_iterations for agentic loop modes (design and review).
+    # Include max_iterations for agentic loop modes (design, review, workshop).
     # Use max_iter (already resolved, including any inline arg override) rather than
     # mode_config["max_iterations"] so that e.g. `max_iterations = 20` in the comment
     # body is honoured for design and review modes, not just for resolve.
@@ -534,6 +534,29 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         result["design_max_iterations"] = max_iter
     if action == "review":
         result["review_max_iterations"] = max_iter
+    if action == "workshop":
+        result["workshop_max_iterations"] = max_iter
+
+        # Council models: explicit list from mode config, or all models except design model
+        council_config = mode_config.get("council", [])
+        council_models = []
+        if council_config:
+            # Explicit council list — use exactly what's specified
+            for council_alias in council_config:
+                if council_alias in models:
+                    council_models.append({
+                        "alias": council_alias,
+                        "id": models[council_alias]["id"],
+                    })
+        else:
+            # Default: all models except the design model (no self-review)
+            for model_alias_key, model_cfg in models.items():
+                if model_alias_key != alias:
+                    council_models.append({
+                        "alias": model_alias_key,
+                        "id": model_cfg["id"],
+                    })
+        result["council_models"] = council_models
 
     return result
 
@@ -636,6 +659,10 @@ def main():
                 f.write(f"design_max_iterations={result['design_max_iterations']}\n")
             if "review_max_iterations" in result:
                 f.write(f"review_max_iterations={result['review_max_iterations']}\n")
+            if "workshop_max_iterations" in result:
+                f.write(f"workshop_max_iterations={result['workshop_max_iterations']}\n")
+            if "council_models" in result:
+                f.write(f"council_models={json.dumps(result['council_models'])}\n")
 
             f.write(f"graceful_wrapup_enabled={str(result['graceful_wrapup_enabled']).lower()}\n")
             f.write(f"graceful_wrapup_iteration={result['graceful_wrapup_iteration']}\n")
