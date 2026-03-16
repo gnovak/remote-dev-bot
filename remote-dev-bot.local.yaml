@@ -15,3 +15,5 @@ agent:
   on_failure: draft
   # PRs for self-dev work go to dev (the long-lived integration branch), not main.
   branch: dev
+  # Enable status log for rdb self-dev — useful for monitoring longer runs.
+  status_log_interval: 5
