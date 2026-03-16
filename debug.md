@@ -54,21 +54,13 @@ runs and benefit less).
 #### `max_context_tokens`
 
 Hard cap on context window size (in estimated tokens, using character count / 4).
-When the context exceeds `compaction_threshold × max_context_tokens`, a
-compaction pass is triggered. Set to `0` to disable compaction entirely (use
-the model's native max).
+Compaction triggers at 85% of this value, leaving headroom for the summary to
+fit. Set to `0` to disable compaction entirely.
 
 - **Default:** `0` (disabled)
-- **Suggested:** Set below the model's max context to control costs, e.g. `100000`
-
-#### `compaction_threshold`
-
-Fraction of `max_context_tokens` at which compaction triggers. Must be between
-0 and 1.
-
-- **Default:** `0.8`
-- **Example:** With `max_context_tokens=100000` and `compaction_threshold=0.8`,
-  compaction fires when estimated tokens exceed 80,000.
+- **Suggested:** Set to a value below your model's native context limit.
+  Common limits: Claude Sonnet 200,000 · Gemini 2.5 Flash 1,000,000 · GPT-4o 128,000.
+  For a Claude Sonnet run, `150000` is a reasonable value.
 
 #### `compaction_coverage`
 
@@ -90,8 +82,7 @@ targets ~50% the token count of the selected messages. Must be between 0 and 1.
 
 ```yaml
 agent:
-  max_context_tokens: 100000
-  compaction_threshold: 0.8
+  max_context_tokens: 150000   # Claude Sonnet; adjust for your model
   compaction_coverage: 0.5
   compaction_factor: 0.5
 ```

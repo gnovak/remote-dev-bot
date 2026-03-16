@@ -101,7 +101,6 @@ ALLOWED_ARGS = {
     "design_context_keep_tool_results": int,  # how many tool result pairs to keep (design)
     "review_context_keep_tool_results": int,  # how many tool result pairs to keep (review)
     "max_context_tokens": int,       # hard cap on context window (0 = model max)
-    "compaction_threshold": float,   # fraction of max_context_tokens to trigger compaction
     "compaction_coverage": float,    # fraction of messages to compact (oldest end)
     "compaction_factor": float,      # fraction of selected content to remove
 }
@@ -450,15 +449,10 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
 
     # Context window compaction parameters
     max_context_tokens = args.get("max_context_tokens", oh.get("max_context_tokens", 0))
-    compaction_threshold = args.get("compaction_threshold", oh.get("compaction_threshold", 0.8))
     compaction_coverage = args.get("compaction_coverage", oh.get("compaction_coverage", 0.5))
     compaction_factor = args.get("compaction_factor", oh.get("compaction_factor", 0.5))
 
     # Validate compaction params
-    if not (0 < compaction_threshold <= 1):
-        raise ValueError(
-            f"agent.compaction_threshold must be between 0 and 1, got: {compaction_threshold}"
-        )
     if not (0 < compaction_coverage <= 1):
         raise ValueError(
             f"agent.compaction_coverage must be between 0 and 1, got: {compaction_coverage}"
@@ -502,7 +496,6 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
 
     # Context window compaction
     result["max_context_tokens"] = max_context_tokens
-    result["compaction_threshold"] = compaction_threshold
     result["compaction_coverage"] = compaction_coverage
     result["compaction_factor"] = compaction_factor
 
@@ -657,7 +650,6 @@ def main():
             if "review_context_keep_tool_results" in result:
                 f.write(f"review_context_keep_tool_results={result['review_context_keep_tool_results']}\n")
             f.write(f"max_context_tokens={result['max_context_tokens']}\n")
-            f.write(f"compaction_threshold={result['compaction_threshold']}\n")
             f.write(f"compaction_coverage={result['compaction_coverage']}\n")
             f.write(f"compaction_factor={result['compaction_factor']}\n")
 

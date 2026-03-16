@@ -42,9 +42,10 @@ EXTRA_FILES = json.loads(os.environ.get("EXTRA_FILES", "[]") or "[]")
 BASH_OUTPUT_LIMIT = int(os.environ.get("BASH_OUTPUT_LIMIT", "8000") or "8000")
 CONTEXT_KEEP_TOOL_RESULTS = int(os.environ.get("CONTEXT_KEEP_TOOL_RESULTS", "10") or "10")
 MAX_CONTEXT_TOKENS = int(os.environ.get("MAX_CONTEXT_TOKENS", "0") or "0")
-COMPACTION_THRESHOLD = float(os.environ.get("COMPACTION_THRESHOLD", "0.8") or "0.8")
 COMPACTION_COVERAGE = float(os.environ.get("COMPACTION_COVERAGE", "0.5") or "0.5")
 COMPACTION_FACTOR = float(os.environ.get("COMPACTION_FACTOR", "0.5") or "0.5")
+# Hardcoded: fire at 85% of max to leave headroom for the summary to land
+_COMPACTION_THRESHOLD = 0.85
 
 GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY", "")
@@ -1045,7 +1046,7 @@ def main():
             # Context window compaction — summarize oldest messages when context grows large
             if MAX_CONTEXT_TOKENS > 0 and not done:
                 total_tokens = estimate_tokens(messages)
-                threshold_tokens = int(MAX_CONTEXT_TOKENS * COMPACTION_THRESHOLD)
+                threshold_tokens = int(MAX_CONTEXT_TOKENS * _COMPACTION_THRESHOLD)
                 if total_tokens > threshold_tokens:
                     print(f"  [Compaction] Context size ~{total_tokens} tokens exceeds "
                           f"threshold {threshold_tokens} — compacting...")

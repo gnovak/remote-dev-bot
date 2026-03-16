@@ -193,7 +193,7 @@ def compact_messages(messages, compaction_coverage, compaction_factor, llm_call_
         {
             "role": "user",
             "content": (
-                "Summarize the following conversation history as concisely as possible. "
+                "Summarize the following conversation history. "
                 "Preserve all technical decisions, file paths, code written or modified, "
                 "commands run and their results, errors encountered and how they were "
                 "resolved, and any conclusions reached. Omit conversational filler.\n\n"

@@ -1238,7 +1238,6 @@ def test_resolve_config_compaction_defaults(config_dir):
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
     assert result["max_context_tokens"] == 0
-    assert result["compaction_threshold"] == 0.8
     assert result["compaction_coverage"] == 0.5
     assert result["compaction_factor"] == 0.5
 
@@ -1249,14 +1248,12 @@ def test_resolve_config_compaction_from_yaml(config_dir):
     with open(base_path) as f:
         config = yaml.safe_load(f)
     config["agent"]["max_context_tokens"] = 100000
-    config["agent"]["compaction_threshold"] = 0.7
     config["agent"]["compaction_coverage"] = 0.6
     config["agent"]["compaction_factor"] = 0.4
     with open(base_path, "w") as f:
         yaml.dump(config, f)
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
     assert result["max_context_tokens"] == 100000
-    assert result["compaction_threshold"] == 0.7
     assert result["compaction_coverage"] == 0.6
     assert result["compaction_factor"] == 0.4
 
@@ -1266,10 +1263,10 @@ def test_resolve_config_compaction_via_override(config_dir):
     tmp_path, base_path = config_dir
     override_path = str(tmp_path / "override.yaml")
     with open(override_path, "w") as f:
-        yaml.dump({"agent": {"max_context_tokens": 50000, "compaction_threshold": 0.9}}, f)
+        yaml.dump({"agent": {"max_context_tokens": 50000, "compaction_coverage": 0.7}}, f)
     result = resolve_config(base_path, override_path, "resolve")
     assert result["max_context_tokens"] == 50000
-    assert result["compaction_threshold"] == 0.9
+    assert result["compaction_coverage"] == 0.7
 
 
 def test_resolve_config_compaction_via_args(config_dir):
@@ -1279,27 +1276,13 @@ def test_resolve_config_compaction_via_args(config_dir):
         base_path, "nonexistent.yaml", "resolve",
         args={
             "max_context_tokens": 200000,
-            "compaction_threshold": 0.6,
             "compaction_coverage": 0.3,
             "compaction_factor": 0.7,
         }
     )
     assert result["max_context_tokens"] == 200000
-    assert result["compaction_threshold"] == 0.6
     assert result["compaction_coverage"] == 0.3
     assert result["compaction_factor"] == 0.7
-
-
-def test_resolve_config_compaction_threshold_invalid(config_dir):
-    """compaction_threshold outside (0, 1] raises ValueError."""
-    tmp_path, base_path = config_dir
-    with open(base_path) as f:
-        config = yaml.safe_load(f)
-    config["agent"]["compaction_threshold"] = 1.5
-    with open(base_path, "w") as f:
-        yaml.dump(config, f)
-    with pytest.raises(ValueError, match="compaction_threshold"):
-        resolve_config(base_path, "nonexistent.yaml", "resolve")
 
 
 def test_resolve_config_compaction_coverage_invalid(config_dir):
@@ -1330,13 +1313,11 @@ def test_parse_args_compaction_params():
     """Compaction parameters are parsed correctly via parse_args."""
     result = parse_args([
         "max_context_tokens = 100000",
-        "compaction_threshold = 0.7",
         "compaction_coverage = 0.6",
         "compaction_factor = 0.4",
     ])
     assert result == {
         "max_context_tokens": 100000,
-        "compaction_threshold": 0.7,
         "compaction_coverage": 0.6,
         "compaction_factor": 0.4,
     }
@@ -1345,4 +1326,4 @@ def test_parse_args_compaction_params():
 def test_parse_args_compaction_invalid_float():
     """Non-float value for compaction param raises ValueError."""
     with pytest.raises(ValueError, match="must be a number"):
-        parse_args(["compaction_threshold = not_a_number"])
+        parse_args(["compaction_coverage = not_a_number"])
