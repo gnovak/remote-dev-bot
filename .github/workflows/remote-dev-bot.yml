@@ -69,6 +69,8 @@ jobs:
       status_log_interval: ${{ steps.parse.outputs.status_log_interval }}
       design_context_keep_tool_results: ${{ steps.parse.outputs.design_context_keep_tool_results }}
       review_context_keep_tool_results: ${{ steps.parse.outputs.review_context_keep_tool_results }}
+      workshop_max_iterations: ${{ steps.parse.outputs.workshop_max_iterations }}
+      council_models: ${{ steps.parse.outputs.council_models }}
 
     steps:
       - name: Generate app token
@@ -2247,6 +2249,342 @@ if c > 0 and bits > 0:
             echo "| Metric | Value |"
             echo "|--------|-------|"
             echo "| Iterations | ${ITERATIONS} |"
+            echo "| Input tokens | ${INPUT_TOKENS_FMT} |"
+            echo "| Output tokens | ${OUTPUT_TOKENS_FMT} |"
+            printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
+            echo ""
+            echo "_Cost is estimated based on token usage and may vary from actual billing._"
+          } > /tmp/cost_comment.md
+
+          # Post comment
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --body-file /tmp/cost_comment.md
+
+  # --- Mode: workshop (action=workshop) — multi-model design council with human checkpoints ---
+  workshop:
+    needs: parse
+    if: needs.parse.outputs.action == 'workshop'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Generate app token
+        if: vars.RDB_APP_ID != ''
+        uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ vars.RDB_APP_ID }}
+          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+
+      - name: Checkout target repository
+        uses: actions/checkout@v5
+
+      - name: Checkout remote-dev-bot config
+        uses: actions/checkout@v5
+        with:
+          repository: gnovak/remote-dev-bot
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          ref: ${{ inputs.rdb_ref }}
+          path: .remote-dev-bot
+          sparse-checkout: |
+            /remote-dev-bot.yaml
+            /lib/
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install PyYAML litellm
+
+      - name: Determine API key
+        id: apikey
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          # Select the correct API key based on the design model's provider prefix.
+          # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
+          # GitHub Actions automatically masks secret values in logs — this does
+          # NOT print the key. The key is consumed by the next step as
+          # ${{ steps.apikey.outputs.key }} and never appears in plaintext output.
+          MODEL="${{ needs.parse.outputs.model }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+
+          # Helper: post a friendly comment when the required API key secret is missing.
+          MODEL_HEADER="🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+          NO_API_KEY_WARNING="⚠️ **No API key configured for this model.**"
+          post_no_api_key_comment() {
+            local secret_name="$1"
+            {
+              printf '%s\n\n' "${MODEL_HEADER}"
+              printf '%s\n\n' "${NO_API_KEY_WARNING}"
+              printf 'The selected model \`%s\` (\`%s\`) requires an \`%s\` secret, but none was found.\n\n' "${ALIAS}" "${MODEL}" "${secret_name}"
+              printf '**To fix:** Add your API key as a repository secret:\n'
+              printf '\`\`\`bash\n'
+              printf 'gh secret set %s --repo ${{ github.repository }}\n' "${secret_name}"
+              printf '\`\`\`\n'
+              printf 'Then re-trigger the bot by commenting the same command again.\n'
+            } > /tmp/no_api_key_comment.md
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/no_api_key_comment.md
+          }
+
+          if [[ "$MODEL" == anthropic/* ]]; then
+            API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "ANTHROPIC_API_KEY"
+              echo "::error::No ANTHROPIC_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+          elif [[ "$MODEL" == openai/* ]]; then
+            API_KEY="${{ secrets.OPENAI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "OPENAI_API_KEY"
+              echo "::error::No OPENAI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+          elif [[ "$MODEL" == gemini/* ]]; then
+            API_KEY="${{ secrets.GEMINI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "GEMINI_API_KEY"
+              echo "::error::No GEMINI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Unknown model provider for: $MODEL"
+            exit 1
+          fi
+
+      - name: Gather issue context
+        id: context
+        run: |
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+
+          # Fetch issue title and body
+          ISSUE_JSON=$(gh api repos/${{ github.repository }}/issues/${ISSUE_NUMBER})
+          ISSUE_TITLE=$(echo "$ISSUE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['title'])")
+          ISSUE_BODY=$(echo "$ISSUE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body','') or '')")
+
+          # Fetch all comments (up to 100 — GitHub API max per page)
+          COMMENTS_JSON=$(gh api "repos/${{ github.repository }}/issues/${ISSUE_NUMBER}/comments?per_page=100")
+          COMMENTS=$(echo "$COMMENTS_JSON" | python3 -c "
+          import sys, json
+          comments = json.load(sys.stdin)
+          for c in reversed(comments):
+              user = c['user']['login']
+              body = c.get('body','')
+              print(f'--- @{user} ---')
+              print(body)
+              print()
+          ")
+
+          # Write to files to avoid shell escaping issues
+          echo "$ISSUE_TITLE" > /tmp/issue_title.txt
+          echo "$ISSUE_BODY" > /tmp/issue_body.txt
+          echo "$COMMENTS" > /tmp/issue_comments.txt
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+
+      - name: Run workshop
+        id: workshop
+        env:
+          LLM_API_KEY: ${{ steps.apikey.outputs.key }}
+          LLM_MODEL: ${{ needs.parse.outputs.model }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          ISSUE_TYPE: ${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          MAX_ITERATIONS: ${{ needs.parse.outputs.workshop_max_iterations }}
+          COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
+          EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
+          WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
+          WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
+        run: |
+          python3 << 'PYEOF'
+          import json
+          import os
+          import subprocess
+          import sys
+          import yaml
+
+          sys.path.insert(0, ".remote-dev-bot/lib")
+
+          from workshop import run_workshop
+
+          model = os.environ["LLM_MODEL"]
+          alias = "${{ needs.parse.outputs.alias }}"
+          issue_number = os.environ["ISSUE_NUMBER"]
+          github_repo = os.environ["GITHUB_REPO"]
+          github_token = os.environ["GITHUB_TOKEN"]
+
+          max_iterations = int(os.environ.get("MAX_ITERATIONS", "15") or "15")
+          wrapup_enabled = os.environ.get("WRAPUP_ENABLED", "true").lower() == "true"
+          wrapup_iteration = int(os.environ.get("WRAPUP_ITERATION", "0") or "0")
+
+          # Council models from parse job (JSON list of {alias, id} dicts)
+          council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
+
+          # Load extra_instructions from config
+          extra_instructions = ""
+          for path in ["remote-dev-bot.yaml", ".remote-dev-bot/remote-dev-bot.yaml"]:
+              if os.path.exists(path):
+                  with open(path) as f:
+                      cfg = yaml.safe_load(f) or {}
+                  mode_cfg = cfg.get("modes", {}).get("workshop", {})
+                  if "extra_instructions" in mode_cfg:
+                      extra_instructions = mode_cfg["extra_instructions"]
+                      break
+
+          # Generate repository file listing (tracked files only)
+          proc = subprocess.run(
+              ["git", "ls-files"],
+              capture_output=True, text=True
+          )
+          file_listing = proc.stdout.strip()
+          extra_context = f"## Repository File Listing\n\n```\n{file_listing}\n```"
+
+          # Read repo context files (missing files are skipped gracefully)
+          context_files = json.loads(os.environ.get("EXTRA_FILES", "[]") or "[]")
+          for filepath in context_files:
+              if os.path.exists(filepath):
+                  with open(filepath) as f:
+                      content = f.read().strip()
+                  if content:
+                      extra_context += f"\n\n## File: {filepath}\n\n{content}"
+
+          # Read issue context
+          with open("/tmp/issue_title.txt") as f:
+              issue_title = f.read().strip()
+          with open("/tmp/issue_body.txt") as f:
+              issue_body = f.read().strip()
+          with open("/tmp/issue_comments.txt") as f:
+              issue_comments = f.read().strip()
+
+          # post_comment_fn: posts a comment on the issue via gh CLI
+          def post_comment(body):
+              proc = subprocess.run(
+                  ["gh", "issue", "comment", issue_number,
+                   "--repo", github_repo,
+                   "--body", body],
+                  env={**os.environ, "GH_TOKEN": github_token},
+                  capture_output=True, text=True,
+              )
+              if proc.returncode != 0:
+                  print(f"Warning: failed to post comment: {proc.stderr}", file=sys.stderr)
+
+          # Run the workshop (Stages 1 and 2)
+          workshop_result = run_workshop(
+              model=model,
+              model_alias=alias,
+              council_models=council_models,
+              issue_title=issue_title,
+              issue_body=issue_body,
+              issue_comments=issue_comments,
+              extra_instructions=extra_instructions,
+              extra_context=extra_context,
+              max_iterations=max_iterations,
+              wrapup_enabled=wrapup_enabled,
+              wrapup_iteration=wrapup_iteration,
+              post_comment_fn=post_comment,
+          )
+
+          # Save usage data for the cost comment step
+          with open("/tmp/llm_usage.json", "w") as f:
+              json.dump({
+                  "input_tokens": workshop_result.get("total_input_tokens", 0),
+                  "output_tokens": workshop_result.get("total_output_tokens", 0),
+                  "cost": workshop_result.get("total_cost", 0.0),
+                  "iterations": workshop_result.get("design_result", {}).get("iterations", 0),
+              }, f)
+          PYEOF
+
+      - name: Post result comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          MODEL="${{ needs.parse.outputs.model }}"
+
+          # Post a fallback comment if the workshop script crashed before writing usage data
+          if [[ ! -f /tmp/llm_usage.json ]]; then
+            {
+              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo ""
+              echo "### ⚠️ Workshop process exited unexpectedly"
+              echo ""
+              echo "The workshop process exited unexpectedly — see run logs for details."
+              echo ""
+              echo "See the [workflow run logs]($RUN_URL) for full details."
+            } > /tmp/failure_comment.md
+
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/failure_comment.md
+          fi
+
+      - name: Post cost comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          MODEL="${{ needs.parse.outputs.model }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          MODE="${{ needs.parse.outputs.mode }}"
+
+          # Read usage data — default to 0 if file missing (shows $0.00, signals no data)
+          read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
+          import json, os
+          if os.path.exists('/tmp/llm_usage.json'):
+              d = json.load(open('/tmp/llm_usage.json'))
+              print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
+          else:
+              print(0, 0, 0, 0)
+          ")
+
+          # Round UP to nearest penny — $0.00 means no cost data was available.
+          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
+
+          # Format token counts as human-readable (2 sig figs, k and M suffixes)
+          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          def fmt(n):
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f'{round(v)} M' if v >= 10 else f'{round(v, 1)} M'
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
+              return str(n)
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
+          ")
+
+          # Format cost comment
+          {
+            echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+            echo ""
+            echo "### 💰 Cost Summary"
+            echo ""
+            echo "**Mode:** ${MODE}"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            if [[ -n "$ITERATIONS" && "$ITERATIONS" != "0" ]]; then
+              echo "| Design iterations | ${ITERATIONS} / ${{ needs.parse.outputs.workshop_max_iterations }} |"
+            fi
             echo "| Input tokens | ${INPUT_TOKENS_FMT} |"
             echo "| Output tokens | ${OUTPUT_TOKENS_FMT} |"
             printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
