@@ -158,6 +158,13 @@ else
         "Create a file inline_test.py with a stub function stub() that returns None." \
         $'/agent-resolve\nmax_iterations = 10' \
         "all" "resolve"
+
+    # Compaction smoke test: set a low max_context_tokens so compaction fires
+    # within the first few iterations. Verifies compaction doesn't crash the run.
+    add_test "compaction" "Test: context window compaction" \
+        "Create a file compaction_test.py with five functions named f1() through f5() that each return their function number as an integer (f1 returns 1, f2 returns 2, etc.)." \
+        $'/agent-resolve\nmax_context_tokens = 12000' \
+        "all" "resolve"
 fi
 
 # --- Helpers ---
