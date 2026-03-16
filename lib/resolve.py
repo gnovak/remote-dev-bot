@@ -22,6 +22,8 @@ import time
 import litellm
 from litellm import completion
 
+from lib.context import compact_messages, estimate_tokens
+
 # --- Environment ---
 
 ISSUE_NUMBER = os.environ["ISSUE_NUMBER"]
@@ -39,6 +41,10 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "")
 EXTRA_FILES = json.loads(os.environ.get("EXTRA_FILES", "[]") or "[]")
 BASH_OUTPUT_LIMIT = int(os.environ.get("BASH_OUTPUT_LIMIT", "8000") or "8000")
 CONTEXT_KEEP_TOOL_RESULTS = int(os.environ.get("CONTEXT_KEEP_TOOL_RESULTS", "10") or "10")
+MAX_CONTEXT_TOKENS = int(os.environ.get("MAX_CONTEXT_TOKENS", "0") or "0")
+COMPACTION_THRESHOLD = float(os.environ.get("COMPACTION_THRESHOLD", "0.8") or "0.8")
+COMPACTION_COVERAGE = float(os.environ.get("COMPACTION_COVERAGE", "0.5") or "0.5")
+COMPACTION_FACTOR = float(os.environ.get("COMPACTION_FACTOR", "0.5") or "0.5")
 
 GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY", "")
@@ -1035,6 +1041,38 @@ def main():
             # Trim old tool result pairs to manage context size
             if CONTEXT_KEEP_TOOL_RESULTS > 0:
                 messages = trim_tool_results(messages, CONTEXT_KEEP_TOOL_RESULTS)
+
+            # Context window compaction — summarize oldest messages when context grows large
+            if MAX_CONTEXT_TOKENS > 0 and not done:
+                total_tokens = estimate_tokens(messages)
+                threshold_tokens = int(MAX_CONTEXT_TOKENS * COMPACTION_THRESHOLD)
+                if total_tokens > threshold_tokens:
+                    print(f"  [Compaction] Context size ~{total_tokens} tokens exceeds "
+                          f"threshold {threshold_tokens} — compacting...")
+
+                    def _compaction_llm_call(prompt_messages, max_tokens):
+                        """Side-channel LLM call for summarization."""
+                        resp = completion(
+                            model=LLM_MODEL,
+                            messages=prompt_messages,
+                            max_tokens=max_tokens,
+                        )
+                        if resp.choices:
+                            msg_content = resp.choices[0].message.content
+                            return msg_content if msg_content else ""
+                        return ""
+
+                    messages, stats = compact_messages(
+                        messages, COMPACTION_COVERAGE, COMPACTION_FACTOR,
+                        _compaction_llm_call,
+                    )
+                    if stats["messages_compacted"] > 0:
+                        new_total = estimate_tokens(messages)
+                        ratio = (1 - new_total / total_tokens) * 100 if total_tokens > 0 else 0
+                        print(f"  [Compaction] Iteration {iteration + 1}: "
+                              f"{stats['messages_compacted']} messages compacted, "
+                              f"tokens {total_tokens} -> {new_total} "
+                              f"({ratio:.1f}% reduction)")
 
             if done:
                 break

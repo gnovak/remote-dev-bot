@@ -40,6 +40,62 @@ Configurable in `remote-dev-bot.yaml` under `agent:`, or as an inline arg.
 - **Lower values:** Smaller context, lower cost, but agent may "forget" earlier work
 - **Higher values / 0:** Full history; safe but expensive on long runs
 
+### Context Window Compaction
+
+When the conversation context grows beyond a configurable threshold, the agent
+automatically compacts the oldest portion by LLM-summarizing it. This preserves
+the gist of earlier work while reducing token count. Compaction is complementary
+to `context_keep_tool_results` — dropping runs first (cheaper), then compaction
+checks whether the remaining context still needs reduction.
+
+Compaction only applies to resolve mode (design and review modes have shorter
+runs and benefit less).
+
+#### `max_context_tokens`
+
+Hard cap on context window size (in estimated tokens, using character count / 4).
+When the context exceeds `compaction_threshold × max_context_tokens`, a
+compaction pass is triggered. Set to `0` to disable compaction entirely (use
+the model's native max).
+
+- **Default:** `0` (disabled)
+- **Suggested:** Set below the model's max context to control costs, e.g. `100000`
+
+#### `compaction_threshold`
+
+Fraction of `max_context_tokens` at which compaction triggers. Must be between
+0 and 1.
+
+- **Default:** `0.8`
+- **Example:** With `max_context_tokens=100000` and `compaction_threshold=0.8`,
+  compaction fires when estimated tokens exceed 80,000.
+
+#### `compaction_coverage`
+
+Fraction of conversation messages (after the system prompt) to select for
+compaction, taken from the oldest end. Must be between 0 and 1.
+
+- **Default:** `0.5`
+- **Higher values:** More messages are summarized (more aggressive)
+
+#### `compaction_factor`
+
+Fraction of the selected content to remove. `0.5` means the compacted summary
+targets ~50% the token count of the selected messages. Must be between 0 and 1.
+
+- **Default:** `0.5`
+- **Higher values:** More aggressive compression (smaller summaries)
+
+**Example configuration:**
+
+```yaml
+agent:
+  max_context_tokens: 100000
+  compaction_threshold: 0.8
+  compaction_coverage: 0.5
+  compaction_factor: 0.5
+```
+
 ---
 
 ## Iteration and Behavior

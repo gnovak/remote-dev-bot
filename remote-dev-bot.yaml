@@ -96,6 +96,12 @@ agent:
   # are replaced with a placeholder to prevent O(N²) token growth on long runs.
   # Set to 0 to keep all tool results (not recommended for runs > ~20 iterations).
   context_keep_tool_results: 10
+  # Context window compaction: LLM-summarize oldest conversation messages
+  # when context grows too large. Set max_context_tokens to 0 to disable.
+  max_context_tokens: 0
+  compaction_threshold: 0.8
+  compaction_coverage: 0.5
+  compaction_factor: 0.5
   graceful_wrapup:
     # Enable/disable graceful wrap-up instructions
     enabled: true
