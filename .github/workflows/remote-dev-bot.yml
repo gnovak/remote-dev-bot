@@ -792,8 +792,10 @@ jobs:
               "\n\nCRITICAL: Do NOT modify any files. Do NOT make git commits. "
               "Do NOT begin your response with a slash command like /agent. "
               "Your only output is the review submitted via submit_review."
-              "\n\nLength: your review will be posted as a GitHub comment. "
-              "Aim for complete but concise — not exhaustive or verbose. "
+              "\n\nLength and tone: your review will be posted as a GitHub comment "
+              "and may be read by a subsequent resolve agent as part of its task context. "
+              "Say what needs to be said — don't pad, don't repeat the PR description back, "
+              "don't add caveats for their own sake. "
               "Cover what matters most; skip minor nits unless they are pervasive. "
               "Do not truncate or trail off mid-sentence."
           )
@@ -1362,9 +1364,11 @@ jobs:
               "- **High-level design** (e.g. \"analyze the architecture\", \"what's the right approach\", \"design X\"): Stay at the boxes-and-arrows level. Focus on major components, data flow, key trade-offs, and alternatives considered. Keep it concise. Don't dig into file formats or implementation details unless they materially affect the design decision.\n\n"
               "- **Implementation spec** (e.g. \"write an implementation spec\", \"spec out\", \"acceptance criteria\", \"how exactly should X work\"): Ground your analysis in real artifacts. Find and read sample data files in the repo — don't describe formats abstractly when you can examine them directly. Include: (1) a concrete input→output example using real data from the repo, (2) an \"Open Questions\" section listing anything genuinely unresolved or unspecified, and (3) acceptance criteria specific enough to verify programmatically.\n\n"
               "If the issue doesn't clearly signal one or the other, default to high-level design."
-              "\n\nLength: your analysis will be posted as a GitHub comment. "
-              "Write a complete, self-contained analysis — do not truncate or trail off mid-sentence. "
-              "If you need to be selective, prioritize the most important points over exhaustive coverage."
+              "\n\nLength and tone: your analysis will be posted as a GitHub comment "
+              "and may be read by a subsequent resolve agent as part of its task context. "
+              "Say what needs to be said — don't pad, don't repeat the issue back, "
+              "don't add caveats for their own sake. "
+              "Do not truncate or trail off mid-sentence."
           )
 
           if extra_instructions:
