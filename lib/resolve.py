@@ -507,6 +507,10 @@ description.
   description in the comments is the actual work to do.
 - Look for the latest comment that describes a specific plan or set of changes,
   and implement that.
+- **Treat the most recent human decisions as authoritative.** Discussions often
+  explore multiple options before settling on one. When you see a decision
+  ("let's go with A", "scratch B, do X instead"), that closes the question —
+  don't re-examine rejected options or re-litigate what's already been decided.
 """
 
 
