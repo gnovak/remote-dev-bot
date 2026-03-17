@@ -22,6 +22,10 @@ import time
 import litellm
 from litellm import completion
 
+# Ensure the rdb root is on sys.path so `lib.context` is importable when
+# resolve.py runs from a target repo's working directory.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from lib.context import compact_messages, estimate_tokens
 
 # --- Environment ---
