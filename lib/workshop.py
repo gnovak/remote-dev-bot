@@ -14,13 +14,80 @@ critiques, then optionally triggers Stage 3 (adjust) — implemented in a
 follow-up.
 """
 
+import gzip
 import json
+import math
 import os
 import re
 import sys
+import time
 
 # Ensure sibling modules are importable when run from the workflow
 sys.path.insert(0, os.path.dirname(__file__))
+
+
+# ---------------------------------------------------------------------------
+# Cost formatting helpers
+# ---------------------------------------------------------------------------
+
+def _fmt_tok(n):
+    n = int(n)
+    if n >= 1_000_000:
+        v = n / 1_000_000
+        return f"{round(v)}M" if v >= 10 else f"{round(v, 1)}M"
+    elif n >= 1_000:
+        v = n / 1_000
+        return f"{round(v)}K" if v >= 10 else f"{round(v, 1)}K"
+    return str(n)
+
+
+def _fmt_ela(s):
+    s = int(s)
+    return f"{s // 60}m {s % 60}s" if s >= 60 else f"{s}s"
+
+
+def _fmt_bpd(text, cost):
+    if cost <= 0:
+        return 'N/A'
+    data = text.encode('utf-8') if isinstance(text, str) else text
+    bpd = len(gzip.compress(data)) / cost  # compressed bytes / dollar
+    if bpd >= 1_000_000:
+        return f"{bpd / 1_000_000:.1f} Mbit/$"
+    return f"{bpd / 1_000:.1f} Kbit/$"
+
+
+def _build_cost_table(input_tokens, output_tokens, cost, elapsed, output_text):
+    rounded = math.ceil(cost * 100) / 100
+    rows = [
+        ('Time', _fmt_ela(elapsed)),
+        ('Input', _fmt_tok(input_tokens) + ' tokens'),
+        ('Output', _fmt_tok(output_tokens) + ' tokens'),
+        ('Bits/$', _fmt_bpd(output_text, cost)),
+        ('**Cost**', f'**${rounded:.2f}**'),
+    ]
+    lines = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
+    lines += [f'| {k} | {v} |' for k, v in rows]
+    return '\n'.join(lines)
+
+
+# ---------------------------------------------------------------------------
+# API key resolution
+# ---------------------------------------------------------------------------
+
+# Map from model ID prefix to environment variable name
+_PROVIDER_KEY_MAP = {
+    'anthropic/': 'ANTHROPIC_API_KEY',
+    'openai/': 'OPENAI_API_KEY',
+    'gemini/': 'GEMINI_API_KEY',
+}
+
+
+def _get_required_api_key_name(model_id):
+    """Return the env var name required for model_id, or None if unknown."""
+    for prefix, key_name in _PROVIDER_KEY_MAP.items():
+        if model_id.startswith(prefix):
+            return key_name
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -170,10 +237,11 @@ def resolve_council_models(models, design_alias, council_config=None):
     models : dict
         All configured models (alias -> {"id": ...}).
     design_alias : str
-        The alias of the design model (excluded by default).
+        The alias of the design model.  Included in the default council so
+        it can critique its own work in a critic role.
     council_config : list or None
         Explicit council list from mode config. If empty/None, defaults to
-        all models except the design model.
+        all configured models (including the design model).
 
     Returns
     -------
@@ -190,13 +258,13 @@ def resolve_council_models(models, design_alias, council_config=None):
                     "id": models[alias]["id"],
                 })
     else:
-        # Default: all models except the design model (no self-review)
+        # Default: all configured models (design model included — self-review
+        # in a critic role is valuable)
         for alias, cfg in models.items():
-            if alias != design_alias:
-                council_models.append({
-                    "alias": alias,
-                    "id": cfg["id"],
-                })
+            council_models.append({
+                "alias": alias,
+                "id": cfg["id"],
+            })
 
     return council_models
 
@@ -270,6 +338,7 @@ def run_workshop(
         f"Running design exploration with `{model_alias}` (`{model}`)...\n"
     )
 
+    design_start = time.time()
     design_result = run_design_loop(
         model=model,
         issue_title=issue_title,
@@ -282,6 +351,7 @@ def run_workshop(
         wrapup_iteration=wrapup_iteration,
         context_keep_tool_results=context_keep_tool_results,
     )
+    design_elapsed = time.time() - design_start
 
     design_analysis = design_result.get("analysis", "")
 
@@ -313,12 +383,20 @@ def run_workshop(
             "total_cost": design_result.get("cost", 0.0),
         }
 
-    # Post design analysis
+    # Post design analysis with embedded cost table
+    design_cost_table = _build_cost_table(
+        input_tokens=design_result.get("input_tokens", 0),
+        output_tokens=design_result.get("output_tokens", 0),
+        cost=design_result.get("cost", 0.0),
+        elapsed=design_elapsed,
+        output_text=design_analysis,
+    )
     post(
         f"🤖 **Model:** `{model_alias}` (`{model}`)\n\n"
         f"{design_analysis}\n\n"
         f"---\n"
-        f"_Design analysis by `/agent-workshop` Stage 1 (`{model_alias}`)_"
+        f"_Design analysis by `/agent-workshop` Stage 1 (`{model_alias}`)_\n\n"
+        f"{design_cost_table}"
     )
 
     # --- Stage 2: Council Review ---
@@ -351,14 +429,30 @@ def run_workshop(
     council_results = []
 
     def _run_single_review(council_model):
-        return run_council_review(
-            model_id=council_model["id"],
+        # Check if the required API key is available before attempting the call.
+        model_id = council_model["id"]
+        key_name = _get_required_api_key_name(model_id)
+        if key_name is not None:
+            key_value = os.environ.get(key_name, "")
+            if not key_value:
+                print(
+                    f"Skipping {council_model['alias']} — API key not configured "
+                    f"({key_name} is empty or missing)",
+                    flush=True,
+                )
+                return None  # Signal skip
+
+        review_start = time.time()
+        result = run_council_review(
+            model_id=model_id,
             model_alias=council_model["alias"],
             issue_title=issue_title,
             issue_body=issue_body,
             issue_comments=issue_comments,
             design_analysis=design_analysis,
         )
+        result["elapsed"] = time.time() - review_start
+        return result
 
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=len(council_models)
@@ -371,6 +465,9 @@ def run_workshop(
             cm = futures[future]
             try:
                 result = future.result()
+                if result is None:
+                    # Model was skipped due to missing API key
+                    continue
                 council_results.append(result)
             except Exception as e:
                 council_results.append({
@@ -380,6 +477,7 @@ def run_workshop(
                     "input_tokens": 0,
                     "output_tokens": 0,
                     "cost": 0.0,
+                    "elapsed": 0.0,
                 })
 
     # Post each council review as a separate comment
@@ -391,11 +489,19 @@ def run_workshop(
                 f"contained `/agent` command(s). Blocked for safety."
             )
         else:
+            cost_table = _build_cost_table(
+                input_tokens=cr.get("input_tokens", 0),
+                output_tokens=cr.get("output_tokens", 0),
+                cost=cr.get("cost", 0.0),
+                elapsed=cr.get("elapsed", 0.0),
+                output_text=cr.get("review", ""),
+            )
             post(
                 f"🤖 **Council reviewer:** `{cr['model_alias']}` (`{cr['model_id']}`)\n\n"
                 f"{cr['review']}\n\n"
                 f"---\n"
-                f"_Council review by `/agent-workshop` Stage 2 (`{cr['model_alias']}`)_"
+                f"_Council review by `/agent-workshop` Stage 2 (`{cr['model_alias']}`)_\n\n"
+                f"{cost_table}"
             )
 
     # Post summary comment

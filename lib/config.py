@@ -549,13 +549,13 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
                         "id": models[council_alias]["id"],
                     })
         else:
-            # Default: all models except the design model (no self-review)
+            # Default: all configured models (design model included — self-review
+            # in a critic role is valuable)
             for model_alias_key, model_cfg in models.items():
-                if model_alias_key != alias:
-                    council_models.append({
-                        "alias": model_alias_key,
-                        "id": model_cfg["id"],
-                    })
+                council_models.append({
+                    "alias": model_alias_key,
+                    "id": model_cfg["id"],
+                })
         result["council_models"] = council_models
 
     return result

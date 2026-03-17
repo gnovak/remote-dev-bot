@@ -49,11 +49,13 @@ modes:
       - .gemini/GEMINI.md
       - how-it-works.md
     # Council: models that review the design. Defaults to all configured models
-    # (excluding the design model) if not specified.
-    # council:
-    #   - claude-small
-    #   - gpt-small
-    #   - gemini-small
+    # (including the design model) if not specified. Override per-repo to
+    # select a different set. The value of the council is diverse perspectives
+    # across model families; depth within one family adds less value.
+    council:
+      - claude-small
+      - gpt-small
+      - gemini-small
 
 models:
   claude-small:

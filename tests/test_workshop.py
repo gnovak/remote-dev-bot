@@ -52,23 +52,25 @@ class TestResolveCouncilModels:
         assert "claude-large" in aliases
         assert "gpt-small" in aliases
 
-    def test_default_council_excludes_design_model(self):
-        """Default council (no config) includes all models except the design model."""
+    def test_default_council_includes_design_model(self):
+        """Default council (no config) includes all models, including the design model."""
         result = resolve_council_models(
             self.SAMPLE_MODELS,
             design_alias="claude-large",
         )
         aliases = [m["alias"] for m in result]
-        assert "claude-large" not in aliases
+        # Design model is included so it can critique its own work
+        assert "claude-large" in aliases
         assert "claude-small" in aliases
         assert "gpt-small" in aliases
         assert "gemini-small" in aliases
 
-    def test_default_council_empty_when_only_design_model(self):
-        """If only the design model is configured, council is empty."""
+    def test_default_council_single_model(self):
+        """If only the design model is configured, council contains just that model."""
         models = {"claude-large": {"id": "anthropic/claude-opus-4-6"}}
         result = resolve_council_models(models, design_alias="claude-large")
-        assert result == []
+        assert len(result) == 1
+        assert result[0]["alias"] == "claude-large"
 
     def test_explicit_council_skips_unknown_aliases(self):
         """Unknown aliases in the council config are silently skipped."""
@@ -81,26 +83,27 @@ class TestResolveCouncilModels:
         assert aliases == ["claude-small"]
 
     def test_empty_council_config_uses_default(self):
-        """An empty council_config list falls back to default behavior."""
+        """An empty council_config list falls back to default behavior (all models)."""
         result = resolve_council_models(
             self.SAMPLE_MODELS,
             design_alias="claude-large",
             council_config=[],
         )
         aliases = [m["alias"] for m in result]
-        assert "claude-large" not in aliases
-        assert len(aliases) == 3  # all except design model
+        # Default includes all models including design model
+        assert "claude-large" in aliases
+        assert len(aliases) == 4  # all models
 
     def test_none_council_config_uses_default(self):
-        """None council_config falls back to default behavior."""
+        """None council_config falls back to default behavior (all models)."""
         result = resolve_council_models(
             self.SAMPLE_MODELS,
             design_alias="claude-large",
             council_config=None,
         )
         aliases = [m["alias"] for m in result]
-        assert "claude-large" not in aliases
-        assert len(aliases) == 3
+        assert "claude-large" in aliases
+        assert len(aliases) == 4
 
 
 # ---------------------------------------------------------------------------
