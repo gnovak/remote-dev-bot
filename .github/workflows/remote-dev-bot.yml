@@ -238,23 +238,6 @@ jobs:
       - name: Install dependencies
         run: pip install PyYAML litellm
 
-      - name: Inject iteration budget hint
-        if: needs.parse.outputs.graceful_wrapup_enabled == 'true'
-        run: |
-          mkdir -p .openhands/microagents
-          cat >> .openhands/microagents/remote-dev-bot-wrapup.md << WRAPUP_EOF
-          # Iteration Budget (injected by remote-dev-bot)
-
-          This task has a budget of **${{ needs.parse.outputs.max_iterations }} iterations**.
-
-          When you reach iteration **${{ needs.parse.outputs.graceful_wrapup_iteration }}**, begin wrapping up:
-          1. Commit all changes you have made so far with a clear commit message
-          2. If the task is not fully complete, add a brief TODO comment or update the issue description with what remains
-          3. Call \`finish()\` with your honest assessment of what was accomplished
-
-          Do not start new work after iteration ${{ needs.parse.outputs.graceful_wrapup_iteration }}.
-          WRAPUP_EOF
-
       - name: Resolve issue
         env:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
