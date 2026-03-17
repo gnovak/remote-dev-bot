@@ -1395,26 +1395,27 @@ class TestWorkshopConfig:
         )
         assert result["workshop_max_iterations"] == 25
 
-    def test_workshop_default_council_excludes_design_model(self, workshop_config_dir):
-        """Default council (no explicit list) excludes the design model."""
+    def test_workshop_default_council_includes_design_model(self, workshop_config_dir):
+        """Default council (no explicit list) includes all models, including the design model."""
         tmp_path, base_path = workshop_config_dir
         result = resolve_config(base_path, "nonexistent.yaml", "workshop")
         council = result["council_models"]
         aliases = [m["alias"] for m in council]
         # design model is claude-large (default_model for workshop mode)
-        assert "claude-large" not in aliases
+        # it should now be included — self-review in critic role is valuable
+        assert "claude-large" in aliases
         assert "claude-small" in aliases
         assert "gpt-small" in aliases
         assert "gemini-small" in aliases
 
     def test_workshop_default_council_with_explicit_model(self, workshop_config_dir):
-        """Default council excludes the explicit model when user specifies one."""
+        """Default council includes all models even when user specifies a design model explicitly."""
         tmp_path, base_path = workshop_config_dir
         result = resolve_config(base_path, "nonexistent.yaml", "workshop-claude-small")
         council = result["council_models"]
         aliases = [m["alias"] for m in council]
-        # design model is now claude-small (explicitly specified)
-        assert "claude-small" not in aliases
+        # design model is now claude-small (explicitly specified) — still included
+        assert "claude-small" in aliases
         assert "claude-large" in aliases
 
     def test_workshop_explicit_council(self, workshop_config_dir):
