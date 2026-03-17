@@ -481,13 +481,17 @@ jobs:
           if _m: loc_changed += int(_m.group(1))
           bits_text = diff_text
           rounded = math.ceil(cost * 100) / 100
+          def _fmt_loc(n):
+              if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
+              if n >= 1_000: return f"{n/1_000:.1f}k"
+              return str(n)
           rows = [
               ('Time', _fmt_ela(elapsed)),
               ('Iterations', iterations_fmt),
               ('Input', _fmt_tok(input_tokens) + ' tokens'),
               ('Output', _fmt_tok(output_tokens) + ' tokens'),
               ('Diff', shortstat if shortstat else 'N/A'),
-              ('LOC/$', f'{loc_changed / cost:,.0f} loc/$' if cost > 0 and loc_changed > 0 else 'N/A'),
+              ('LOC/$', f'{_fmt_loc(int(loc_changed / cost))} loc/$' if cost > 0 and loc_changed > 0 else 'N/A'),
               ('Info/$', _fmt_bpd(bits_text, cost)),
               ('**Cost**', f'**${rounded:.2f}**'),
           ]
