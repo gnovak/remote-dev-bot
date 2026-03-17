@@ -1088,6 +1088,24 @@ def main():
             # API call to ask the agent for a brief status update.
             if STATUS_LOG_INTERVAL > 0 and (iteration + 1) % STATUS_LOG_INTERVAL == 0:
                 try:
+                    # Get git diff --stat for ground-truth file changes
+                    diff_result = subprocess.run(
+                        ["git", "diff", "--stat", "HEAD"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    diff_lines = diff_result.stdout.strip().splitlines()
+                    # Format as "file.py +N/-M" per file, skip the summary line
+                    file_changes = []
+                    for line in diff_lines:
+                        m = re.match(r"\s*(\S+)\s*\|\s*\d+\s*([+-]+)", line)
+                        if m:
+                            fname = m.group(1)
+                            plusminus = m.group(2)
+                            ins = plusminus.count("+")
+                            dels = plusminus.count("-")
+                            file_changes.append(f"{fname} +{ins}/-{dels}")
+                    changes_str = "  ".join(file_changes) if file_changes else "(none)"
+
                     # Strip tool-call messages — the status check call omits
                     # tools=TOOLS, so Anthropic rejects history containing
                     # tool_calls/tool roles. Keep only text turns.
@@ -1100,27 +1118,28 @@ def main():
                         {
                             "role": "user",
                             "content": (
-                                "STATUS CHECK: One sentence only — what specific files/components "
-                                "have you modified so far, and what are you currently doing? "
-                                "Be concrete (e.g. 'Updated lib/config.py and remote-dev-bot.yaml, "
-                                "now adding the workshop job to the workflow.'), not high-level "
-                                "(e.g. 'Implementing the feature for issue N.'). No preamble."
+                                f"Changes: {changes_str}\n\n"
+                                "STATUS CHECK: One sentence only — what are you currently doing? "
+                                "Be concrete (name files/functions). No preamble."
                             ),
                         }
                     ]
                     status_response = completion(
                         model=LLM_MODEL,
                         messages=status_messages,
-                        max_tokens=256,
+                        max_tokens=128,
                     )
                     status_text = ""
                     if status_response.choices:
                         sc = status_response.choices[0].message
                         if hasattr(sc, "content") and sc.content:
-                            status_text = sc.content.strip()
+                            # Keep only the first sentence to prevent tool-call XML sprawl
+                            raw = sc.content.strip()
+                            first_sentence = re.split(r"(?<=[.!?])\s|\n", raw)[0]
+                            status_text = f"[Changes: {changes_str}] {first_sentence}"
                     if status_text:
                         status_log.append((iteration + 1, status_text))
-                        print(f"  [Status log iter {iteration + 1}]: {status_text[:100]}")
+                        print(f"  [Status log iter {iteration + 1}]: {status_text[:120]}")
                 except Exception as e:
                     print(f"  [Status log] failed at iteration {iteration + 1}: {e}")
 
