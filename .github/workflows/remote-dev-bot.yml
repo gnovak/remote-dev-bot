@@ -449,9 +449,9 @@ jobs:
           def _fmt_bpd(text, cost):
               if cost <= 0: return 'N/A'
               data = text.encode('utf-8') if isinstance(text, str) else text
-              bpd = (len(gzip.compress(data)) * 8) / cost
-              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} MB/$"
-              return f"{bpd / 1_000:.1f} KB/$"
+              bpd = (len(gzip.compress(data))) / cost
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit/$"
+              return f"{bpd / 1_000:.1f} Kbit/$"
           if os.path.exists("/tmp/llm_usage.json"):
               _d = json.load(open("/tmp/llm_usage.json"))
               input_tokens = _d.get('input_tokens', 0)
@@ -478,7 +478,7 @@ jobs:
           bits_text = diff_text
           extra_rows = [('Diff', shortstat if shortstat else 'N/A'), ('LOC/$', f'{loc_changed / cost:,.0f} loc/$' if cost > 0 and loc_changed > 0 else 'N/A')]
           rounded = math.ceil(cost * 100) / 100
-          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bits/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
+          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bytes/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
           _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
           _tbl += [f'| {k} | {v} |' for k, v in rows]
           open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
@@ -1137,9 +1137,9 @@ jobs:
           def _fmt_bpd(text, cost):
               if cost <= 0: return 'N/A'
               data = text.encode('utf-8') if isinstance(text, str) else text
-              bpd = (len(gzip.compress(data)) * 8) / cost
-              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} MB/$"
-              return f"{bpd / 1_000:.1f} KB/$"
+              bpd = (len(gzip.compress(data))) / cost
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit/$"
+              return f"{bpd / 1_000:.1f} Kbit/$"
           if os.path.exists("/tmp/llm_usage.json"):
               _d = json.load(open("/tmp/llm_usage.json"))
               input_tokens = _d.get('input_tokens', 0)
@@ -1156,7 +1156,7 @@ jobs:
           bits_text = output_text
           extra_rows = []
           rounded = math.ceil(cost * 100) / 100
-          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bits/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
+          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bytes/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
           _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
           _tbl += [f'| {k} | {v} |' for k, v in rows]
           open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
@@ -1765,9 +1765,9 @@ jobs:
           def _fmt_bpd(text, cost):
               if cost <= 0: return 'N/A'
               data = text.encode('utf-8') if isinstance(text, str) else text
-              bpd = (len(gzip.compress(data)) * 8) / cost
-              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} MB/$"
-              return f"{bpd / 1_000:.1f} KB/$"
+              bpd = (len(gzip.compress(data))) / cost
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit/$"
+              return f"{bpd / 1_000:.1f} Kbit/$"
           if os.path.exists("/tmp/llm_usage.json"):
               _d = json.load(open("/tmp/llm_usage.json"))
               input_tokens = _d.get('input_tokens', 0)
@@ -1784,7 +1784,7 @@ jobs:
           bits_text = output_text
           extra_rows = []
           rounded = math.ceil(cost * 100) / 100
-          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bits/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
+          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bytes/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
           _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
           _tbl += [f'| {k} | {v} |' for k, v in rows]
           open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
@@ -2298,9 +2298,9 @@ jobs:
           def _fmt_bpd(text, cost):
               if cost <= 0: return 'N/A'
               data = text.encode('utf-8') if isinstance(text, str) else text
-              bpd = (len(gzip.compress(data)) * 8) / cost
-              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} MB/$"
-              return f"{bpd / 1_000:.1f} KB/$"
+              bpd = (len(gzip.compress(data))) / cost
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit/$"
+              return f"{bpd / 1_000:.1f} Kbit/$"
           if os.path.exists("/tmp/llm_usage.json"):
               _d = json.load(open("/tmp/llm_usage.json"))
               input_tokens = _d.get('input_tokens', 0)
@@ -2317,7 +2317,7 @@ jobs:
           bits_text = output_text
           extra_rows = []
           rounded = math.ceil(cost * 100) / 100
-          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bits/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
+          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bytes/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
           _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
           _tbl += [f'| {k} | {v} |' for k, v in rows]
           open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
