@@ -457,11 +457,11 @@ Use the bash tool to edit files. Good approaches:
    git add <files>
    git commit -m "Clear description of what and why"
    ```
-3. **Push immediately after every `git commit`:**
+3. **Push immediately after every `git commit` — this is critical:**
    ```
    git push origin HEAD
    ```
-   After every `git commit`, immediately run `git push origin HEAD` to preserve your work on the remote. This ensures progress is saved even if the run is interrupted before completion.
+   After every `git commit`, immediately run `git push origin HEAD`. **This is very important: if the run is interrupted or you run out of iterations before calling `finish()`, only pushed commits are preserved. Unpushed commits are lost forever when the runner shuts down.**
 
 **Commit frequently — after each meaningful unit of work.** Don't accumulate all changes into one commit at the end. Good commit points:
 - A new file is created and working
@@ -915,12 +915,14 @@ def main():
                     "content": (
                         f"⚠️ WRAP UP NOW — iteration {iteration + 1} of {MAX_ITERATIONS}. "
                         f"Only {remaining} iteration(s) remain after this one.\n\n"
-                        "Commit whatever work exists, push, then call finish():\n"
-                        "1. `git add -A && git commit -m \"WIP: partial implementation\"`\n"
-                        "2. `git push origin HEAD`\n"
+                        "**First, right now, before anything else: push whatever you have.**\n"
+                        "1. `git add -A && git commit -m \"WIP: partial implementation\"` "
+                        "(skip if nothing to commit)\n"
+                        "2. `git push origin HEAD` — do this immediately, unpushed work "
+                        "is lost when the runner shuts down\n"
                         "3. Call `finish(success=False, explanation=\"...\")` describing "
                         "what was done and what remains.\n\n"
-                        "Do NOT start any new work. Commit and finish now."
+                        "Do NOT start any new work. Push and finish now."
                     ),
                 })
 
@@ -1166,6 +1168,19 @@ def main():
     if finish_args is None:
         write_status(False, "Agent exhausted all iterations without calling finish()")
         print("Agent did not call finish() — treating as failure")
+        # Safety net: push any local commits the agent made but forgot to push.
+        # Unpushed commits are lost when the runner shuts down, so we attempt a
+        # push here regardless of whether the agent followed the push instructions.
+        try:
+            local_commits = run(
+                f"git log origin/{TARGET_BRANCH}..HEAD --oneline",
+                check=False, timeout=15,
+            ).strip()
+            if local_commits:
+                print(f"  Pushing {len(local_commits.splitlines())} unpushed commit(s) before exit...")
+                run(f"git push origin HEAD", check=False, timeout=60)
+        except Exception as e:
+            print(f"  Safety push failed: {e}")
         remote_branch_exists = bool(run(
             f"git ls-remote --heads origin {branch}",
             check=False, timeout=30
