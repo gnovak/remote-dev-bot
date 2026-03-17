@@ -449,16 +449,20 @@ jobs:
           def _fmt_bpd(text, cost):
               if cost <= 0: return 'N/A'
               data = text.encode('utf-8') if isinstance(text, str) else text
-              bpd = (len(gzip.compress(data))) / cost
-              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit/$"
-              return f"{bpd / 1_000:.1f} Kbit/$"
+              bpd = (len(gzip.compress(data)) * 8) / cost  # bits per dollar
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit"
+              return f"{bpd / 1_000:.1f} Kbit"
           if os.path.exists("/tmp/llm_usage.json"):
               _d = json.load(open("/tmp/llm_usage.json"))
               input_tokens = _d.get('input_tokens', 0)
               output_tokens = _d.get('output_tokens', 0)
               cost = float(_d.get('cost') or 0)
+              iterations = _d.get('iterations', 0)
           else:
-              input_tokens = output_tokens = 0; cost = 0.0
+              input_tokens = output_tokens = 0; cost = 0.0; iterations = 0
+          _max_iter_str = os.environ.get("MAX_ITERATIONS", "") or ""
+          _max_iter = int(_max_iter_str) if _max_iter_str.isdigit() and int(_max_iter_str) > 0 else 0
+          iterations_fmt = f"{iterations} / {_max_iter}" if _max_iter > 0 else str(iterations)
           try:
               _st = int(open('/tmp/start_time').read().strip())
           except Exception:
@@ -476,9 +480,21 @@ jobs:
           _m = _re.search(r"(\d+) deletion", shortstat)
           if _m: loc_changed += int(_m.group(1))
           bits_text = diff_text
-          extra_rows = [('Diff', shortstat if shortstat else 'N/A'), ('LOC/$', f'{loc_changed / cost:,.0f} loc/$' if cost > 0 and loc_changed > 0 else 'N/A')]
           rounded = math.ceil(cost * 100) / 100
-          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bytes/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
+          def _fmt_loc(n):
+              if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
+              if n >= 1_000: return f"{n/1_000:.1f}k"
+              return str(n)
+          rows = [
+              ('Time', _fmt_ela(elapsed)),
+              ('Iterations', iterations_fmt),
+              ('Input', _fmt_tok(input_tokens) + ' tokens'),
+              ('Output', _fmt_tok(output_tokens) + ' tokens'),
+              ('Diff', shortstat if shortstat else 'N/A'),
+              ('LOC/$', f'{_fmt_loc(int(loc_changed / cost))} loc/$' if cost > 0 and loc_changed > 0 else 'N/A'),
+              ('Info/$', _fmt_bpd(bits_text, cost)),
+              ('**Cost**', f'**${rounded:.2f}**'),
+          ]
           _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
           _tbl += [f'| {k} | {v} |' for k, v in rows]
           open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
@@ -522,6 +538,12 @@ jobs:
           else
             INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
           fi
+          MAX_ITER="${MAX_ITERATIONS:-}"
+          ITERATIONS_FMT=$(python3 -c "
+          max_i = '${MAX_ITER}'
+          iters = '${ITERATIONS}'
+          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
+          ")
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
           IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
@@ -546,6 +568,7 @@ jobs:
             echo "| Metric | Value |"
             echo "|--------|-------|"
             echo "| Time | ${ELAPSED_FMT} |"
+            echo "| Iterations | ${ITERATIONS_FMT} |"
             echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
             echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
             printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
@@ -1146,16 +1169,20 @@ jobs:
           def _fmt_bpd(text, cost):
               if cost <= 0: return 'N/A'
               data = text.encode('utf-8') if isinstance(text, str) else text
-              bpd = (len(gzip.compress(data))) / cost
-              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit/$"
-              return f"{bpd / 1_000:.1f} Kbit/$"
+              bpd = (len(gzip.compress(data)) * 8) / cost  # bits per dollar
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit"
+              return f"{bpd / 1_000:.1f} Kbit"
           if os.path.exists("/tmp/llm_usage.json"):
               _d = json.load(open("/tmp/llm_usage.json"))
               input_tokens = _d.get('input_tokens', 0)
               output_tokens = _d.get('output_tokens', 0)
               cost = float(_d.get('cost') or 0)
+              iterations = _d.get('iterations', 0)
           else:
-              input_tokens = output_tokens = 0; cost = 0.0
+              input_tokens = output_tokens = 0; cost = 0.0; iterations = 0
+          _max_iter_str = os.environ.get("REVIEW_MAX_ITERATIONS", "") or ""
+          _max_iter = int(_max_iter_str) if _max_iter_str.isdigit() and int(_max_iter_str) > 0 else 0
+          iterations_fmt = f"{iterations} / {_max_iter}" if _max_iter > 0 else str(iterations)
           try:
               _st = int(open('/tmp/start_time').read().strip())
           except Exception:
@@ -1163,9 +1190,15 @@ jobs:
           elapsed = int(time.time()) - _st
           output_text = open("/tmp/review_result.txt").read() if os.path.exists("/tmp/review_result.txt") else ""
           bits_text = output_text
-          extra_rows = []
           rounded = math.ceil(cost * 100) / 100
-          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bytes/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
+          rows = [
+              ('Time', _fmt_ela(elapsed)),
+              ('Iterations', iterations_fmt),
+              ('Input', _fmt_tok(input_tokens) + ' tokens'),
+              ('Output', _fmt_tok(output_tokens) + ' tokens'),
+              ('Info/$', _fmt_bpd(bits_text, cost)),
+              ('**Cost**', f'**${rounded:.2f}**'),
+          ]
           _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
           _tbl += [f'| {k} | {v} |' for k, v in rows]
           open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
@@ -1222,6 +1255,12 @@ jobs:
           else
             INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
           fi
+          MAX_ITER="${REVIEW_MAX_ITERATIONS:-}"
+          ITERATIONS_FMT=$(python3 -c "
+          max_i = '${MAX_ITER}'
+          iters = '${ITERATIONS}'
+          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
+          ")
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
           IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
@@ -1246,6 +1285,7 @@ jobs:
             echo "| Metric | Value |"
             echo "|--------|-------|"
             echo "| Time | ${ELAPSED_FMT} |"
+            echo "| Iterations | ${ITERATIONS_FMT} |"
             echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
             echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
             printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
@@ -1774,16 +1814,20 @@ jobs:
           def _fmt_bpd(text, cost):
               if cost <= 0: return 'N/A'
               data = text.encode('utf-8') if isinstance(text, str) else text
-              bpd = (len(gzip.compress(data))) / cost
-              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit/$"
-              return f"{bpd / 1_000:.1f} Kbit/$"
+              bpd = (len(gzip.compress(data)) * 8) / cost  # bits per dollar
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit"
+              return f"{bpd / 1_000:.1f} Kbit"
           if os.path.exists("/tmp/llm_usage.json"):
               _d = json.load(open("/tmp/llm_usage.json"))
               input_tokens = _d.get('input_tokens', 0)
               output_tokens = _d.get('output_tokens', 0)
               cost = float(_d.get('cost') or 0)
+              iterations = _d.get('iterations', 0)
           else:
-              input_tokens = output_tokens = 0; cost = 0.0
+              input_tokens = output_tokens = 0; cost = 0.0; iterations = 0
+          _max_iter_str = os.environ.get("DESIGN_MAX_ITERATIONS", "") or ""
+          _max_iter = int(_max_iter_str) if _max_iter_str.isdigit() and int(_max_iter_str) > 0 else 0
+          iterations_fmt = f"{iterations} / {_max_iter}" if _max_iter > 0 else str(iterations)
           try:
               _st = int(open('/tmp/start_time').read().strip())
           except Exception:
@@ -1791,9 +1835,15 @@ jobs:
           elapsed = int(time.time()) - _st
           output_text = open("/tmp/design_analysis.txt").read() if os.path.exists("/tmp/design_analysis.txt") else ""
           bits_text = output_text
-          extra_rows = []
           rounded = math.ceil(cost * 100) / 100
-          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bytes/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
+          rows = [
+              ('Time', _fmt_ela(elapsed)),
+              ('Iterations', iterations_fmt),
+              ('Input', _fmt_tok(input_tokens) + ' tokens'),
+              ('Output', _fmt_tok(output_tokens) + ' tokens'),
+              ('Info/$', _fmt_bpd(bits_text, cost)),
+              ('**Cost**', f'**${rounded:.2f}**'),
+          ]
           _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
           _tbl += [f'| {k} | {v} |' for k, v in rows]
           open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
@@ -1855,6 +1905,12 @@ jobs:
           else
             INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
           fi
+          MAX_ITER="${DESIGN_MAX_ITERATIONS:-}"
+          ITERATIONS_FMT=$(python3 -c "
+          max_i = '${MAX_ITER}'
+          iters = '${ITERATIONS}'
+          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
+          ")
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
           IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
@@ -1879,6 +1935,7 @@ jobs:
             echo "| Metric | Value |"
             echo "|--------|-------|"
             echo "| Time | ${ELAPSED_FMT} |"
+            echo "| Iterations | ${ITERATIONS_FMT} |"
             echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
             echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
             printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
@@ -2307,16 +2364,20 @@ jobs:
           def _fmt_bpd(text, cost):
               if cost <= 0: return 'N/A'
               data = text.encode('utf-8') if isinstance(text, str) else text
-              bpd = (len(gzip.compress(data))) / cost
-              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit/$"
-              return f"{bpd / 1_000:.1f} Kbit/$"
+              bpd = (len(gzip.compress(data)) * 8) / cost  # bits per dollar
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit"
+              return f"{bpd / 1_000:.1f} Kbit"
           if os.path.exists("/tmp/llm_usage.json"):
               _d = json.load(open("/tmp/llm_usage.json"))
               input_tokens = _d.get('input_tokens', 0)
               output_tokens = _d.get('output_tokens', 0)
               cost = float(_d.get('cost') or 0)
+              iterations = _d.get('iterations', 0)
           else:
-              input_tokens = output_tokens = 0; cost = 0.0
+              input_tokens = output_tokens = 0; cost = 0.0; iterations = 0
+          _max_iter_str = os.environ.get("EXPLORE_MAX_ITERATIONS", "") or ""
+          _max_iter = int(_max_iter_str) if _max_iter_str.isdigit() and int(_max_iter_str) > 0 else 0
+          iterations_fmt = f"{iterations} / {_max_iter}" if _max_iter > 0 else str(iterations)
           try:
               _st = int(open('/tmp/start_time').read().strip())
           except Exception:
@@ -2324,9 +2385,15 @@ jobs:
           elapsed = int(time.time()) - _st
           output_text = open("/tmp/explore_analysis.txt").read() if os.path.exists("/tmp/explore_analysis.txt") else ""
           bits_text = output_text
-          extra_rows = []
           rounded = math.ceil(cost * 100) / 100
-          rows = [('Time', _fmt_ela(elapsed)), ('Input', _fmt_tok(input_tokens) + ' tokens'), ('Output', _fmt_tok(output_tokens) + ' tokens'), ('Bytes/$', _fmt_bpd(bits_text, cost))] + extra_rows + [('**Cost**', f'**${rounded:.2f}**')]
+          rows = [
+              ('Time', _fmt_ela(elapsed)),
+              ('Iterations', iterations_fmt),
+              ('Input', _fmt_tok(input_tokens) + ' tokens'),
+              ('Output', _fmt_tok(output_tokens) + ' tokens'),
+              ('Info/$', _fmt_bpd(bits_text, cost)),
+              ('**Cost**', f'**${rounded:.2f}**'),
+          ]
           _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
           _tbl += [f'| {k} | {v} |' for k, v in rows]
           open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
@@ -2378,6 +2445,12 @@ jobs:
           else
             INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
           fi
+          MAX_ITER="${EXPLORE_MAX_ITERATIONS:-}"
+          ITERATIONS_FMT=$(python3 -c "
+          max_i = '${MAX_ITER}'
+          iters = '${ITERATIONS}'
+          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
+          ")
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
           IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
@@ -2402,6 +2475,7 @@ jobs:
             echo "| Metric | Value |"
             echo "|--------|-------|"
             echo "| Time | ${ELAPSED_FMT} |"
+            echo "| Iterations | ${ITERATIONS_FMT} |"
             echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
             echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
             printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
@@ -2725,6 +2799,14 @@ jobs:
               return str(n)
           print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
+
+          WORKSHOP_MAX_ITER="${{ needs.parse.outputs.workshop_max_iterations }}"
+          ITERATIONS_FMT=$(python3 -c "
+          max_i = '${WORKSHOP_MAX_ITER}'
+          iters = '${ITERATIONS}'
+          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
+          ")
+
           {
             echo "⚠️ Workshop did not complete — partial cost:"
             echo ""
@@ -2737,6 +2819,7 @@ jobs:
             echo "| Metric | Value |"
             echo "|--------|-------|"
             echo "| Time | ${ELAPSED_FMT} |"
+            echo "| Iterations | ${ITERATIONS_FMT} |"
             echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
             echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
             printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
