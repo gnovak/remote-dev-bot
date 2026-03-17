@@ -576,6 +576,15 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" \
             --repo "${{ github.repository }}" \
             --body-file /tmp/cost_comment_fallback.md
+
+  # --- Mode: review (action=review) — lightweight agentic loop to review a PR ---
+  review:
+    needs: parse
+    if: needs.parse.outputs.action == 'review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
       - name: Generate app token
         if: vars.RDB_APP_ID != ''
         uses: actions/create-github-app-token@v3
@@ -2625,6 +2634,7 @@ jobs:
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
         run: |
+          date +%s > /tmp/start_time
           python3 << 'PYEOF'
           import json
           import os
@@ -2713,7 +2723,7 @@ jobs:
               post_comment_fn=post_comment,
           )
 
-          # Save usage data for the cost comment step
+          # Save usage data for the cost fallback step
           with open("/tmp/llm_usage.json", "w") as f:
               json.dump({
                   "input_tokens": workshop_result.get("total_input_tokens", 0),
@@ -2722,6 +2732,9 @@ jobs:
                   "iterations": workshop_result.get("design_result", {}).get("iterations", 0),
               }, f)
           PYEOF
+
+          # Cost is embedded in each workshop comment by workshop.py — write sentinel
+          echo "cost embedded" > /tmp/cost_embedded
 
       - name: Post result comment
         if: always()
@@ -2750,38 +2763,39 @@ jobs:
               --body-file /tmp/failure_comment.md
           fi
 
-      - name: Post cost comment
+      - name: Post cost comment (fallback)
         if: always()
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
+          # Sentinel: if cost was embedded in workshop comments, skip
+          if [ -f /tmp/cost_embedded ]; then
+            echo "Cost already embedded in workshop comments — skipping fallback"
+            exit 0
+          fi
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           MODEL="${{ needs.parse.outputs.model }}"
           ALIAS="${{ needs.parse.outputs.alias }}"
-          MODE="${{ needs.parse.outputs.mode }}"
-
-          # Read usage data — default to 0 if file missing (shows $0.00, signals no data)
-          read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
-          import json, os
-          if os.path.exists('/tmp/llm_usage.json'):
-              d = json.load(open('/tmp/llm_usage.json'))
-              print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
-          else:
-              print(0, 0, 0, 0)
+          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
+          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
+          if [ -f /tmp/llm_usage.json ]; then
+            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
+          import json
+          d = json.load(open('/tmp/llm_usage.json'))
+          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
           ")
-
-          # Round UP to nearest penny — $0.00 means no cost data was available.
+          else
+            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
+          fi
           ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
-
-          # Format token counts as human-readable (2 sig figs, k and M suffixes)
           IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
           def fmt(n):
               if n >= 1_000_000:
                   v = n / 1_000_000
-                  return f'{round(v)} M' if v >= 10 else f'{round(v, 1)} M'
+                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
               elif n >= 1_000:
                   v = n / 1_000
-                  return f'{round(v)} k' if v >= 10 else f'{round(v, 1)} k'
+                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
               return str(n)
           print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
@@ -2793,25 +2807,23 @@ jobs:
           print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
           ")
 
-          # Format cost comment
           {
+            echo "⚠️ Workshop did not complete — partial cost:"
+            echo ""
             echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
-            echo "### 💰 Cost Summary"
+            echo "---"
             echo ""
-            echo "**Mode:** ${MODE}"
+            echo "### 💰 Cost"
             echo ""
             echo "| Metric | Value |"
             echo "|--------|-------|"
+            echo "| Time | ${ELAPSED_FMT} |"
             echo "| Iterations | ${ITERATIONS_FMT} |"
-            echo "| Input tokens | ${INPUT_TOKENS_FMT} |"
-            echo "| Output tokens | ${OUTPUT_TOKENS_FMT} |"
-            printf "| **Estimated cost** | **\$%s** |\n" "$ROUNDED"
-            echo ""
-            echo "_Cost is estimated based on token usage and may vary from actual billing._"
-          } > /tmp/cost_comment.md
-
-          # Post comment
+            echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+            echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+            printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+          } > /tmp/cost_comment_fallback.md
           gh issue comment "$ISSUE_NUMBER" \
             --repo "${{ github.repository }}" \
-            --body-file /tmp/cost_comment.md
+            --body-file /tmp/cost_comment_fallback.md

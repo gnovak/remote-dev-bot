@@ -220,6 +220,13 @@ starting work.
 An AI assistant can write this for you — just ask it to read your codebase and
 generate an `AGENTS.md` describing the architecture and conventions.
 
+It's also worth noting project maturity and constraints: whether backward
+compatibility matters, whether there are external users, whether data can be
+regenerated from scratch. Agents use this to calibrate how much weight to put
+on migration paths, API stability, and similar concerns. For example: *"This is
+a pre-alpha prototype with no external users; backward compatibility and data
+migration are non-concerns."*
+
 ### Model Aliases
 
 Add or modify model aliases in your repo's `remote-dev-bot.yaml` (create it in
