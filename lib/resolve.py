@@ -1136,10 +1136,10 @@ def main():
                             # Keep only the first sentence to prevent tool-call XML sprawl
                             raw = sc.content.strip()
                             first_sentence = re.split(r"(?<=[.!?])\s|\n", raw)[0]
-                            status_text = f"[Changes: {changes_str}] {first_sentence}"
+                            status_text = f"{first_sentence}  \n\u00a0\u00a0\u00a0\u00a0[Changes: {changes_str}]"
                     if status_text:
                         status_log.append((iteration + 1, status_text))
-                        print(f"  [Status log iter {iteration + 1}]: {status_text[:120]}")
+                        print(f"  [Status log iter {iteration + 1}]: {first_sentence[:100]}")
                 except Exception as e:
                     print(f"  [Status log] failed at iteration {iteration + 1}: {e}")
 
@@ -1150,7 +1150,7 @@ def main():
     # Post rolling status log as issue comment (if any entries were collected)
     if status_log and ISSUE_NUMBER and GITHUB_REPO:
         try:
-            log_text = "\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
+            log_text = "\n\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
             comment_body = f"## Agent Status Log\n\n{log_text}"
             comment_file = "/tmp/rdb_status_log_comment.txt"
             with open(comment_file, "w") as f:
