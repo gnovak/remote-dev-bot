@@ -450,8 +450,8 @@ jobs:
               if cost <= 0: return 'N/A'
               data = text.encode('utf-8') if isinstance(text, str) else text
               bpd = (len(gzip.compress(data)) * 8) / cost  # bits per dollar
-              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit"
-              return f"{bpd / 1_000:.1f} Kbit"
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit/$"
+              return f"{bpd / 1_000:.1f} Kbit/$"
           if os.path.exists("/tmp/llm_usage.json"):
               _d = json.load(open("/tmp/llm_usage.json"))
               input_tokens = _d.get('input_tokens', 0)
@@ -1170,8 +1170,8 @@ jobs:
               if cost <= 0: return 'N/A'
               data = text.encode('utf-8') if isinstance(text, str) else text
               bpd = (len(gzip.compress(data)) * 8) / cost  # bits per dollar
-              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit"
-              return f"{bpd / 1_000:.1f} Kbit"
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit/$"
+              return f"{bpd / 1_000:.1f} Kbit/$"
           if os.path.exists("/tmp/llm_usage.json"):
               _d = json.load(open("/tmp/llm_usage.json"))
               input_tokens = _d.get('input_tokens', 0)
@@ -1815,8 +1815,8 @@ jobs:
               if cost <= 0: return 'N/A'
               data = text.encode('utf-8') if isinstance(text, str) else text
               bpd = (len(gzip.compress(data)) * 8) / cost  # bits per dollar
-              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit"
-              return f"{bpd / 1_000:.1f} Kbit"
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit/$"
+              return f"{bpd / 1_000:.1f} Kbit/$"
           if os.path.exists("/tmp/llm_usage.json"):
               _d = json.load(open("/tmp/llm_usage.json"))
               input_tokens = _d.get('input_tokens', 0)
@@ -2365,8 +2365,8 @@ jobs:
               if cost <= 0: return 'N/A'
               data = text.encode('utf-8') if isinstance(text, str) else text
               bpd = (len(gzip.compress(data)) * 8) / cost  # bits per dollar
-              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit"
-              return f"{bpd / 1_000:.1f} Kbit"
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit/$"
+              return f"{bpd / 1_000:.1f} Kbit/$"
           if os.path.exists("/tmp/llm_usage.json"):
               _d = json.load(open("/tmp/llm_usage.json"))
               input_tokens = _d.get('input_tokens', 0)
