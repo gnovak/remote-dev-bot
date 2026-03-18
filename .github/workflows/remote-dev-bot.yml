@@ -141,7 +141,7 @@ jobs:
   # --- Mode: resolve (action=pr) — run LiteLLM agent loop, open a PR ---
   resolve:
     needs: parse
-    if: needs.parse.outputs.action == 'pr'
+    if: needs.parse.outputs.action == 'pr' || needs.parse.outputs.action == 'build'
     runs-on: ubuntu-latest
 
     steps:
@@ -352,6 +352,119 @@ jobs:
           fi
           # Success case: PR was already created by resolve.py — no comment needed here
 
+      - name: Run council code review
+        if: needs.parse.outputs.action == 'build'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
+          GITHUB_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # Read the PR URL written by resolve.py
+          PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
+
+          if [[ -z "$PR_URL" ]]; then
+            echo "No PR URL found — resolve may have failed. Posting notice and skipping council review."
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "$GITHUB_REPO" \
+              --body "## 🏛️ Build Stage 2 — Council Code Review
+
+          ⚠️ **Skipped** — the implementation stage did not produce a pull request. Council code review requires a PR to review. See the [workflow run logs]($RUN_URL) for details."
+            exit 0
+          fi
+
+          export PR_URL
+          python3 << 'PYEOF'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          sys.path.insert(0, ".remote-dev-bot/lib")
+          from workshop import run_build_council
+
+          github_repo = os.environ["GITHUB_REPO"]
+          github_token = os.environ["GH_TOKEN"]
+          pr_url = os.environ.get("PR_URL", "")
+          issue_number = os.environ["ISSUE_NUMBER"]
+
+          pr_number_match = re.search(r'/pull/(\d+)$', pr_url)
+          if not pr_number_match:
+              print("No PR number found in URL, exiting")
+              sys.exit(0)
+          pr_number = pr_number_match.group(1)
+
+          env = {**os.environ, "GH_TOKEN": github_token}
+
+          # Fetch PR details
+          pr_json = subprocess.run(
+              ["gh", "api", f"repos/{github_repo}/pulls/{pr_number}"],
+              capture_output=True, text=True, env=env,
+          ).stdout
+          pr_data = json.loads(pr_json)
+          pr_title = pr_data.get("title", "")
+          pr_body = pr_data.get("body", "") or ""
+
+          # Fetch PR diff (truncate very large diffs to avoid token blowout)
+          diff_result = subprocess.run(
+              ["gh", "api", f"repos/{github_repo}/pulls/{pr_number}",
+               "--header", "Accept: application/vnd.github.diff"],
+              capture_output=True, text=True, env=env,
+          )
+          pr_diff = diff_result.stdout[:40000]
+
+          # Fetch issue title + body
+          issue_json = subprocess.run(
+              ["gh", "api", f"repos/{github_repo}/issues/{issue_number}"],
+              capture_output=True, text=True, env=env,
+          ).stdout
+          issue_data = json.loads(issue_json)
+          issue_title = issue_data.get("title", "")
+          issue_body_text = issue_data.get("body", "") or ""
+
+          council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
+
+          def post_pr_comment(body):
+              proc = subprocess.run(
+                  ["gh", "pr", "comment", pr_number,
+                   "--repo", github_repo,
+                   "--body", body],
+                  env=env,
+                  capture_output=True, text=True,
+              )
+              if proc.returncode != 0:
+                  print(f"Warning: failed to post PR comment: {proc.stderr}", file=sys.stderr)
+
+          build_result = run_build_council(
+              council_models=council_models,
+              issue_title=issue_title,
+              issue_body=issue_body_text,
+              pr_title=pr_title,
+              pr_body=pr_body,
+              pr_diff=pr_diff,
+              post_comment_fn=post_pr_comment,
+          )
+
+          # Merge council usage into resolve.py's existing usage data
+          existing = {}
+          if os.path.exists("/tmp/llm_usage.json"):
+              with open("/tmp/llm_usage.json") as f:
+                  existing = json.load(f)
+
+          combined = {
+              "input_tokens": existing.get("input_tokens", 0) + build_result["total_input_tokens"],
+              "output_tokens": existing.get("output_tokens", 0) + build_result["total_output_tokens"],
+              "cost": (existing.get("cost") or 0.0) + build_result["total_cost"],
+              "iterations": existing.get("iterations", 0),
+          }
+          with open("/tmp/llm_usage.json", "w") as f:
+              json.dump(combined, f)
+          PYEOF
 
       - name: Write step summary
         if: always()

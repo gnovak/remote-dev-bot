@@ -226,6 +226,259 @@ def run_council_review(
 
 
 # ---------------------------------------------------------------------------
+# Council code review (build mode Stage 2)
+# ---------------------------------------------------------------------------
+
+COUNCIL_CODE_REVIEW_SYSTEM_PROMPT = (
+    "You are a senior software engineer participating in a code review council. "
+    "You have been given a pull request that resolves a GitHub issue, and you "
+    "must provide a structured code review.\n\n"
+    "Your review should be thorough but constructive. Focus on:\n"
+    "- Correctness: does this actually solve the issue? Any edge cases missed?\n"
+    "- Code quality: readability, maintainability, appropriate abstractions\n"
+    "- Potential bugs or regressions introduced by the change\n"
+    "- Alternative approaches that might be simpler or more robust\n\n"
+    "Be specific and actionable. Reference file names when raising concerns. "
+    "If the change looks good overall, say so clearly — do not manufacture concerns."
+)
+
+COUNCIL_CODE_REVIEW_FORMAT = """\
+Format your response EXACTLY as follows (use these exact headers):
+
+## Code Review by {model_alias}
+
+**Overall:** [LGTM / Looks good with minor comments / Needs changes]
+
+**What I'd approve:** …
+
+**Concerns:** …
+
+**Suggestions:** …
+
+**Questions for the author:** …
+"""
+
+
+def build_council_code_review_prompt(
+    *,
+    issue_title,
+    issue_body,
+    pr_title,
+    pr_body,
+    pr_diff,
+    model_alias,
+):
+    """Build the user prompt for a council code review."""
+    return (
+        f"## Issue being resolved: {issue_title}\n\n"
+        f"{issue_body}\n\n"
+        f"## Pull Request: {pr_title}\n\n"
+        f"{pr_body}\n\n"
+        f"## Diff:\n\n```diff\n{pr_diff}\n```\n\n"
+        f"---\n\n"
+        f"Please review the pull request above and provide your code review.\n\n"
+        f"{COUNCIL_CODE_REVIEW_FORMAT.format(model_alias=model_alias)}"
+    )
+
+
+def run_council_code_review(
+    *,
+    model_id,
+    model_alias,
+    issue_title,
+    issue_body,
+    pr_title,
+    pr_body,
+    pr_diff,
+    api_keys=None,
+):
+    """Run a single council code review (non-agentic single LLM call).
+
+    Returns dict with keys: review, model_alias, model_id,
+    input_tokens, output_tokens, cost.
+    """
+    from litellm import completion as litellm_completion
+
+    if api_keys:
+        for key, value in api_keys.items():
+            if value:
+                os.environ[key] = value
+
+    user_content = build_council_code_review_prompt(
+        issue_title=issue_title,
+        issue_body=issue_body,
+        pr_title=pr_title,
+        pr_body=pr_body,
+        pr_diff=pr_diff,
+        model_alias=model_alias,
+    )
+
+    messages = [
+        {"role": "system", "content": COUNCIL_CODE_REVIEW_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+    response = litellm_completion(
+        model=model_id,
+        messages=messages,
+        max_tokens=8192,
+    )
+
+    usage = getattr(response, "usage", None)
+    input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+    output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
+    cost = getattr(response, "_hidden_params", {}).get("response_cost", None) or 0.0
+
+    review_text = response.choices[0].message.content or ""
+
+    return {
+        "review": review_text,
+        "model_alias": model_alias,
+        "model_id": model_id,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cost": cost,
+    }
+
+
+def run_build_council(
+    *,
+    council_models,
+    issue_title,
+    issue_body,
+    pr_title,
+    pr_body,
+    pr_diff,
+    post_comment_fn=None,
+):
+    """Run Stage 2 council code reviews for build mode.
+
+    Runs each council model's review in parallel (non-agentic). Posts each
+    review via post_comment_fn (defaults to print if None).
+
+    Returns dict with council_results, total_input_tokens,
+    total_output_tokens, total_cost.
+    """
+    import concurrent.futures
+    from design_loop import has_agent_command
+
+    def post(body):
+        if post_comment_fn:
+            post_comment_fn(body)
+        else:
+            print(body)
+
+    if not council_models:
+        post(
+            "## 🏛️ Build Stage 2 — Council Code Review\n\n"
+            "⚠️ No council models configured. Skipping council code review.\n"
+        )
+        return {
+            "council_results": [],
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_cost": 0.0,
+        }
+
+    post(
+        f"## 🏛️ Build Stage 2 — Council Code Review\n\n"
+        f"Requesting code reviews from {len(council_models)} council member(s): "
+        f"{', '.join(f'`{m[\"alias\"]}`' for m in council_models)}...\n"
+    )
+
+    council_results = []
+
+    def _run_single_code_review(council_model):
+        model_id = council_model["id"]
+        key_name = _get_required_api_key_name(model_id)
+        if key_name is not None:
+            key_value = os.environ.get(key_name, "")
+            if not key_value:
+                print(
+                    f"Skipping {council_model['alias']} — API key not configured "
+                    f"({key_name} is empty or missing)",
+                    flush=True,
+                )
+                return None
+
+        review_start = time.time()
+        result = run_council_code_review(
+            model_id=model_id,
+            model_alias=council_model["alias"],
+            issue_title=issue_title,
+            issue_body=issue_body,
+            pr_title=pr_title,
+            pr_body=pr_body,
+            pr_diff=pr_diff,
+        )
+        result["elapsed"] = time.time() - review_start
+        return result
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(council_models)) as executor:
+        futures = {
+            executor.submit(_run_single_code_review, cm): cm
+            for cm in council_models
+        }
+        for future in concurrent.futures.as_completed(futures):
+            cm = futures[future]
+            try:
+                result = future.result()
+                if result is None:
+                    continue
+                council_results.append(result)
+            except Exception as e:
+                council_results.append({
+                    "review": f"⚠️ Error during review: {e}",
+                    "model_alias": cm["alias"],
+                    "model_id": cm["id"],
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cost": 0.0,
+                    "elapsed": 0.0,
+                })
+
+    for cr in council_results:
+        if has_agent_command(cr["review"]):
+            post(
+                f"⚠️ **Agent loop blocked!** Review from `{cr['model_alias']}` "
+                f"contained `/agent` command(s). Blocked for safety."
+            )
+        else:
+            cost_table = _build_cost_table(
+                input_tokens=cr.get("input_tokens", 0),
+                output_tokens=cr.get("output_tokens", 0),
+                cost=cr.get("cost", 0.0),
+                elapsed=cr.get("elapsed", 0.0),
+                output_text=cr.get("review", ""),
+            )
+            post(
+                f"🤖 **Council reviewer:** `{cr['model_alias']}` (`{cr['model_id']}`)\n\n"
+                f"{cr['review']}\n\n"
+                f"---\n"
+                f"_Council code review by `/agent-build` Stage 2 (`{cr['model_alias']}`)_\n\n"
+                f"{cost_table}"
+            )
+
+    n = len(council_results)
+    post(
+        f"## Build Stage 2 complete — awaiting human review\n\n"
+        f"{n} model(s) have posted code reviews above. Please review the feedback "
+        f"and address any concerns before merging.\n"
+    )
+
+    total_input = sum(cr.get("input_tokens", 0) for cr in council_results)
+    total_output = sum(cr.get("output_tokens", 0) for cr in council_results)
+    total_cost = sum(cr.get("cost", 0.0) for cr in council_results)
+
+    return {
+        "council_results": council_results,
+        "total_input_tokens": total_input,
+        "total_output_tokens": total_output,
+        "total_cost": total_cost,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Council filtering
 # ---------------------------------------------------------------------------
 

@@ -6,6 +6,8 @@
 #   /agent-design-claude-large  — design analysis with specific model
 #   /agent-review               — code review on a PR, post comment
 #   /agent-review-claude-large  — code review with specific model
+#   /agent-build               — implement issue as a team: open PR, then council reviews the code
+#   /agent-build-claude-large  — build with specific model
 
 default_model: claude-small
 
@@ -56,6 +58,21 @@ modes:
       - claude-small
       - gpt-small
       - gemini-small
+
+
+  build:
+    action: build             # Run agent loop, open a PR, then council reviews the code
+    default_model: claude-small
+    max_iterations: 50        # Iteration limit for the implementation loop
+    extra_files:
+      - AGENTS.md
+      - README.md
+    # Council: models that review the PR. Defaults to all configured models if not specified.
+    council:
+      - claude-small
+      - gpt-small
+      - gemini-small
+
 
 models:
   claude-small:
