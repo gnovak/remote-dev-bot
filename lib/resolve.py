@@ -1080,6 +1080,11 @@ def main():
                               f"{stats['messages_compacted']} messages compacted, "
                               f"tokens {total_tokens} -> {new_total} "
                               f"({ratio:.1f}% reduction)")
+                        status_log.append((
+                            iteration + 1,
+                            f"[Context compaction] {stats['messages_compacted']} messages summarized, "
+                            f"tokens {total_tokens:,} → {new_total:,} ({ratio:.1f}% reduction)",
+                        ))
 
             if done:
                 break
