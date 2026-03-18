@@ -90,9 +90,9 @@ agent:
   # PR type: "draft" or "ready"
   pr_type: ready
   # What to do when the agent can't fully resolve the issue (success=False):
-  #   comment — post a comment with the agent's evaluation, no PR (default)
-  #   draft   — post the same comment AND open a draft PR with partial changes
-  on_failure: comment
+  #   draft   — open a draft PR with partial changes (default)
+  #   comment — post a comment only, no PR
+  on_failure: draft
   # Assign the triggering user to the issue when the agent starts
   assign_issue: true
   # Assign the triggering user to the resulting PR

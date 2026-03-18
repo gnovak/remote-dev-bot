@@ -387,7 +387,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     # and inline arg wins over both (applied below after action is resolved).
     max_iter = oh.get("max_iterations", 50)
     pr_type = oh.get("pr_type", "ready")
-    on_failure = oh.get("on_failure", "comment")
+    on_failure = oh.get("on_failure", "draft")
     # BACKCOMPAT(v0→v1, 2026-03-05): accept target_branch as alias for branch
     target_branch = oh.get("branch", oh.get("target_branch", "main"))
     assign_issue = oh.get("assign_issue", True)

@@ -1214,9 +1214,11 @@ def main():
                     f"This draft PR contains whatever was committed and pushed during the run. "
                     f"To continue, trigger `/agent-resolve` as a comment on this PR and the "
                     f"agent will pick up from this branch.\n\n"
-                    f"**Agent's last status:** {last_status}"
+                    f"**Agent's last status:** {last_status}\n\n"
+                    f"Fixes #{ISSUE_NUMBER}"
                 )
                 pr_url = create_pr(branch, f"WIP: partial work on #{ISSUE_NUMBER}", draft_body, draft=True)
+                write_pr_url(pr_url)
                 print(f"Created draft PR for partial work: {pr_url}")
                 _pr_created = True
             except Exception as e:
@@ -1274,10 +1276,14 @@ def main():
         if ON_FAILURE == "draft" and ISSUE_TYPE == "issue":
             print("Creating draft PR (on_failure=draft)...")
             try:
+                _body = pr_body or explanation
+                _fixes = f"Fixes #{ISSUE_NUMBER}"
+                if _fixes not in _body:
+                    _body = _body + ("\n\n" if _body else "") + _fixes
                 pr_url = create_pr(
                     branch,
                     f"[Draft] Fix for issue #{ISSUE_NUMBER}",
-                    pr_body or explanation,
+                    _body,
                     draft=True,
                 )
                 write_pr_url(pr_url)
@@ -1302,7 +1308,8 @@ def _cleanup():
                     f"\u26a0\ufe0f **Partial work** \u2014 agent terminated unexpectedly before completing the task.\n\n"
                     f"This draft PR contains whatever was committed and pushed during the run. "
                     f"To continue, trigger `/agent-resolve` as a comment on this PR and the "
-                    f"agent will pick up from this branch."
+                    f"agent will pick up from this branch.\n\n"
+                    f"Fixes #{ISSUE_NUMBER}"
                 )
                 pr_url = create_pr(
                     _branch_created,

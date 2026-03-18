@@ -635,7 +635,7 @@ def test_resolve_config_agent_defaults():
         result = resolve_config(path, "nonexistent.yaml", "resolve")
         assert result["max_iterations"] == 50
         assert result["pr_type"] == "ready"
-        assert result["on_failure"] == "comment"
+        assert result["on_failure"] == "draft"
         assert result["target_branch"] == "main"
         assert result["assign_issue"] is True
         assert result["assign_pr"] is True
@@ -666,10 +666,10 @@ def test_resolve_config_openhands_key_backcompat():
 
 
 def test_resolve_config_on_failure_default(config_dir):
-    """on_failure defaults to 'comment'."""
+    """on_failure defaults to 'draft'."""
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
-    assert result["on_failure"] == "comment"
+    assert result["on_failure"] == "draft"
 
 
 def test_resolve_config_on_failure_draft(config_dir):
