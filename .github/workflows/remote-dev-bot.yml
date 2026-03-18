@@ -344,6 +344,7 @@ jobs:
           if [[ "$SUCCESS" == "false" ]]; then
             ALIAS="${{ needs.parse.outputs.alias }}"
             MODEL="${{ needs.parse.outputs.model }}"
+            DRAFT_PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
             {
               echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
               echo ""
@@ -355,12 +356,11 @@ jobs:
                 echo "$EXPLANATION"
                 echo ""
               fi
-              echo "See the [workflow run logs]($RUN_URL) for full details."
-              if [[ "$ON_FAILURE" == "comment" ]]; then
+              if [[ -n "$DRAFT_PR_URL" ]]; then
+                echo "A draft PR with partial work was created: $DRAFT_PR_URL"
                 echo ""
-                echo "---"
-                echo "_To receive a draft PR with partial changes when this happens, set \`agent.on_failure: draft\` in your \`remote-dev-bot.yaml\`._"
               fi
+              echo "See the [workflow run logs]($RUN_URL) for full details."
             } > /tmp/failure_comment.md
 
             gh issue comment "$ISSUE_NUMBER" \

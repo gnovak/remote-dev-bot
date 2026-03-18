@@ -1182,6 +1182,7 @@ def main():
                     f"**Agent's last status:** {last_status}"
                 )
                 pr_url = create_pr(branch, f"WIP: partial work on #{ISSUE_NUMBER}", draft_body, draft=True)
+                write_pr_url(pr_url)
                 print(f"Created draft PR for partial work: {pr_url}")
                 _pr_created = True
             except Exception as e:
