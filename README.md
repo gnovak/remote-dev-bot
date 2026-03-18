@@ -62,14 +62,16 @@ comment (no code changes).
 
 ## Commands
 
-| Command                       | What it does                                         |
-| ----------------------------- | ---------------------------------------------------- |
-| `/agent-resolve`              | Resolve the issue and open a PR (default model)      |
-| `/agent-resolve-claude-large` | Resolve with a specific model                        |
-| `/agent-design`               | Explore codebase and post a design analysis comment  |
-| `/agent-design-claude-large`  | Design analysis with a specific model                |
-| `/agent-review`               | Post a code review comment on a PR (no code changes) |
-| `/agent-review-claude-large`  | Code review with a specific model                    |
+| Command                         | What it does                                         |
+| ------------------------------- | ---------------------------------------------------- |
+| `/agent-resolve`                | Resolve the issue and open a PR (default model)      |
+| `/agent-resolve-claude-large`   | Resolve with a specific model                        |
+| `/agent-design`                 | Explore codebase and post a design analysis comment  |
+| `/agent-design-claude-large`    | Design analysis with a specific model                |
+| `/agent-review`                 | Post a code review comment on a PR (no code changes) |
+| `/agent-review-claude-large`    | Code review with a specific model                    |
+| `/agent-workshop[-<model>]`     | Design analysis + multi-model council critique       |
+| `/agent-build[-<model>]`        | Implement issue + multi-model council code review    |
 
 Modes and model aliases are configured in `remote-dev-bot.yaml`.
 
@@ -176,6 +178,33 @@ Sign all commits with a trailer: Model: <your model name and version>
 
 There is no built-in trailer — commit message format is entirely up to you.
 
+## Workshop and Build Modes
+
+Workshop and Build are council modes: after the agent finishes its primary
+task, each model in the configured `council` independently reviews the result
+and posts a structured comment. Human reads the council's feedback, then
+decides what to do next.
+
+**Workshop** (`/agent-workshop`):
+
+- Stage 1: one agent explores the codebase and produces a design proposal
+  (same as `/agent-design`)
+- Stage 2: each council model independently critiques the proposal and posts a
+  structured review comment on the issue
+- Bot pauses — human reads the critiques and replies, then can trigger
+  `/agent-design` for a revised proposal or `/agent-build` to implement
+
+**Build** (`/agent-build`):
+
+- Stage 1: one agent implements the issue and opens a PR (same as
+  `/agent-resolve`)
+- Stage 2: each council model reviews the PR diff and posts a code review
+  comment on the PR
+- Bot pauses — human reviews the code reviews and decides whether to merge
+
+Both modes use a configurable `council:` list in the mode config. If omitted,
+the council defaults to all configured models.
+
 ## Architecture
 
 The system has two parts:
@@ -259,19 +288,19 @@ Sometimes the agent judges that it couldn't completely fix the issue (it reports
 `success=False` in its evaluation). The `on_failure` setting controls what
 happens next:
 
-| Value               | Behaviour                                                                                                                                                          |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `comment` (default) | Posts a comment with the agent's evaluation and a link to the run logs. No PR is created.                                                                                                                       |
-| `draft`             | Posts the same comment **and** opens a draft PR with whatever changes the agent made. Also creates a draft PR if the agent exhausts its iteration budget or crashes mid-run with committed work on the branch. |
+| Value            | Behaviour                                                                                                                                                          |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `draft` (default)| Posts the agent's evaluation comment **and** opens a draft PR with whatever changes were made. Also opens a draft PR if the agent exhausts its iteration budget or fails mid-run with committed work on the branch. |
+| `comment`        | Posts a comment with the agent's evaluation and a link to the run logs. No PR is created.                                                                          |
 
 ```yaml
 agent:
-  on_failure: draft # create a draft PR with partial changes
+  on_failure: comment # post a comment only, no draft PR
 ```
 
-Use `draft` if you want to review and complete partial work yourself. The
-default `comment` is safer — it surfaces what happened without creating a PR
-that might be accidentally merged.
+Use the default `draft` to preserve partial work for review and completion.
+Set `comment` if you prefer a comment-only failure mode and don't want a draft
+PR created.
 
 ### Other Configuration Options
 
@@ -305,6 +334,24 @@ agent:
 You can also override `max_iterations`, `branch`, and `context` on a
 per-invocation basis without editing the config file — see
 [Per-Invocation Arguments](#per-invocation-arguments).
+
+### Council Configuration (Workshop and Build)
+
+The `workshop:` and `build:` mode entries accept a `council:` list that
+controls which models participate in the review stage. If omitted, all
+configured models are used.
+
+```yaml
+modes:
+  workshop:
+    council:
+      - claude-small
+      - gpt-small
+  build:
+    council:
+      - claude-small
+      - gemini-small
+```
 
 ## Security
 
