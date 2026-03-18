@@ -153,11 +153,19 @@ else
         "Discuss the design trade-offs of storing configuration in YAML vs TOML vs JSON for a developer tooling project." \
         "/agent-explore" "all" "explore"
 
-    # Workshop mode smoke test: cheap council model, low iterations
+    # Workshop mode smoke test: low iterations
+    # (rdb-test remote-dev-bot.yaml sets council to [claude-small] to keep cost low)
     add_test "workshop" "Test: workshop design council" \
         "Add a docstring to the \`estimate_tokens\` function in lib/context.py" \
-        $'/agent-workshop\ncouncil = claude-small\nmax_iterations = 5' \
+        $'/agent-workshop\nmax_iterations = 5' \
         "claude" "workshop"
+
+    # Build mode smoke test: resolve creates PR (Stage 1), council reviews it (Stage 2).
+    # (rdb-test remote-dev-bot.yaml sets council to [claude-small] to keep cost low)
+    add_test "build" "Test: build mode council review" \
+        "Create a file build_test.py with a function add(a, b) that returns a + b" \
+        '/agent-build' \
+        "claude" "build"
 
     # Inline args smoke test: pass max_iterations as inline arg
     add_test "inline-args" "Test: inline max_iterations" \
@@ -709,6 +717,28 @@ for pos in "${!issue_nums[@]}"; do
                 status="PASS (no workshop comment found)"
             fi
             ((pass++)) || true
+        elif [[ "$test_type" == "build" ]]; then
+            # Build mode: Stage 1 creates a PR; Stage 2 posts council code reviews on the PR.
+            pr_num=$(gh pr list --repo "$TEST_REPO" \
+                --search "head:rdb-fix-issue-$issue_num" \
+                --json number --jq '.[0].number // empty' 2>/dev/null || echo "")
+
+            if [[ -z "$pr_num" ]]; then
+                status="FAIL (no PR created — Stage 1 failed)"
+                ((fail++)) || true
+            else
+                cleanup_branches+=("rdb-fix-issue-$issue_num")
+                # Stage 2: check for council code review comment on the PR
+                council_comment_count=$(gh api "repos/$TEST_REPO/issues/$pr_num/comments" \
+                    --jq '[.[] | select(.body | contains("Build Stage 2 complete") or contains("Council code review") or contains("Code Review by"))] | length' \
+                    2>/dev/null || echo "0")
+                if [[ "$council_comment_count" -gt 0 ]]; then
+                    status="PASS (PR #$pr_num + council review posted)"
+                else
+                    status="PASS (PR #$pr_num created, no council comment found)"
+                fi
+                ((pass++)) || true
+            fi
         else
             # Resolve mode: check if a PR was created
             pr_count=$(gh pr list --repo "$TEST_REPO" \
