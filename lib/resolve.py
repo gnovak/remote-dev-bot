@@ -1088,11 +1088,26 @@ def main():
             # API call to ask the agent for a brief status update.
             if STATUS_LOG_INTERVAL > 0 and (iteration + 1) % STATUS_LOG_INTERVAL == 0:
                 try:
-                    # Get git diff --stat for ground-truth file changes
-                    diff_result = subprocess.run(
-                        ["git", "diff", "--stat", "HEAD"],
+                    # Get git diff --stat for ground-truth file changes.
+                    # Diff against the merge-base with the target branch so we
+                    # capture ALL changes on the branch (committed + uncommitted)
+                    # rather than only uncommitted working-tree changes.
+                    merge_base_result = subprocess.run(
+                        ["git", "merge-base", "HEAD", f"origin/{TARGET_BRANCH}"],
                         capture_output=True, text=True, timeout=10,
                     )
+                    if merge_base_result.returncode == 0:
+                        merge_base = merge_base_result.stdout.strip()
+                        diff_result = subprocess.run(
+                            ["git", "diff", "--stat", merge_base],
+                            capture_output=True, text=True, timeout=10,
+                        )
+                    else:
+                        # Fallback: no origin or no common ancestor
+                        diff_result = subprocess.run(
+                            ["git", "diff", "--stat", "HEAD"],
+                            capture_output=True, text=True, timeout=10,
+                        )
                     diff_lines = diff_result.stdout.strip().splitlines()
                     # Format as "file.py +N/-M" per file, skip the summary line
                     file_changes = []
