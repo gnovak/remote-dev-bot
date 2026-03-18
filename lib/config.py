@@ -421,10 +421,10 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     # Mode settings
     action = mode_config.get("action", "pr")
 
-    # For agentic loop modes (design, review, workshop), the mode config can specify
+    # For agentic loop modes (design, review, workshop, build), the mode config can specify
     # its own max_iterations as a per-mode default, overriding the global
     # agent.max_iterations. Inline args win over both (applied below).
-    if action in ("design", "review", "workshop") and "max_iterations" in mode_config:
+    if action in ("design", "review", "workshop", "build") and "max_iterations" in mode_config:
         max_iter = mode_config["max_iterations"]
 
     # Apply command-line arg overrides
@@ -537,7 +537,9 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     if action == "workshop":
         result["workshop_max_iterations"] = max_iter
 
-        # Council models: explicit list from mode config, or all models except design model
+    if action in ("workshop", "build"):
+        # Council models: explicit list from mode config, or all configured models.
+        # Used by workshop (design critique) and build (code review) modes.
         council_config = mode_config.get("council", [])
         council_models = []
         if council_config:
