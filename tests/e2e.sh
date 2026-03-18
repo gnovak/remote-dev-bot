@@ -153,17 +153,18 @@ else
         "Discuss the design trade-offs of storing configuration in YAML vs TOML vs JSON for a developer tooling project." \
         "/agent-explore" "all" "explore"
 
-    # Workshop mode smoke test: cheap council model, low iterations
+    # Workshop mode smoke test: low iterations
+    # (rdb-test remote-dev-bot.yaml sets council to [claude-small] to keep cost low)
     add_test "workshop" "Test: workshop design council" \
         "Add a docstring to the \`estimate_tokens\` function in lib/context.py" \
-        $'/agent-workshop\ncouncil = claude-small\nmax_iterations = 5' \
+        $'/agent-workshop\nmax_iterations = 5' \
         "claude" "workshop"
 
     # Build mode smoke test: resolve creates PR (Stage 1), council reviews it (Stage 2).
-    # Uses a single-model council (claude-small) to keep cost low.
+    # (rdb-test remote-dev-bot.yaml sets council to [claude-small] to keep cost low)
     add_test "build" "Test: build mode council review" \
         "Create a file build_test.py with a function add(a, b) that returns a + b" \
-        $'/agent-build\ncouncil = claude-small' \
+        '/agent-build' \
         "claude" "build"
 
     # Inline args smoke test: pass max_iterations as inline arg
