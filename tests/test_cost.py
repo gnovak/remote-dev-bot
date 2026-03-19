@@ -53,7 +53,7 @@ parse_cost_from_comment "$1"
 
 
 def test_parse_cost_typical_comment(parse_cost_from_comment):
-    """Parse cost from a typical Cost Summary comment."""
+    """Parse cost from a typical Cost Summary comment (old format with Estimated cost)."""
     body = """### 💰 Cost Summary
 
 **Model:** `claude-small` (anthropic/claude-3-haiku-20240307)
@@ -72,6 +72,25 @@ _Cost is estimated based on token usage and may vary from actual billing._"""
     assert parse_cost_from_comment(body) == "1.23"
 
 
+def test_parse_cost_pr_body_format(parse_cost_from_comment):
+    """Parse cost from new PR body format using '| **Cost** | **$X.XX** |'."""
+    body = """---
+
+### 💰 Cost
+
+| Metric | Value |
+|--------|-------|
+| Time | 2m 30s |
+| Iterations | 5 |
+| Input | 10.0K tokens |
+| Output | 5.0K tokens |
+| Diff | 3 files changed, 42 insertions(+) |
+| LOC/$ | 34.1k loc/$ |
+| Info/$ | 1.2 Mbit/$ |
+| **Cost** | **$1.23** |"""
+    assert parse_cost_from_comment(body) == "1.23"
+
+
 def test_parse_cost_zero_cost(parse_cost_from_comment):
     """Parse cost when cost is $0.00."""
     body = "| **Estimated cost** | **$0.00** |"
@@ -81,6 +100,12 @@ def test_parse_cost_zero_cost(parse_cost_from_comment):
 def test_parse_cost_large_amount(parse_cost_from_comment):
     """Parse cost with larger dollar amounts."""
     body = "| **Estimated cost** | **$12.34** |"
+    assert parse_cost_from_comment(body) == "12.34"
+
+
+def test_parse_cost_pr_body_large_amount(parse_cost_from_comment):
+    """Parse cost from PR body format with larger dollar amounts."""
+    body = "| **Cost** | **$12.34** |"
     assert parse_cost_from_comment(body) == "12.34"
 
 
@@ -100,3 +125,30 @@ def test_parse_cost_multiple_costs_takes_first(parse_cost_from_comment):
     body = """| **Estimated cost** | **$1.00** |
 | **Estimated cost** | **$2.00** |"""
     assert parse_cost_from_comment(body) == "1.00"
+
+
+def test_parse_cost_pr_body_with_two_cost_tables(parse_cost_from_comment):
+    """PR body with two appended cost tables (rf-resolve then rf-feedback): first is returned."""
+    # Simulates what happens after rf-resolve creates the PR (first cost table)
+    # and then rf-feedback appends its cost table to the same PR body.
+    body = """## Summary
+
+Some PR description here.
+
+---
+
+### 💰 Cost
+
+| Metric | Value |
+|--------|-------|
+| **Cost** | **$0.50** |
+
+---
+
+### 💰 Cost
+
+| Metric | Value |
+|--------|-------|
+| **Cost** | **$0.75** |"""
+    # parse_cost_from_comment returns FIRST match (rf-resolve cost)
+    assert parse_cost_from_comment(body) == "0.50"
