@@ -1464,3 +1464,81 @@ class TestWorkshopConfig:
             assert "alias" in m
             assert "id" in m
             assert m["id"]  # not empty
+
+    def test_workshop_council_models_include_system_prompt_prefix(self, tmp_path):
+        """Council models with system_prompt_prefix include it in the output."""
+        config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "claude-security": {
+                    "id": "anthropic/claude-sonnet-4-20250514",
+                    "system_prompt_prefix": "You are the security reviewer.",
+                },
+                "gpt-small": {"id": "openai/gpt-4o-mini"},
+            },
+            "modes": {
+                "resolve": {"action": "pr"},
+                "workshop": {
+                    "action": "workshop",
+                    "default_model": "claude-small",
+                    "max_iterations": 15,
+                },
+            },
+            "agent": {"max_iterations": 50, "pr_type": "ready"},
+        }
+        base_path = str(tmp_path / "base.yaml")
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        council = result["council_models"]
+
+        security = [m for m in council if m["alias"] == "claude-security"][0]
+        assert security["system_prompt_prefix"] == "You are the security reviewer."
+
+        plain = [m for m in council if m["alias"] == "claude-small"][0]
+        assert "system_prompt_prefix" not in plain
+
+    def test_workshop_council_models_no_prefix_no_key(self, workshop_config_dir):
+        """Council models without system_prompt_prefix don't include the key."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        for m in result["council_models"]:
+            assert "system_prompt_prefix" not in m
+
+    def test_workshop_explicit_council_with_system_prompt_prefix(self, tmp_path):
+        """Explicit council list includes system_prompt_prefix for members that have it."""
+        config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "claude-security": {
+                    "id": "anthropic/claude-sonnet-4-20250514",
+                    "system_prompt_prefix": "Security lens.",
+                },
+                "gpt-perf": {
+                    "id": "openai/gpt-4o-mini",
+                    "system_prompt_prefix": "Performance lens.",
+                },
+            },
+            "modes": {
+                "resolve": {"action": "pr"},
+                "workshop": {
+                    "action": "workshop",
+                    "default_model": "claude-small",
+                    "max_iterations": 15,
+                    "council": ["claude-security", "gpt-perf"],
+                },
+            },
+            "agent": {"max_iterations": 50, "pr_type": "ready"},
+        }
+        base_path = str(tmp_path / "base.yaml")
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        council = result["council_models"]
+        assert len(council) == 2
+        assert council[0]["system_prompt_prefix"] == "Security lens."
+        assert council[1]["system_prompt_prefix"] == "Performance lens."

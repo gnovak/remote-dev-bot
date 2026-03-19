@@ -401,10 +401,11 @@ def run_build_council(
             "total_cost": 0.0,
         }
 
+    aliases = ", ".join(f'`{m["alias"]}`' for m in council_models)
     post(
         f"## 🏛️ Build Stage 2 — Council Code Review\n\n"
         f"Requesting code reviews from {len(council_models)} council member(s): "
-        f"{', '.join(f'`{m[\"alias\"]}`' for m in council_models)}...\n"
+        f"{aliases}...\n"
     )
 
     council_results = []

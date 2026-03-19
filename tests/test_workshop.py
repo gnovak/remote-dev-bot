@@ -170,3 +170,49 @@ class TestCouncilSystemPrompt:
 
     def test_system_prompt_mentions_design_review(self):
         assert "design review" in COUNCIL_REVIEW_SYSTEM_PROMPT.lower()
+
+
+# ---------------------------------------------------------------------------
+# system_prompt_prefix support
+# ---------------------------------------------------------------------------
+
+class TestSystemPromptPrefix:
+    """Tests for system_prompt_prefix in council models."""
+
+    SAMPLE_MODELS = {
+        "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+        "claude-security": {
+            "id": "anthropic/claude-sonnet-4-20250514",
+            "system_prompt_prefix": "You are the security reviewer on this team.",
+        },
+        "gpt-small": {"id": "openai/gpt-4o-mini"},
+    }
+
+    def test_resolve_council_includes_system_prompt_prefix(self):
+        """resolve_council_models includes system_prompt_prefix when present."""
+        result = resolve_council_models(
+            self.SAMPLE_MODELS,
+            design_alias="claude-small",
+            council_config=["claude-security", "gpt-small"],
+        )
+        security = [m for m in result if m["alias"] == "claude-security"][0]
+        gpt = [m for m in result if m["alias"] == "gpt-small"][0]
+        assert security["system_prompt_prefix"] == "You are the security reviewer on this team."
+        assert "system_prompt_prefix" not in gpt
+
+    def test_resolve_council_default_includes_system_prompt_prefix(self):
+        """Default council (no explicit list) includes system_prompt_prefix."""
+        result = resolve_council_models(
+            self.SAMPLE_MODELS,
+            design_alias="claude-small",
+        )
+        security = [m for m in result if m["alias"] == "claude-security"][0]
+        plain = [m for m in result if m["alias"] == "claude-small"][0]
+        assert security["system_prompt_prefix"] == "You are the security reviewer on this team."
+        assert "system_prompt_prefix" not in plain
+
+    def test_resolve_council_no_prefix_no_key(self):
+        """Models without system_prompt_prefix don't have the key at all."""
+        models = {"basic": {"id": "anthropic/claude-sonnet-4-20250514"}}
+        result = resolve_council_models(models, design_alias="basic")
+        assert "system_prompt_prefix" not in result[0]
