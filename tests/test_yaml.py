@@ -57,14 +57,6 @@ def test_default_model_exists_in_models(bot_config):
     )
 
 
-def test_modes_have_action(bot_config):
-    for name, mode in bot_config["modes"].items():
-        assert "action" in mode, f"Mode '{name}' missing 'action' field"
-        assert mode["action"] in ("pr", "comment", "review", "explore", "design"), (
-            f"Mode '{name}' has unknown action '{mode['action']}'"
-        )
-
-
 def test_mode_default_models_exist(bot_config):
     models = bot_config["models"]
     for name, mode in bot_config["modes"].items():

@@ -9,7 +9,7 @@ on:
 #
 # Failure strategy:
 #   - unit-tests: fast-fail gate. If this fails, all e2e jobs are skipped.
-#   - e2e-shim, e2e-security: continue-on-failure. Each block runs regardless
+#   - e2e, e2e-security: continue-on-failure. Each block runs regardless
 #     of whether the previous e2e block passed, so a single full-suite run
 #     gives a comprehensive failure picture across all blocks.
 #
@@ -37,7 +37,7 @@ jobs:
         env:
           PYTHONPATH: .
 
-  e2e-shim:
+  e2e:
     needs: unit-tests
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -59,13 +59,13 @@ jobs:
       - name: Install PyYAML
         run: pip install PyYAML
 
-      - name: Run E2E tests (shim, all models)
+      - name: Run E2E tests (all models)
         env:
           GH_TOKEN: ${{ secrets.RDB_TESTER_PAT_TOKEN || github.token }}
         run: ./tests/e2e.sh --branch ${{ github.ref_name }} --all-models
 
   e2e-security:
-    needs: [unit-tests, e2e-shim]
+    needs: [unit-tests, e2e]
     if: always() && needs.unit-tests.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30

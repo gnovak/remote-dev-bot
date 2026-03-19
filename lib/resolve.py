@@ -22,6 +22,12 @@ import time
 import litellm
 from litellm import completion
 
+# Ensure the rdb root is on sys.path so `lib.context` is importable when
+# resolve.py runs from a target repo's working directory.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from lib.context import compact_messages, estimate_tokens
+
 # --- Environment ---
 
 ISSUE_NUMBER = os.environ["ISSUE_NUMBER"]
@@ -37,8 +43,15 @@ COMMIT_TRAILER = os.environ.get("COMMIT_TRAILER", "")
 ALIAS = os.environ.get("ALIAS", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
 EXTRA_FILES = json.loads(os.environ.get("EXTRA_FILES", "[]") or "[]")
+EXTRA_INSTRUCTIONS = os.environ.get("EXTRA_INSTRUCTIONS", "")
+MODEL_EXTRA_INSTRUCTIONS = os.environ.get("MODEL_EXTRA_INSTRUCTIONS", "")
 BASH_OUTPUT_LIMIT = int(os.environ.get("BASH_OUTPUT_LIMIT", "8000") or "8000")
 CONTEXT_KEEP_TOOL_RESULTS = int(os.environ.get("CONTEXT_KEEP_TOOL_RESULTS", "10") or "10")
+MAX_CONTEXT_TOKENS = int(os.environ.get("MAX_CONTEXT_TOKENS", "0") or "0")
+COMPACTION_COVERAGE = float(os.environ.get("COMPACTION_COVERAGE", "0.5") or "0.5")
+COMPACTION_FACTOR = float(os.environ.get("COMPACTION_FACTOR", "0.5") or "0.5")
+# Hardcoded: fire at 85% of max to leave headroom for the summary to land
+_COMPACTION_THRESHOLD = 0.85
 
 GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY", "")
@@ -409,10 +422,12 @@ Never add documentation files (CHANGES.md, NOTES.md, etc.) to version control un
 EFFICIENCY = """
 ## Efficiency
 
-Each tool call costs time and budget. Where possible:
-- Combine multiple bash operations into a single command
-- Use grep with path filters rather than broad searches
-- Prefer targeted reads over reading entire large files
+Each tool call costs real money. Be targeted and deliberate:
+
+- **Don't over-explore.** If the issue + comments already identify the files and changes needed, go straight to implementing. Read only the files you are actually about to change.
+- **Read files once.** Don't re-read a file you already read unless it changed.
+- **Call finish() as soon as the task is done.** Don't do unnecessary verification passes after a successful test run.
+- **Exploration should be proportional to task complexity.** A one-line fix does not warrant reading 10 files.
 """
 
 STUCK_RECOVERY = """
@@ -424,37 +439,6 @@ If tests keep failing after multiple attempts:
 3. If you've exhausted reasonable approaches, call finish(success=False) with a clear explanation
 
 Do not repeat the same failing approach more than twice.
-"""
-
-WORKED_EXAMPLE = """
-## Example Interaction
-
-The following shows the expected pattern — one tool call per turn, explore before implement, commit before finish.
-
-**Turn 1** — explore:
-```
-bash(command="grep -rn 'def paginate' src/ | head -20")
-```
-
-**Turn 2** — read the relevant file:
-```
-read_file(path="src/pagination.py")
-```
-
-**Turn 3** — implement the fix, commit, and push in one turn:
-```
-bash(command="sed -i 's/page_size - 1/page_size/' src/pagination.py && git add src/pagination.py && git commit -m 'Fix off-by-one error in paginate()' && git push origin HEAD")
-```
-
-**Turn 4** — verify and finish:
-```
-bash(command="git status && python -m pytest tests/test_pagination.py -q")
-```
-
-**Turn 5** — call finish:
-```
-finish(success=True, pr_title="Fix off-by-one error in pagination", pr_body="Fixes #42\n\nRoot cause: paginate() subtracted 1 from page_size incorrectly, causing the last item on each page to be dropped. Fix: removed the erroneous subtraction in src/pagination.py.")
-```
 """
 
 GIT_INSTRUCTIONS = """
@@ -475,11 +459,19 @@ Use the bash tool to edit files. Good approaches:
    git add <files>
    git commit -m "Clear description of what and why"
    ```
-3. **Push immediately after every `git commit`:**
+3. **Push immediately after every `git commit` — this is critical:**
    ```
    git push origin HEAD
    ```
-   After every `git commit`, immediately run `git push origin HEAD` to preserve your work on the remote. This ensures progress is saved even if the run is interrupted before completion.
+   After every `git commit`, immediately run `git push origin HEAD`. **This is very important: if the run is interrupted or you run out of iterations before calling `finish()`, only pushed commits are preserved. Unpushed commits are lost forever when the runner shuts down.**
+
+**Commit frequently — after each meaningful unit of work.** Don't accumulate all changes into one commit at the end. Good commit points:
+- A new file is created and working
+- A function or class is complete
+- Tests are passing for a component
+- A logical sub-task is done (e.g., config parsing added, now starting workflow changes)
+
+Each commit message should describe what that unit of work does — treat them as a work log, not a polished history.
 
 ### Finishing
 - Before calling finish(), run `git status` to confirm all changes are committed and the working tree is clean.
@@ -521,6 +513,10 @@ description.
   description in the comments is the actual work to do.
 - Look for the latest comment that describes a specific plan or set of changes,
   and implement that.
+- **Treat the most recent human decisions as authoritative.** Discussions often
+  explore multiple options before settling on one. When you see a decision
+  ("let's go with A", "scratch B, do X instead"), that closes the question —
+  don't re-examine rejected options or re-litigate what's already been decided.
 """
 
 
@@ -560,11 +556,15 @@ is complete before committing — call `finish()` now.
         + GIT_INSTRUCTIONS
         + EFFICIENCY
         + STUCK_RECOVERY
-        + WORKED_EXAMPLE
         + SECURITY_RULES
     )
     if wrapup_hint:
         prompt += wrapup_hint
+
+    # Append mode-level and model-level extra_instructions (project/model-specific guidance)
+    extra_parts = [p for p in [EXTRA_INSTRUCTIONS, MODEL_EXTRA_INSTRUCTIONS] if p]
+    if extra_parts:
+        prompt += "\n\n" + "\n\n".join(extra_parts)
 
     return prompt
 
@@ -911,6 +911,28 @@ def main():
             last_iteration = iteration
             print(f"=== Iteration {iteration + 1}/{MAX_ITERATIONS} ===")
 
+            # Inject live wrapup message when the threshold is reached.
+            # This is more effective than the system prompt hint alone — the agent
+            # is deep in context by this point and needs a fresh, visible reminder.
+            if WRAPUP_ENABLED and WRAPUP_ITERATION > 0 and iteration + 1 == WRAPUP_ITERATION:
+                remaining = MAX_ITERATIONS - WRAPUP_ITERATION
+                print(f"  [Wrapup] Injecting wrapup message at iteration {iteration + 1}")
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"⚠️ WRAP UP NOW — iteration {iteration + 1} of {MAX_ITERATIONS}. "
+                        f"Only {remaining} iteration(s) remain after this one.\n\n"
+                        "**First, right now, before anything else: push whatever you have.**\n"
+                        "1. `git add -A && git commit -m \"WIP: partial implementation\"` "
+                        "(skip if nothing to commit)\n"
+                        "2. `git push origin HEAD` — do this immediately, unpushed work "
+                        "is lost when the runner shuts down\n"
+                        "3. Call `finish(success=False, explanation=\"...\")` describing "
+                        "what was done and what remains.\n\n"
+                        "Do NOT start any new work. Push and finish now."
+                    ),
+                })
+
             try:
                 response = completion(
                     model=LLM_MODEL,
@@ -1036,6 +1058,43 @@ def main():
             if CONTEXT_KEEP_TOOL_RESULTS > 0:
                 messages = trim_tool_results(messages, CONTEXT_KEEP_TOOL_RESULTS)
 
+            # Context window compaction — summarize oldest messages when context grows large
+            if MAX_CONTEXT_TOKENS > 0 and not done:
+                total_tokens = estimate_tokens(messages)
+                threshold_tokens = int(MAX_CONTEXT_TOKENS * _COMPACTION_THRESHOLD)
+                if total_tokens > threshold_tokens:
+                    print(f"  [Compaction] Context size ~{total_tokens} tokens exceeds "
+                          f"threshold {threshold_tokens} — compacting...")
+
+                    def _compaction_llm_call(prompt_messages, max_tokens):
+                        """Side-channel LLM call for summarization."""
+                        resp = completion(
+                            model=LLM_MODEL,
+                            messages=prompt_messages,
+                            max_tokens=max_tokens,
+                        )
+                        if resp.choices:
+                            msg_content = resp.choices[0].message.content
+                            return msg_content if msg_content else ""
+                        return ""
+
+                    messages, stats = compact_messages(
+                        messages, COMPACTION_COVERAGE, COMPACTION_FACTOR,
+                        _compaction_llm_call,
+                    )
+                    if stats["messages_compacted"] > 0:
+                        new_total = estimate_tokens(messages)
+                        ratio = (1 - new_total / total_tokens) * 100 if total_tokens > 0 else 0
+                        print(f"  [Compaction] Iteration {iteration + 1}: "
+                              f"{stats['messages_compacted']} messages compacted, "
+                              f"tokens {total_tokens} -> {new_total} "
+                              f"({ratio:.1f}% reduction)")
+                        status_log.append((
+                            iteration + 1,
+                            f"[Context compaction] {stats['messages_compacted']} messages summarized, "
+                            f"tokens {total_tokens:,} → {new_total:,} ({ratio:.1f}% reduction)",
+                        ))
+
             if done:
                 break
 
@@ -1043,6 +1102,39 @@ def main():
             # API call to ask the agent for a brief status update.
             if STATUS_LOG_INTERVAL > 0 and (iteration + 1) % STATUS_LOG_INTERVAL == 0:
                 try:
+                    # Get git diff --stat for ground-truth file changes.
+                    # Diff against the merge-base with the target branch so we
+                    # capture ALL changes on the branch (committed + uncommitted)
+                    # rather than only uncommitted working-tree changes.
+                    merge_base_result = subprocess.run(
+                        ["git", "merge-base", "HEAD", f"origin/{TARGET_BRANCH}"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    if merge_base_result.returncode == 0:
+                        merge_base = merge_base_result.stdout.strip()
+                        diff_result = subprocess.run(
+                            ["git", "diff", "--stat", merge_base],
+                            capture_output=True, text=True, timeout=10,
+                        )
+                    else:
+                        # Fallback: no origin or no common ancestor
+                        diff_result = subprocess.run(
+                            ["git", "diff", "--stat", "HEAD"],
+                            capture_output=True, text=True, timeout=10,
+                        )
+                    diff_lines = diff_result.stdout.strip().splitlines()
+                    # Format as "file.py +N/-M" per file, skip the summary line
+                    file_changes = []
+                    for line in diff_lines:
+                        m = re.match(r"\s*(\S+)\s*\|\s*\d+\s*([+-]+)", line)
+                        if m:
+                            fname = m.group(1)
+                            plusminus = m.group(2)
+                            ins = plusminus.count("+")
+                            dels = plusminus.count("-")
+                            file_changes.append(f"{fname} +{ins}/-{dels}")
+                    changes_str = "  ".join(file_changes) if file_changes else "(none)"
+
                     # Strip tool-call messages — the status check call omits
                     # tools=TOOLS, so Anthropic rejects history containing
                     # tool_calls/tool roles. Keep only text turns.
@@ -1055,25 +1147,28 @@ def main():
                         {
                             "role": "user",
                             "content": (
-                                "STATUS CHECK: In 1-2 sentences, what are you currently doing "
-                                "and what is your immediate next step? "
-                                "(This is logged for the run summary — answer briefly then continue your work.)"
+                                f"Changes: {changes_str}\n\n"
+                                "STATUS CHECK: One sentence only — what are you currently doing? "
+                                "Be concrete (name files/functions). No preamble."
                             ),
                         }
                     ]
                     status_response = completion(
                         model=LLM_MODEL,
                         messages=status_messages,
-                        max_tokens=256,
+                        max_tokens=128,
                     )
                     status_text = ""
                     if status_response.choices:
                         sc = status_response.choices[0].message
                         if hasattr(sc, "content") and sc.content:
-                            status_text = sc.content.strip()
+                            # Keep only the first sentence to prevent tool-call XML sprawl
+                            raw = sc.content.strip()
+                            first_sentence = re.split(r"(?<=[.!?])\s|\n", raw)[0]
+                            status_text = f"{first_sentence}  \n\u00a0\u00a0\u00a0\u00a0[Changes: {changes_str}]"
                     if status_text:
                         status_log.append((iteration + 1, status_text))
-                        print(f"  [Status log iter {iteration + 1}]: {status_text[:100]}")
+                        print(f"  [Status log iter {iteration + 1}]: {first_sentence[:100]}")
                 except Exception as e:
                     print(f"  [Status log] failed at iteration {iteration + 1}: {e}")
 
@@ -1084,7 +1179,7 @@ def main():
     # Post rolling status log as issue comment (if any entries were collected)
     if status_log and ISSUE_NUMBER and GITHUB_REPO:
         try:
-            log_text = "\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
+            log_text = "\n\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
             comment_body = f"## Agent Status Log\n\n{log_text}"
             comment_file = "/tmp/rdb_status_log_comment.txt"
             with open(comment_file, "w") as f:
@@ -1100,6 +1195,19 @@ def main():
     if finish_args is None:
         write_status(False, "Agent exhausted all iterations without calling finish()")
         print("Agent did not call finish() — treating as failure")
+        # Safety net: push any local commits the agent made but forgot to push.
+        # Unpushed commits are lost when the runner shuts down, so we attempt a
+        # push here regardless of whether the agent followed the push instructions.
+        try:
+            local_commits = run(
+                f"git log origin/{TARGET_BRANCH}..HEAD --oneline",
+                check=False, timeout=15,
+            ).strip()
+            if local_commits:
+                print(f"  Pushing {len(local_commits.splitlines())} unpushed commit(s) before exit...")
+                run(f"git push origin HEAD", check=False, timeout=60)
+        except Exception as e:
+            print(f"  Safety push failed: {e}")
         remote_branch_exists = bool(run(
             f"git ls-remote --heads origin {branch}",
             check=False, timeout=30
@@ -1113,9 +1221,11 @@ def main():
                     f"This draft PR contains whatever was committed and pushed during the run. "
                     f"To continue, trigger `/agent-resolve` as a comment on this PR and the "
                     f"agent will pick up from this branch.\n\n"
-                    f"**Agent's last status:** {last_status}"
+                    f"**Agent's last status:** {last_status}\n\n"
+                    f"Fixes #{ISSUE_NUMBER}"
                 )
                 pr_url = create_pr(branch, f"WIP: partial work on #{ISSUE_NUMBER}", draft_body, draft=True)
+                write_pr_url(pr_url)
                 print(f"Created draft PR for partial work: {pr_url}")
                 _pr_created = True
             except Exception as e:
@@ -1173,10 +1283,14 @@ def main():
         if ON_FAILURE == "draft" and ISSUE_TYPE == "issue":
             print("Creating draft PR (on_failure=draft)...")
             try:
+                _body = pr_body or explanation
+                _fixes = f"Fixes #{ISSUE_NUMBER}"
+                if _fixes not in _body:
+                    _body = _body + ("\n\n" if _body else "") + _fixes
                 pr_url = create_pr(
                     branch,
                     f"[Draft] Fix for issue #{ISSUE_NUMBER}",
-                    pr_body or explanation,
+                    _body,
                     draft=True,
                 )
                 write_pr_url(pr_url)
@@ -1201,7 +1315,8 @@ def _cleanup():
                     f"\u26a0\ufe0f **Partial work** \u2014 agent terminated unexpectedly before completing the task.\n\n"
                     f"This draft PR contains whatever was committed and pushed during the run. "
                     f"To continue, trigger `/agent-resolve` as a comment on this PR and the "
-                    f"agent will pick up from this branch."
+                    f"agent will pick up from this branch.\n\n"
+                    f"Fixes #{ISSUE_NUMBER}"
                 )
                 pr_url = create_pr(
                     _branch_created,

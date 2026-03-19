@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.8.0 — Workshop mode, build mode, and context compaction (Mar 2026)
+
+- **Workshop mode** (`/agent-workshop`): Two-stage multi-model design council.
+  Stage 1 runs an agentic design exploration; Stage 2 runs parallel
+  non-agentic critique from all council models. A human checkpoint sits between
+  the two stages so you can steer before critique begins.
+- **Build mode** (`/agent-build`): Two-stage build pipeline. Stage 1 resolves
+  the issue (full agentic loop); Stage 2 posts parallel council code reviews
+  directly on the resulting PR.
+- **Context window compaction**: When the context grows too large, the oldest
+  messages are summarized and replaced in place. Configurable via
+  `max_context_tokens`, `compaction_coverage`, and `compaction_factor`.
+
+**Breaking changes:** None.
+
 ## v0.7.0 — Reliability, observability, and context management (Mar 2026)
 
 - **Rolling status log**: Every N iterations the agent posts a brief status

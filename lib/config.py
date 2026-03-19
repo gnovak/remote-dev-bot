@@ -100,6 +100,9 @@ ALLOWED_ARGS = {
     "context_keep_tool_results": int,  # how many tool result pairs to keep (resolve)
     "design_context_keep_tool_results": int,  # how many tool result pairs to keep (design)
     "review_context_keep_tool_results": int,  # how many tool result pairs to keep (review)
+    "max_context_tokens": int,       # hard cap on context window (0 = model max)
+    "compaction_coverage": float,    # fraction of messages to compact (oldest end)
+    "compaction_factor": float,      # fraction of selected content to remove
 }
 
 
@@ -164,6 +167,11 @@ def parse_args(lines):
                 result[name] = int(value)
             except ValueError:
                 raise ValueError(f"Argument '{name}' must be an integer, got: {value}")
+        elif arg_type == float:
+            try:
+                result[name] = float(value)
+            except ValueError:
+                raise ValueError(f"Argument '{name}' must be a number, got: {value}")
         elif arg_type == list:
             # Split on whitespace for list values
             result[name] = value.split()
@@ -277,6 +285,11 @@ def parse_command(command_string, known_modes):
     # Normalize to lowercase for case-insensitive matching
     command_string = command_string.lower().strip()
 
+    # Split on the first hyphen only. Everything before is the verb/mode;
+    # everything after is the model alias. This means mode names MUST be
+    # single words (no hyphens) — a mode named "very-cool" would parse as
+    # verb="very", which would fail the known_modes check. Model aliases, by
+    # contrast, can have any number of hyphens (e.g. "gpt-4o-mini", "my-model").
     parts = command_string.split("-", 1)
     verb = parts[0]
 
@@ -371,15 +384,16 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         )
 
     model_id = models[alias]["id"]
+    model_extra_instructions = models[alias].get("extra_instructions", "")
 
     # Read agent settings (formerly openhands:)
     # BACKCOMPAT(v0→v1, 2026-03-05): accept openhands: as alias for agent:
     oh = config.get("agent", config.get("openhands", {}))
     # max_iter: mode_config wins over global agent config (per-mode default),
-    # and inline arg wins over both (applied below after action is resolved).
+    # and inline arg wins over both (applied below).
     max_iter = oh.get("max_iterations", 50)
     pr_type = oh.get("pr_type", "ready")
-    on_failure = oh.get("on_failure", "comment")
+    on_failure = oh.get("on_failure", "draft")
     # BACKCOMPAT(v0→v1, 2026-03-05): accept target_branch as alias for branch
     target_branch = oh.get("branch", oh.get("target_branch", "main"))
     assign_issue = oh.get("assign_issue", True)
@@ -410,13 +424,9 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
               else DEFAULT_TIMEOUT_MINUTES)
     )
 
-    # Mode settings
-    action = mode_config.get("action", "pr")
-
-    # For agentic loop modes (design, review), the mode config can specify its own
-    # max_iterations as a per-mode default, overriding the global agent.max_iterations.
+    # Per-mode max_iterations overrides the global agent.max_iterations default.
     # Inline args win over both (applied below).
-    if action in ("design", "review") and "max_iterations" in mode_config:
+    if "max_iterations" in mode_config:
         max_iter = mode_config["max_iterations"]
 
     # Apply command-line arg overrides
@@ -439,12 +449,26 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     design_context_keep_tool_results = args.get("design_context_keep_tool_results", oh.get("design_context_keep_tool_results", None))
     review_context_keep_tool_results = args.get("review_context_keep_tool_results", oh.get("review_context_keep_tool_results", None))
 
+    # Context window compaction parameters
+    max_context_tokens = args.get("max_context_tokens", oh.get("max_context_tokens", 0))
+    compaction_coverage = args.get("compaction_coverage", oh.get("compaction_coverage", 0.5))
+    compaction_factor = args.get("compaction_factor", oh.get("compaction_factor", 0.5))
+
+    # Validate compaction params
+    if not (0 < compaction_coverage <= 1):
+        raise ValueError(
+            f"agent.compaction_coverage must be between 0 and 1, got: {compaction_coverage}"
+        )
+    if not (0 < compaction_factor <= 1):
+        raise ValueError(
+            f"agent.compaction_factor must be between 0 and 1, got: {compaction_factor}"
+        )
+
     # Calculate the iteration warning threshold (iteration number at which to warn)
     wrapup_iteration = int(max_iter * wrapup_threshold) if wrapup_enabled else 0
 
     result = {
         "mode": mode,
-        "action": action,
         "model": model_id,
         "alias": alias,
         "max_iterations": max_iter,
@@ -471,9 +495,19 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     if review_context_keep_tool_results is not None:
         result["review_context_keep_tool_results"] = review_context_keep_tool_results
 
+    # Context window compaction
+    result["max_context_tokens"] = max_context_tokens
+    result["compaction_coverage"] = compaction_coverage
+    result["compaction_factor"] = compaction_factor
+
     # Include extra_instructions if the mode defines one (appended to canonical prompt)
     if "extra_instructions" in mode_config:
         result["extra_instructions"] = mode_config["extra_instructions"]
+
+    # Include model-level extra_instructions (persona / persistent preferences for this model).
+    # These are composed with mode-level extra_instructions by the caller.
+    if model_extra_instructions:
+        result["model_extra_instructions"] = model_extra_instructions
 
     # Include extra_files: all layers are additive (base + override + local + runtime args).
     # Using pre-merge configs here instead of mode_config (post-merge) so that user-provided
@@ -498,14 +532,45 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             print(f"  {key}: {value}")
         print()
 
-    # Include max_iterations for agentic loop modes (design and review).
+    # Include max_iterations for agentic loop modes (design, review, workshop).
     # Use max_iter (already resolved, including any inline arg override) rather than
     # mode_config["max_iterations"] so that e.g. `max_iterations = 20` in the comment
     # body is honoured for design and review modes, not just for resolve.
-    if action == "design":
+    if mode == "design":
         result["design_max_iterations"] = max_iter
-    if action == "review":
+    if mode == "review":
         result["review_max_iterations"] = max_iter
+    if mode == "workshop":
+        result["workshop_max_iterations"] = max_iter
+
+    if mode in ("workshop", "build"):
+        # Council models: explicit list from mode config, or all configured models.
+        # Used by workshop (design critique) and build (code review) modes.
+        council_config = mode_config.get("council", [])
+        council_models = []
+        if council_config:
+            # Explicit council list — use exactly what's specified
+            for council_alias in council_config:
+                if council_alias in models:
+                    entry = {
+                        "alias": council_alias,
+                        "id": models[council_alias]["id"],
+                    }
+                    if models[council_alias].get("extra_instructions"):
+                        entry["extra_instructions"] = models[council_alias]["extra_instructions"]
+                    council_models.append(entry)
+        else:
+            # Default: all configured models (design model included — self-review
+            # in a critic role is valuable)
+            for model_alias_key, model_cfg in models.items():
+                entry = {
+                    "alias": model_alias_key,
+                    "id": model_cfg["id"],
+                }
+                if model_cfg.get("extra_instructions"):
+                    entry["extra_instructions"] = model_cfg["extra_instructions"]
+                council_models.append(entry)
+        result["council_models"] = council_models
 
     return result
 
@@ -590,7 +655,6 @@ def main():
     if output_file:
         with open(output_file, "a") as f:
             f.write(f"mode={result['mode']}\n")
-            f.write(f"action={result['action']}\n")
             f.write(f"model={result['model']}\n")
             f.write(f"alias={result['alias']}\n")
             f.write(f"max_iterations={result['max_iterations']}\n")
@@ -602,12 +666,18 @@ def main():
             f.write(f"assign_pr={str(result['assign_pr']).lower()}\n")
             if "extra_instructions" in result:
                 f.write(f"extra_instructions={result['extra_instructions']}\n")
+            if "model_extra_instructions" in result:
+                f.write(f"model_extra_instructions={result['model_extra_instructions']}\n")
             if "extra_files" in result:
                 f.write(f"extra_files={json.dumps(result['extra_files'])}\n")
             if "design_max_iterations" in result:
                 f.write(f"design_max_iterations={result['design_max_iterations']}\n")
             if "review_max_iterations" in result:
                 f.write(f"review_max_iterations={result['review_max_iterations']}\n")
+            if "workshop_max_iterations" in result:
+                f.write(f"workshop_max_iterations={result['workshop_max_iterations']}\n")
+            if "council_models" in result:
+                f.write(f"council_models={json.dumps(result['council_models'])}\n")
 
             f.write(f"graceful_wrapup_enabled={str(result['graceful_wrapup_enabled']).lower()}\n")
             f.write(f"graceful_wrapup_iteration={result['graceful_wrapup_iteration']}\n")
@@ -621,11 +691,14 @@ def main():
                 f.write(f"design_context_keep_tool_results={result['design_context_keep_tool_results']}\n")
             if "review_context_keep_tool_results" in result:
                 f.write(f"review_context_keep_tool_results={result['review_context_keep_tool_results']}\n")
+            f.write(f"max_context_tokens={result['max_context_tokens']}\n")
+            f.write(f"compaction_coverage={result['compaction_coverage']}\n")
+            f.write(f"compaction_factor={result['compaction_factor']}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"
     print(f"Config: base=remote-dev-bot, override={override_label}")
-    print(f"Mode: {result['mode']} (action: {result['action']})")
+    print(f"Mode: {result['mode']}")
     print(f"Model alias: {result['alias']}")
     print(f"Model ID: {result['model']}")
     if comment_body:

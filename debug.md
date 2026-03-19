@@ -40,6 +40,53 @@ Configurable in `remote-dev-bot.yaml` under `agent:`, or as an inline arg.
 - **Lower values:** Smaller context, lower cost, but agent may "forget" earlier work
 - **Higher values / 0:** Full history; safe but expensive on long runs
 
+### Context Window Compaction
+
+When the conversation context grows beyond a configurable threshold, the agent
+automatically compacts the oldest portion by LLM-summarizing it. This preserves
+the gist of earlier work while reducing token count. Compaction is complementary
+to `context_keep_tool_results` — dropping runs first (cheaper), then compaction
+checks whether the remaining context still needs reduction.
+
+Compaction only applies to resolve mode (design and review modes have shorter
+runs and benefit less).
+
+#### `max_context_tokens`
+
+Hard cap on context window size (in estimated tokens, using character count / 4).
+Compaction triggers at 85% of this value, leaving headroom for the summary to
+fit. Set to `0` to disable compaction entirely.
+
+- **Default:** `0` (disabled)
+- **Suggested:** Set to a value below your model's native context limit.
+  Common limits: Claude Sonnet 200,000 · Gemini 2.5 Flash 1,000,000 · GPT-4o 128,000.
+  For a Claude Sonnet run, `150000` is a reasonable value.
+
+#### `compaction_coverage`
+
+Fraction of conversation messages (after the system prompt) to select for
+compaction, taken from the oldest end. Must be between 0 and 1.
+
+- **Default:** `0.5`
+- **Higher values:** More messages are summarized (more aggressive)
+
+#### `compaction_factor`
+
+Fraction of the selected content to remove. `0.5` means the compacted summary
+targets ~50% the token count of the selected messages. Must be between 0 and 1.
+
+- **Default:** `0.5`
+- **Higher values:** More aggressive compression (smaller summaries)
+
+**Example configuration:**
+
+```yaml
+agent:
+  max_context_tokens: 150000   # Claude Sonnet; adjust for your model
+  compaction_coverage: 0.5
+  compaction_factor: 0.5
+```
+
 ---
 
 ## Iteration and Behavior

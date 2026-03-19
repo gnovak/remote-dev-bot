@@ -113,6 +113,16 @@ def test_parse_command_multi_segment_model():
     assert parse_command("resolve-gpt-large", KNOWN_MODES) == ("resolve", "gpt-large")
 
 
+def test_parse_command_single_word_model():
+    """Model aliases with no hyphens (single word) should work."""
+    assert parse_command("resolve-bob", KNOWN_MODES) == ("resolve", "bob")
+
+
+def test_parse_command_many_segment_model():
+    """Model aliases with multiple hyphens should be preserved in full."""
+    assert parse_command("resolve-bob-very-large", KNOWN_MODES) == ("resolve", "bob-very-large")
+
+
 def test_parse_command_bare_agent_errors():
     """Empty command string (bare /agent) should raise ValueError."""
     with pytest.raises(ValueError, match="Bare /agent is not supported"):
@@ -422,20 +432,16 @@ def config_dir(tmp_path):
         },
         "modes": {
             "resolve": {
-                "action": "pr",
                 "default_model": "claude-small",
             },
             "design": {
-                "action": "comment",
                 "default_model": "claude-small",
                 "extra_instructions": "Focus on scalability.",
             },
             "review": {
-                "action": "review",
                 "default_model": "claude-small",
             },
             "design_agentic": {
-                "action": "design",
                 "default_model": "claude-small",
                 "max_iterations": 10,
                 "extra_instructions": "You are exploring this issue.",
@@ -455,7 +461,6 @@ def test_resolve_config_resolve_default_model(config_dir):
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
     assert result["mode"] == "resolve"
-    assert result["action"] == "pr"
     assert result["alias"] == "claude-small"
     assert result["model"] == "anthropic/claude-sonnet-4-5"
 
@@ -472,7 +477,6 @@ def test_resolve_config_design_mode(config_dir):
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "design")
     assert result["mode"] == "design"
-    assert result["action"] == "comment"
     assert result["alias"] == "claude-small"
     assert "extra_instructions" in result
     assert "scalability" in result["extra_instructions"]
@@ -490,7 +494,6 @@ def test_resolve_config_review_mode(config_dir):
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "review")
     assert result["mode"] == "review"
-    assert result["action"] == "review"
     assert result["alias"] == "claude-small"
     assert result["model"] == "anthropic/claude-sonnet-4-5"
 
@@ -506,15 +509,16 @@ def test_resolve_config_design_agentic_mode(config_dir):
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "design_agentic")
     assert result["mode"] == "design_agentic"
-    assert result["action"] == "design"
     assert result["alias"] == "claude-small"
     assert result["model"] == "anthropic/claude-sonnet-4-5"
     assert "extra_instructions" in result
     assert "exploring" in result["extra_instructions"]
     assert "extra_files" in result
     assert result["extra_files"] == ["README.md", "AGENTS.md"]
-    assert "design_max_iterations" in result
-    assert result["design_max_iterations"] == 10
+    # design_max_iterations is only set for modes literally named "design";
+    # design_agentic uses max_iterations directly.
+    assert "design_max_iterations" not in result
+    assert result["max_iterations"] == 10
 
 
 def test_resolve_config_design_agentic_with_model(config_dir):
@@ -574,8 +578,8 @@ def test_resolve_config_mode_default_model_differs():
                     "m2": {"id": "anthropic/test-2"},
                 },
                 "modes": {
-                    "resolve": {"action": "pr", "default_model": "m1"},
-                    "design": {"action": "comment", "default_model": "m2"},
+                    "resolve": {"default_model": "m1"},
+                    "design": {"default_model": "m2"},
                 },
             },
             f,
@@ -626,7 +630,7 @@ def test_resolve_config_agent_defaults():
             {
                 "default_model": "m",
                 "models": {"m": {"id": "anthropic/test"}},
-                "modes": {"resolve": {"action": "pr"}},
+                "modes": {"resolve": {}},
             },
             f,
         )
@@ -635,7 +639,7 @@ def test_resolve_config_agent_defaults():
         result = resolve_config(path, "nonexistent.yaml", "resolve")
         assert result["max_iterations"] == 50
         assert result["pr_type"] == "ready"
-        assert result["on_failure"] == "comment"
+        assert result["on_failure"] == "draft"
         assert result["target_branch"] == "main"
         assert result["assign_issue"] is True
         assert result["assign_pr"] is True
@@ -651,7 +655,7 @@ def test_resolve_config_openhands_key_backcompat():
             {
                 "default_model": "m",
                 "models": {"m": {"id": "anthropic/test"}},
-                "modes": {"resolve": {"action": "pr"}},
+                "modes": {"resolve": {}},
                 "openhands": {"max_iterations": 42, "pr_type": "draft"},
             },
             f,
@@ -666,10 +670,10 @@ def test_resolve_config_openhands_key_backcompat():
 
 
 def test_resolve_config_on_failure_default(config_dir):
-    """on_failure defaults to 'comment'."""
+    """on_failure defaults to 'draft'."""
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
-    assert result["on_failure"] == "comment"
+    assert result["on_failure"] == "draft"
 
 
 def test_resolve_config_on_failure_draft(config_dir):
@@ -1039,7 +1043,7 @@ class TestConfigMain:
         """Resolve mode writes every key that downstream steps depend on."""
         content = self._call_main("resolve", tmp_path)
         for key in (
-            "mode", "action", "model", "alias",
+            "mode", "model", "alias",
             "max_iterations", "pr_type", "on_failure",
             "assign_issue", "assign_pr", "target_branch", "timeout_minutes",
         ):
@@ -1048,10 +1052,9 @@ class TestConfigMain:
         assert "oh_version=" not in content
         assert "commit_trailer=" not in content
 
-    def test_resolve_mode_and_action_values(self, tmp_path):
+    def test_resolve_mode_value(self, tmp_path):
         content = self._call_main("resolve", tmp_path)
         assert "mode=resolve\n" in content
-        assert "action=pr\n" in content
 
     def test_resolve_assign_values(self, tmp_path):
         """Resolve mode writes assign_issue and assign_pr as lowercase booleans."""
@@ -1059,10 +1062,10 @@ class TestConfigMain:
         assert "assign_issue=true\n" in content
         assert "assign_pr=true\n" in content
 
-    def test_resolve_omits_extra_files(self, tmp_path):
-        """extra_files is design-only and must not appear in resolve output."""
+    def test_resolve_includes_extra_files(self, tmp_path):
+        """resolve now has extra_files (AGENTS.md, README.md) for orientation."""
         content = self._call_main("resolve", tmp_path)
-        assert "extra_files=" not in content
+        assert "extra_files=" in content
 
     def test_design_includes_extra_files_as_json(self, tmp_path):
         """Design mode writes extra_files as a non-empty JSON array."""
@@ -1074,15 +1077,13 @@ class TestConfigMain:
                 assert isinstance(files, list) and len(files) > 0
                 break
 
-    def test_design_mode_and_action_values(self, tmp_path):
+    def test_design_mode_value(self, tmp_path):
         content = self._call_main("design", tmp_path)
         assert "mode=design\n" in content
-        assert "action=design\n" in content
 
-    def test_review_mode_and_action_values(self, tmp_path):
+    def test_review_mode_value(self, tmp_path):
         content = self._call_main("review", tmp_path)
         assert "mode=review\n" in content
-        assert "action=review\n" in content
 
     def test_invalid_command_exits_one(self, tmp_path):
         with (
@@ -1136,7 +1137,6 @@ class TestConfigMain:
         """COMMENT_BODY with simple command works."""
         content = self._call_main_with_comment("/agent resolve", tmp_path)
         assert "mode=resolve\n" in content
-        assert "action=pr\n" in content
 
     def test_comment_body_with_model(self, tmp_path):
         """COMMENT_BODY with model alias works."""
@@ -1189,7 +1189,6 @@ class TestConfigMain:
             main()
         content = output_file.read_text()
         assert "mode=resolve\n" in content
-        assert "action=pr\n" in content
 
     def test_comment_body_with_existing_base_config(self, tmp_path):
         """COMMENT_BODY mode reads base config when it exists (covers main() lines 461-462)."""
@@ -1199,7 +1198,7 @@ class TestConfigMain:
         base_config = {
             "default_model": "m1",
             "models": {"m1": {"id": "anthropic/test-model"}},
-            "modes": {"resolve": {"action": "pr"}},
+            "modes": {"resolve": {}},
             "agent": {"max_iterations": 7, "pr_type": "ready"},
         }
         (base_dir / "remote-dev-bot.yaml").write_text(yaml.dump(base_config))
@@ -1228,3 +1227,355 @@ class TestConfigMain:
         # Config was read from our custom base; max_iterations should reflect it
         assert "max_iterations=7\n" in content
         assert "oh_version=" not in content
+
+
+# --- resolve_config: compaction parameters ---
+
+
+def test_resolve_config_compaction_defaults(config_dir):
+    """Compaction parameters default to 0 / 0.8 / 0.5 / 0.5."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["max_context_tokens"] == 0
+    assert result["compaction_coverage"] == 0.5
+    assert result["compaction_factor"] == 0.5
+
+
+def test_resolve_config_compaction_from_yaml(config_dir):
+    """Compaction parameters are read from agent: yaml section."""
+    tmp_path, base_path = config_dir
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["agent"]["max_context_tokens"] = 100000
+    config["agent"]["compaction_coverage"] = 0.6
+    config["agent"]["compaction_factor"] = 0.4
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["max_context_tokens"] == 100000
+    assert result["compaction_coverage"] == 0.6
+    assert result["compaction_factor"] == 0.4
+
+
+def test_resolve_config_compaction_via_override(config_dir):
+    """Compaction parameters can be overridden at the override layer."""
+    tmp_path, base_path = config_dir
+    override_path = str(tmp_path / "override.yaml")
+    with open(override_path, "w") as f:
+        yaml.dump({"agent": {"max_context_tokens": 50000, "compaction_coverage": 0.7}}, f)
+    result = resolve_config(base_path, override_path, "resolve")
+    assert result["max_context_tokens"] == 50000
+    assert result["compaction_coverage"] == 0.7
+
+
+def test_resolve_config_compaction_via_args(config_dir):
+    """Compaction parameters can be overridden via inline args."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(
+        base_path, "nonexistent.yaml", "resolve",
+        args={
+            "max_context_tokens": 200000,
+            "compaction_coverage": 0.3,
+            "compaction_factor": 0.7,
+        }
+    )
+    assert result["max_context_tokens"] == 200000
+    assert result["compaction_coverage"] == 0.3
+    assert result["compaction_factor"] == 0.7
+
+
+def test_resolve_config_compaction_coverage_invalid(config_dir):
+    """compaction_coverage outside (0, 1] raises ValueError."""
+    tmp_path, base_path = config_dir
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["agent"]["compaction_coverage"] = 0
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+    with pytest.raises(ValueError, match="compaction_coverage"):
+        resolve_config(base_path, "nonexistent.yaml", "resolve")
+
+
+def test_resolve_config_compaction_factor_invalid(config_dir):
+    """compaction_factor outside (0, 1] raises ValueError."""
+    tmp_path, base_path = config_dir
+    with open(base_path) as f:
+        config = yaml.safe_load(f)
+    config["agent"]["compaction_factor"] = -0.1
+    with open(base_path, "w") as f:
+        yaml.dump(config, f)
+    with pytest.raises(ValueError, match="compaction_factor"):
+        resolve_config(base_path, "nonexistent.yaml", "resolve")
+
+
+def test_parse_args_compaction_params():
+    """Compaction parameters are parsed correctly via parse_args."""
+    result = parse_args([
+        "max_context_tokens = 100000",
+        "compaction_coverage = 0.6",
+        "compaction_factor = 0.4",
+    ])
+    assert result == {
+        "max_context_tokens": 100000,
+        "compaction_coverage": 0.6,
+        "compaction_factor": 0.4,
+    }
+
+
+def test_parse_args_compaction_invalid_float():
+    """Non-float value for compaction param raises ValueError."""
+    with pytest.raises(ValueError, match="must be a number"):
+        parse_args(["compaction_coverage = not_a_number"])
+
+
+# --- Workshop mode config tests ---
+
+
+class TestWorkshopConfig:
+    """Tests for workshop mode configuration."""
+
+    @pytest.fixture
+    def workshop_config_dir(self, tmp_path):
+        """Create a temp dir with config that includes workshop mode."""
+        config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "claude-large": {"id": "anthropic/claude-opus-4-6"},
+                "gpt-small": {"id": "openai/gpt-4o-mini"},
+                "gemini-small": {"id": "gemini/gemini-2.5-flash"},
+            },
+            "modes": {
+                "resolve": {},
+                "workshop": {
+                    "default_model": "claude-large",
+                    "max_iterations": 15,
+                },
+            },
+            "agent": {
+                "max_iterations": 50,
+                "pr_type": "ready",
+            },
+        }
+        base_path = str(tmp_path / "base.yaml")
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        return tmp_path, base_path
+
+    def test_workshop_mode_basic(self, workshop_config_dir):
+        """Workshop mode is recognized with correct defaults."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        assert result["mode"] == "workshop"
+        assert result["alias"] == "claude-large"
+        assert result["model"] == "anthropic/claude-opus-4-6"
+
+    def test_workshop_mode_with_model(self, workshop_config_dir):
+        """Workshop mode accepts explicit model alias."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop-claude-small")
+        assert result["mode"] == "workshop"
+        assert result["alias"] == "claude-small"
+
+    def test_workshop_max_iterations(self, workshop_config_dir):
+        """Workshop mode uses its own max_iterations."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        assert result["workshop_max_iterations"] == 15
+
+    def test_workshop_max_iterations_override_via_args(self, workshop_config_dir):
+        """Inline args override workshop max_iterations."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "workshop",
+            args={"max_iterations": 25},
+        )
+        assert result["workshop_max_iterations"] == 25
+
+    def test_workshop_default_council_includes_design_model(self, workshop_config_dir):
+        """Default council (no explicit list) includes all models, including the design model."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        council = result["council_models"]
+        aliases = [m["alias"] for m in council]
+        # design model is claude-large (default_model for workshop mode)
+        # it should now be included — self-review in critic role is valuable
+        assert "claude-large" in aliases
+        assert "claude-small" in aliases
+        assert "gpt-small" in aliases
+        assert "gemini-small" in aliases
+
+    def test_workshop_default_council_with_explicit_model(self, workshop_config_dir):
+        """Default council includes all models even when user specifies a design model explicitly."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop-claude-small")
+        council = result["council_models"]
+        aliases = [m["alias"] for m in council]
+        # design model is now claude-small (explicitly specified) — still included
+        assert "claude-small" in aliases
+        assert "claude-large" in aliases
+
+    def test_workshop_explicit_council(self, workshop_config_dir):
+        """Explicit council list uses exactly those models."""
+        tmp_path, base_path = workshop_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["workshop"]["council"] = ["claude-small", "gpt-small"]
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        council = result["council_models"]
+        aliases = [m["alias"] for m in council]
+        assert aliases == ["claude-small", "gpt-small"]
+
+    def test_workshop_explicit_council_can_include_design_model(self, workshop_config_dir):
+        """Explicit council can include the design model (self-review)."""
+        tmp_path, base_path = workshop_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["workshop"]["council"] = ["claude-large", "gpt-small"]
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        council = result["council_models"]
+        aliases = [m["alias"] for m in council]
+        assert "claude-large" in aliases  # design model explicitly included
+
+    def test_workshop_council_models_have_id(self, workshop_config_dir):
+        """Each council model entry has both alias and id."""
+        tmp_path, base_path = workshop_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        for m in result["council_models"]:
+            assert "alias" in m
+            assert "id" in m
+            assert m["id"]  # not empty
+
+
+# --- model-level extra_instructions ---
+
+
+class TestModelExtraInstructions:
+    """Tests for model-level extra_instructions on individual model entries."""
+
+    @pytest.fixture
+    def config_with_model_extra(self, tmp_path):
+        """Config where one model has extra_instructions."""
+        config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {
+                    "id": "anthropic/claude-sonnet-4-5",
+                    "extra_instructions": "Always respond tersely.",
+                },
+                "gpt-small": {
+                    "id": "openai/gpt-5.1-codex-mini",
+                },
+                "gemini-small": {
+                    "id": "gemini/gemini-2.5-flash",
+                    "extra_instructions": "Use metric units.",
+                },
+            },
+            "modes": {
+                "resolve": {"default_model": "claude-small"},
+                "workshop": {
+                    "default_model": "claude-small",
+                    "council": ["claude-small", "gpt-small", "gemini-small"],
+                },
+            },
+            "agent": {"max_iterations": 50, "pr_type": "ready"},
+        }
+        base_path = str(tmp_path / "base.yaml")
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        return tmp_path, base_path
+
+    def test_model_extra_instructions_in_result(self, config_with_model_extra):
+        """model_extra_instructions is set when the resolved model has extra_instructions."""
+        tmp_path, base_path = config_with_model_extra
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+        assert "model_extra_instructions" in result
+        assert "tersely" in result["model_extra_instructions"]
+
+    def test_model_extra_instructions_absent_when_not_configured(self, config_with_model_extra):
+        """model_extra_instructions is absent when the resolved model has none."""
+        tmp_path, base_path = config_with_model_extra
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve-gpt-small")
+        assert "model_extra_instructions" not in result
+
+    def test_model_extra_instructions_different_model(self, config_with_model_extra):
+        """model_extra_instructions reflects the resolved model's value."""
+        tmp_path, base_path = config_with_model_extra
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve-gemini-small")
+        assert "model_extra_instructions" in result
+        assert "metric" in result["model_extra_instructions"]
+
+    def test_council_models_include_model_extra_instructions(self, config_with_model_extra):
+        """Council model entries include extra_instructions when configured."""
+        tmp_path, base_path = config_with_model_extra
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        council = {m["alias"]: m for m in result["council_models"]}
+        assert "extra_instructions" in council["claude-small"]
+        assert "tersely" in council["claude-small"]["extra_instructions"]
+        assert "extra_instructions" in council["gemini-small"]
+        assert "metric" in council["gemini-small"]["extra_instructions"]
+        # gpt-small has no model extra_instructions
+        assert "extra_instructions" not in council["gpt-small"]
+
+    def test_model_extra_instructions_written_to_github_output(self, tmp_path):
+        """model_extra_instructions is written to GITHUB_OUTPUT when present."""
+        # Write a custom base config with model extra_instructions
+        base_dir = tmp_path / ".remote-dev-bot"
+        base_dir.mkdir()
+        base_config = {
+            "default_model": "m1",
+            "models": {
+                "m1": {"id": "anthropic/test", "extra_instructions": "Be concise."},
+            },
+            "modes": {"resolve": {}},
+            "agent": {"max_iterations": 10, "pr_type": "ready"},
+        }
+        (base_dir / "remote-dev-bot.yaml").write_text(yaml.dump(base_config))
+
+        output_file = tmp_path / "github_output"
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            env = {k: v for k, v in os.environ.items() if k not in ("COMMENT_BODY",)}
+            env["GITHUB_OUTPUT"] = str(output_file)
+            env["COMMENT_BODY"] = "/agent resolve"
+            with patch("sys.argv", ["config.py"]), patch.dict(os.environ, env, clear=True):
+                main()
+        finally:
+            os.chdir(old_cwd)
+
+        content = output_file.read_text()
+        assert "model_extra_instructions=Be concise.\n" in content
+
+    def test_model_extra_instructions_absent_from_github_output_when_not_configured(self, tmp_path):
+        """model_extra_instructions is NOT written to GITHUB_OUTPUT when absent."""
+        base_dir = tmp_path / ".remote-dev-bot"
+        base_dir.mkdir()
+        base_config = {
+            "default_model": "m1",
+            "models": {"m1": {"id": "anthropic/test"}},
+            "modes": {"resolve": {}},
+            "agent": {"max_iterations": 10, "pr_type": "ready"},
+        }
+        (base_dir / "remote-dev-bot.yaml").write_text(yaml.dump(base_config))
+
+        output_file = tmp_path / "github_output"
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            env = {k: v for k, v in os.environ.items() if k not in ("COMMENT_BODY",)}
+            env["GITHUB_OUTPUT"] = str(output_file)
+            env["COMMENT_BODY"] = "/agent resolve"
+            with patch("sys.argv", ["config.py"]), patch.dict(os.environ, env, clear=True):
+                main()
+        finally:
+            os.chdir(old_cwd)
+
+        content = output_file.read_text()
+        assert "model_extra_instructions=" not in content
