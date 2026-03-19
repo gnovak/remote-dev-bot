@@ -1069,10 +1069,10 @@ class TestConfigMain:
         assert "assign_issue=true\n" in content
         assert "assign_pr=true\n" in content
 
-    def test_resolve_omits_extra_files(self, tmp_path):
-        """extra_files is design-only and must not appear in resolve output."""
+    def test_resolve_includes_extra_files(self, tmp_path):
+        """resolve now has extra_files (AGENTS.md, README.md) for orientation."""
         content = self._call_main("resolve", tmp_path)
-        assert "extra_files=" not in content
+        assert "extra_files=" in content
 
     def test_design_includes_extra_files_as_json(self, tmp_path):
         """Design mode writes extra_files as a non-empty JSON array."""
