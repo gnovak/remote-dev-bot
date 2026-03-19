@@ -96,7 +96,7 @@ pytest --doctest-modules lib/config.py
 ### Adding a new model provider (e.g., a new LLM vendor)
 
 1. Add the provider prefix to `KNOWN_PROVIDERS` in `lib/config.py` (e.g., `"newvendor/"`)
-2. Add an API key check in the "Determine API key" step of `.github/workflows/remote-dev-bot.yml` — there are four copies (resolve, design, review, workshop); update all of them
+2. Add an API key check in the "Determine API key" step of `.github/workflows/remote-dev-bot.yml` — there are five copies (resolve, design, review, workshop, build); update all of them
 3. Add model aliases under `models:` in `remote-dev-bot.yaml` with IDs using the new prefix
 4. Add the API key secret (`NEWVENDOR_API_KEY`) to the secrets passed through in `agent.yml` and `dogfood.yml`
 5. Update the runbook.md to mention the new provider as an option
