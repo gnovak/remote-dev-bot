@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.8.0 — Workshop mode, build mode, and council improvements (Mar 2026)
+## v0.8.0 — Workshop mode, build mode, and context compaction (Mar 2026)
 
 - **Workshop mode** (`/agent-workshop`): Two-stage multi-model design council.
   Stage 1 runs an agentic design exploration; Stage 2 runs parallel
@@ -9,32 +9,9 @@
 - **Build mode** (`/agent-build`): Two-stage build pipeline. Stage 1 resolves
   the issue (full agentic loop); Stage 2 posts parallel council code reviews
   directly on the resulting PR.
-- **Model-level `extra_instructions`**: Each model entry in config can now
-  carry its own `extra_instructions` (e.g., a persona or stylistic preference).
-  These are composed with any mode-level `extra_instructions` for both the main
-  agent and council reviewers.
 - **Context window compaction**: When the context grows too large, the oldest
   messages are summarized and replaced in place. Configurable via
   `max_context_tokens`, `compaction_coverage`, and `compaction_factor`.
-- **Cost tables embedded in comments**: The cost table is now embedded directly
-  inside each agent comment (design analysis, council review, etc.) rather than
-  posted as a separate follow-up comment. Falls back to a separate comment if
-  embedding fails.
-- **Status log: git changes**: Each status update now includes a `diff --stat`
-  against the merge-base so you can see what has actually changed at a glance.
-- **Wrapup improvements**: A live iteration-budget hint is injected as a user
-  message when the wrapup threshold is reached; a commit-frequently instruction
-  is also added to reduce lost work at the limit.
-- **Draft PR improvements**: `Fixes #N` is automatically added to draft PR
-  bodies for bidirectional GitHub linking; draft PRs now also receive cost
-  reports.
-- **Push safety**: Work is pushed after every commit; a push safety net was
-  added to `resolve.py` to ensure nothing is lost if a run is interrupted.
-- **`/agent-explore` removed**: Explore mode has been superseded by
-  `/agent-design` and is no longer available.
-- **Internal refactor**: The `action` output variable has been removed;
-  workflow jobs now route directly on `mode`. `remote-dev-bot.yaml` defaults
-  have been cleaned up.
 
 **Breaking changes:** None.
 
