@@ -15,9 +15,6 @@ default_model: claude-small
 # Modes define what the agent does. Each mode specifies optional defaults;
 # omit a key to inherit from the agent: section below.
 #
-# Note: action: defaults to the mode name, so only resolve needs it explicitly
-# (its action is "pr", not "resolve").
-#
 # extra_files lists differ by mode deliberately:
 #   - design/workshop/review: read static context files for analysis
 #     (contributing guidelines, agent conventions, etc.)
@@ -25,7 +22,6 @@ default_model: claude-small
 #     need light orientation files; extra context would add noise
 modes:
   resolve:
-    action: pr               # Run agent loop, open a PR
     default_model: claude-small
     max_iterations: 50       # Iteration limit for the agent loop
     extra_files:

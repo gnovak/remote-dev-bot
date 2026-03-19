@@ -383,7 +383,7 @@ def run_build_council(
     post(
         f"## 🏛️ Build Stage 2 — Council Code Review\n\n"
         f"Requesting code reviews from {len(council_models)} council member(s): "
-        f"{', '.join(f'`{m[\"alias\"]}`' for m in council_models)}...\n"
+        f"{', '.join('`' + m['alias'] + '`' for m in council_models)}...\n"
     )
 
     council_results = []
