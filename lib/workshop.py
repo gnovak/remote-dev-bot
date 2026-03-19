@@ -155,6 +155,7 @@ def run_council_review(
     issue_comments,
     design_analysis,
     api_keys=None,
+    system_prompt_prefix=None,
 ):
     """Run a single council review (non-agentic single LLM call).
 
@@ -170,6 +171,9 @@ def run_council_review(
         The Stage 1 design analysis to review.
     api_keys : dict or None
         Optional mapping of env var names to values to set before the call.
+    system_prompt_prefix : str or None
+        Optional role/persona prefix prepended to the system prompt. Use this
+        to give a council member a focused lens (e.g. security, performance).
 
     Returns
     -------
@@ -197,8 +201,13 @@ def run_council_review(
         model_alias=model_alias,
     )
 
+    # Build system prompt, optionally prepending a role/persona prefix
+    system_prompt = COUNCIL_REVIEW_SYSTEM_PROMPT
+    if system_prompt_prefix:
+        system_prompt = system_prompt_prefix.rstrip() + "\n\n" + system_prompt
+
     messages = [
-        {"role": "system", "content": COUNCIL_REVIEW_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content},
     ]
 
@@ -291,8 +300,15 @@ def run_council_code_review(
     pr_body,
     pr_diff,
     api_keys=None,
+    system_prompt_prefix=None,
 ):
     """Run a single council code review (non-agentic single LLM call).
+
+    Parameters
+    ----------
+    system_prompt_prefix : str or None
+        Optional role/persona prefix prepended to the system prompt. Use this
+        to give a council member a focused lens (e.g. security, performance).
 
     Returns dict with keys: review, model_alias, model_id,
     input_tokens, output_tokens, cost.
@@ -313,8 +329,13 @@ def run_council_code_review(
         model_alias=model_alias,
     )
 
+    # Build system prompt, optionally prepending a role/persona prefix
+    system_prompt = COUNCIL_CODE_REVIEW_SYSTEM_PROMPT
+    if system_prompt_prefix:
+        system_prompt = system_prompt_prefix.rstrip() + "\n\n" + system_prompt
+
     messages = [
-        {"role": "system", "content": COUNCIL_CODE_REVIEW_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content},
     ]
 
@@ -410,6 +431,7 @@ def run_build_council(
             pr_title=pr_title,
             pr_body=pr_body,
             pr_diff=pr_diff,
+            system_prompt_prefix=council_model.get("system_prompt_prefix"),
         )
         result["elapsed"] = time.time() - review_start
         return result
@@ -488,7 +510,7 @@ def resolve_council_models(models, design_alias, council_config=None):
     Parameters
     ----------
     models : dict
-        All configured models (alias -> {"id": ...}).
+        All configured models (alias -> {"id": ..., optionally "system_prompt_prefix": ...}).
     design_alias : str
         The alias of the design model.  Included in the default council so
         it can critique its own work in a critic role.
@@ -498,7 +520,7 @@ def resolve_council_models(models, design_alias, council_config=None):
 
     Returns
     -------
-    list of dict, each with "alias" and "id" keys.
+    list of dict, each with "alias", "id", and optionally "system_prompt_prefix" keys.
     """
     council_models = []
 
@@ -506,18 +528,26 @@ def resolve_council_models(models, design_alias, council_config=None):
         # Explicit council list — use exactly what's specified
         for alias in council_config:
             if alias in models:
-                council_models.append({
+                entry = {
                     "alias": alias,
                     "id": models[alias]["id"],
-                })
+                }
+                spp = models[alias].get("system_prompt_prefix")
+                if spp:
+                    entry["system_prompt_prefix"] = spp
+                council_models.append(entry)
     else:
         # Default: all configured models (design model included — self-review
         # in a critic role is valuable)
         for alias, cfg in models.items():
-            council_models.append({
+            entry = {
                 "alias": alias,
                 "id": cfg["id"],
-            })
+            }
+            spp = cfg.get("system_prompt_prefix")
+            if spp:
+                entry["system_prompt_prefix"] = spp
+            council_models.append(entry)
 
     return council_models
 
@@ -703,6 +733,7 @@ def run_workshop(
             issue_body=issue_body,
             issue_comments=issue_comments,
             design_analysis=design_analysis,
+            system_prompt_prefix=council_model.get("system_prompt_prefix"),
         )
         result["elapsed"] = time.time() - review_start
         return result

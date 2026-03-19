@@ -553,18 +553,26 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             # Explicit council list — use exactly what's specified
             for council_alias in council_config:
                 if council_alias in models:
-                    council_models.append({
+                    entry = {
                         "alias": council_alias,
                         "id": models[council_alias]["id"],
-                    })
+                    }
+                    spp = models[council_alias].get("system_prompt_prefix")
+                    if spp:
+                        entry["system_prompt_prefix"] = spp
+                    council_models.append(entry)
         else:
             # Default: all configured models (design model included — self-review
             # in a critic role is valuable)
             for model_alias_key, model_cfg in models.items():
-                council_models.append({
+                entry = {
                     "alias": model_alias_key,
                     "id": model_cfg["id"],
-                })
+                }
+                spp = model_cfg.get("system_prompt_prefix")
+                if spp:
+                    entry["system_prompt_prefix"] = spp
+                council_models.append(entry)
         result["council_models"] = council_models
 
     return result
