@@ -1,31 +1,49 @@
 # Remote Dev Bot Configuration
 # Usage: /agent-<mode>[-<model>]
-#   /agent-resolve              — resolve issue, open PR (default model)
-#   /agent-resolve-claude-large — resolve issue with specific model
-#   /agent-design               — design analysis, post comment
-#   /agent-design-claude-large  — design analysis with specific model
-#   /agent-review               — code review on a PR, post comment
-#   /agent-review-claude-large  — code review with specific model
-#   /agent-build               — implement issue as a team: open PR, then council reviews the code
-#   /agent-build-claude-large  — build with specific model
+#
+#   /agent-resolve   — implement issue, open PR
+#   /agent-design    — design analysis, post comment
+#   /agent-review    — code review on a PR, post comment
+#   /agent-workshop  — design analysis + multi-model council critique
+#   /agent-build     — implement issue + multi-model council code review
+#
+# To use a specific model, append it: /agent-resolve-claude-large
+# This works for any mode. See models: below for available aliases.
 
 default_model: claude-small
 
-# Modes define what the agent does. Each mode has an action and optional defaults.
+# Modes define what the agent does. Each mode specifies optional defaults;
+# omit a key to inherit from the agent: section below.
+#
+# Note: action: defaults to the mode name, so only resolve needs it explicitly
+# (its action is "pr", not "resolve").
+#
+# extra_files lists differ by mode deliberately:
+#   - design/workshop/review: read static context files for analysis
+#     (contributing guidelines, agent conventions, etc.)
+#   - resolve/build: explore the codebase dynamically via tools and only
+#     need light orientation files; extra context would add noise
 modes:
   resolve:
     action: pr               # Run agent loop, open a PR
-  design:
-    action: design            # Multi-round agentic loop with tool calling for design analysis
     default_model: claude-small
-    max_iterations: 10        # Iteration limit for the agentic loop
+    max_iterations: 50       # Iteration limit for the agent loop
+    extra_files:
+      - AGENTS.md
+      - README.md
+    # Optional: extra_instructions appended to the resolve prompt.
+    # extra_instructions: |
+    #   Always add type annotations to any Python functions you write.
+
+  design:
+    default_model: claude-small
+    max_iterations: 10       # Iteration limit for the agentic loop
     extra_files:
       - README.md
       - CONTRIBUTING.md
       - AGENTS.md
       - CLAUDE.md
       - .gemini/GEMINI.md
-      - how-it-works.md
     # Optional: extra_instructions appended to the canonical design prompt.
     # Use this to add project-specific guidance (e.g., preferred patterns,
     # areas to focus on, or terminology). Do not duplicate the base prompt.
@@ -33,23 +51,20 @@ modes:
     #   When analyzing issues, always consider the impact on our deploy pipeline.
 
   review:
-    action: review            # Lightweight agentic loop: review the PR diff, post as a PR comment (no code changes)
-    max_iterations: 10        # Iteration limit for the review loop
+    max_iterations: 10       # Iteration limit for the review loop
     extra_files:
       - AGENTS.md
       - README.md
 
   workshop:
-    action: workshop          # Multi-model design council with human checkpoints
     default_model: claude-small  # Model for design stage (Stage 1)
-    max_iterations: 15        # Iteration limit for the design loop
+    max_iterations: 15       # Iteration limit for the design loop
     extra_files:
       - README.md
       - CONTRIBUTING.md
       - AGENTS.md
       - CLAUDE.md
       - .gemini/GEMINI.md
-      - how-it-works.md
     # Council: models that review the design. Defaults to all configured models
     # (including the design model) if not specified. Override per-repo to
     # select a different set. The value of the council is diverse perspectives
@@ -59,11 +74,9 @@ modes:
       - gpt-small
       - gemini-small
 
-
   build:
-    action: build             # Run agent loop, open a PR, then council reviews the code
     default_model: claude-small
-    max_iterations: 50        # Iteration limit for the implementation loop
+    max_iterations: 50       # Iteration limit for the implementation loop
     extra_files:
       - AGENTS.md
       - README.md
@@ -99,10 +112,11 @@ models:
     id: gemini/gemini-2.5-pro
     description: "Google Gemini 2.5 Pro"
 
-# Agent settings (resolve mode)
+# Agent settings — apply to all modes unless overridden per-mode above.
 # Note: 'openhands:' is accepted as a backward-compatible alias for 'agent:'
 agent:
-  # Max agent iterations per run (controls cost ceiling)
+  # Max agent iterations per run (controls cost ceiling).
+  # Override per-invocation with: max_iterations = 25 (inline arg in comment body)
   max_iterations: 50
   # PR type: "draft" or "ready"
   pr_type: ready
@@ -124,8 +138,6 @@ agent:
   # first half + last half of this length to prevent context bloat.
   # Set to 0 to disable truncation.
   bash_output_limit: 8000
-  # Graceful wrap-up: inject instructions when approaching max iterations
-  # This helps the agent commit partial work before hitting the limit
   # Rolling status log: post a one-sentence status update every N iterations
   # as an issue comment. Set to 0 to disable (default — enable per-repo).
   status_log_interval: 0
@@ -133,13 +145,20 @@ agent:
   # are replaced with a placeholder to prevent O(N²) token growth on long runs.
   # Set to 0 to keep all tool results (not recommended for runs > ~20 iterations).
   context_keep_tool_results: 10
-  # Context window compaction: LLM-summarize oldest conversation messages
-  # when context grows too large. Set max_context_tokens to 0 to disable.
+  # Context window compaction: when the context grows too large, the oldest
+  # messages are summarized by the LLM and replaced with a compact summary.
+  # Set max_context_tokens to 0 to disable compaction entirely.
   # Compaction triggers at 85% of max_context_tokens (hardcoded).
   # Typical model limits: Claude Sonnet 200k, Gemini 2.5 Flash 1M, GPT-4o 128k.
   max_context_tokens: 0
+  # Fraction of conversation history (from the oldest end) to consider for
+  # compaction when triggered. 0.5 = compact the oldest 50% of messages.
   compaction_coverage: 0.5
+  # Fraction of the selected messages to actually summarize and replace.
+  # 0.5 = replace 50% of the selected range, keeping the rest verbatim.
   compaction_factor: 0.5
+  # Graceful wrap-up: inject instructions when approaching max iterations.
+  # This helps the agent commit partial work before hitting the limit.
   graceful_wrapup:
     # Enable/disable graceful wrap-up instructions
     enabled: true

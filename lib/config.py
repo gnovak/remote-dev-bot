@@ -423,8 +423,10 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
               else DEFAULT_TIMEOUT_MINUTES)
     )
 
-    # Mode settings
-    action = mode_config.get("action", "pr")
+    # Mode settings. Default action to the mode name so modes don't need to
+    # repeat themselves (e.g. action: design under modes: design:). The resolve
+    # mode still specifies action: pr explicitly since its action name differs.
+    action = mode_config.get("action", mode)
 
     # For agentic loop modes (design, review, workshop, build), the mode config can specify
     # its own max_iterations as a per-mode default, overriding the global

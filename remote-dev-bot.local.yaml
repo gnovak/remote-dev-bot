@@ -9,6 +9,16 @@
 # Users CAN create their own remote-dev-bot.local.yaml; it will be
 # applied as a third layer on top of their remote-dev-bot.yaml.
 
+modes:
+  design:
+    extra_files:
+      # how-it-works.md is specific to the rdb repo itself; not included in
+      # the base config distributed to users.
+      - how-it-works.md
+  workshop:
+    extra_files:
+      - how-it-works.md
+
 agent:
   # Show draft PRs for partial resolutions when devving rdb itself —
   # partial changes are worth reviewing during active development.
