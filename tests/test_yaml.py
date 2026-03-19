@@ -57,17 +57,6 @@ def test_default_model_exists_in_models(bot_config):
     )
 
 
-def test_modes_have_action(bot_config):
-    # action: defaults to the mode name in config.py, so it's optional in YAML.
-    # Only resolve needs it explicitly (action: pr). Validate any that are present.
-    valid_actions = ("pr", "comment", "review", "design", "workshop", "build", "resolve")
-    for name, mode in bot_config["modes"].items():
-        if "action" in mode:
-            assert mode["action"] in valid_actions, (
-                f"Mode '{name}' has unknown action '{mode['action']}'"
-            )
-
-
 def test_mode_default_models_exist(bot_config):
     models = bot_config["models"]
     for name, mode in bot_config["modes"].items():

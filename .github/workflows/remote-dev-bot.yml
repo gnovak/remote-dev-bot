@@ -51,7 +51,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       mode: ${{ steps.parse.outputs.mode }}
-      action: ${{ steps.parse.outputs.action }}
       model: ${{ steps.parse.outputs.model }}
       alias: ${{ steps.parse.outputs.alias }}
       max_iterations: ${{ steps.parse.outputs.max_iterations }}
@@ -137,10 +136,10 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
-  # --- Mode: resolve (action=pr) — run LiteLLM agent loop, open a PR ---
+  # --- Mode: resolve — run LiteLLM agent loop, open a PR ---
   resolve:
     needs: parse
-    if: needs.parse.outputs.action == 'pr'
+    if: needs.parse.outputs.mode == 'resolve'
     runs-on: ubuntu-latest
 
     steps:
@@ -559,10 +558,10 @@ jobs:
             --body-file /tmp/cost_comment_fallback.md
 
 
-  # --- Mode: build (action=build) — resolve Stage 1 + council code review Stage 2 ---
+  # --- Mode: build — resolve Stage 1 + council code review Stage 2 ---
   build:
     needs: parse
-    if: needs.parse.outputs.action == 'build'
+    if: needs.parse.outputs.mode == 'build'
     runs-on: ubuntu-latest
 
     steps:
@@ -1093,10 +1092,10 @@ jobs:
             --repo "${{ github.repository }}" \
             --body-file /tmp/cost_comment_fallback.md
 
-  # --- Mode: review (action=review) — lightweight agentic loop to review a PR ---
+  # --- Mode: review — lightweight agentic loop to review a PR ---
   review:
     needs: parse
-    if: needs.parse.outputs.action == 'review'
+    if: needs.parse.outputs.mode == 'review'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -1810,10 +1809,10 @@ jobs:
             --repo "${{ github.repository }}" \
             --body-file /tmp/cost_comment_fallback.md
 
-  # --- Mode: design (action=design) — multi-round agentic loop with tool calling ---
+  # --- Mode: design — multi-round agentic loop with tool calling ---
   design:
     needs: parse
-    if: needs.parse.outputs.action == 'design'
+    if: needs.parse.outputs.mode == 'design'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -2460,10 +2459,10 @@ jobs:
             --repo "${{ github.repository }}" \
             --body-file /tmp/cost_comment_fallback.md
 
-  # --- Mode: workshop (action=workshop) — multi-model design council with human checkpoints ---
+  # --- Mode: workshop — multi-model design council with human checkpoints ---
   workshop:
     needs: parse
-    if: needs.parse.outputs.action == 'workshop'
+    if: needs.parse.outputs.mode == 'workshop'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

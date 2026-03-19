@@ -389,7 +389,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     # BACKCOMPAT(v0→v1, 2026-03-05): accept openhands: as alias for agent:
     oh = config.get("agent", config.get("openhands", {}))
     # max_iter: mode_config wins over global agent config (per-mode default),
-    # and inline arg wins over both (applied below after action is resolved).
+    # and inline arg wins over both (applied below).
     max_iter = oh.get("max_iterations", 50)
     pr_type = oh.get("pr_type", "ready")
     on_failure = oh.get("on_failure", "draft")
@@ -423,15 +423,9 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
               else DEFAULT_TIMEOUT_MINUTES)
     )
 
-    # Mode settings. Default action to the mode name so modes don't need to
-    # repeat themselves (e.g. action: design under modes: design:). The resolve
-    # mode still specifies action: pr explicitly since its action name differs.
-    action = mode_config.get("action", mode)
-
-    # For agentic loop modes (design, review, workshop, build), the mode config can specify
-    # its own max_iterations as a per-mode default, overriding the global
-    # agent.max_iterations. Inline args win over both (applied below).
-    if action in ("design", "review", "workshop", "build") and "max_iterations" in mode_config:
+    # Per-mode max_iterations overrides the global agent.max_iterations default.
+    # Inline args win over both (applied below).
+    if "max_iterations" in mode_config:
         max_iter = mode_config["max_iterations"]
 
     # Apply command-line arg overrides
@@ -474,7 +468,6 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
 
     result = {
         "mode": mode,
-        "action": action,
         "model": model_id,
         "alias": alias,
         "max_iterations": max_iter,
@@ -537,14 +530,14 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     # Use max_iter (already resolved, including any inline arg override) rather than
     # mode_config["max_iterations"] so that e.g. `max_iterations = 20` in the comment
     # body is honoured for design and review modes, not just for resolve.
-    if action == "design":
+    if mode == "design":
         result["design_max_iterations"] = max_iter
-    if action == "review":
+    if mode == "review":
         result["review_max_iterations"] = max_iter
-    if action == "workshop":
+    if mode == "workshop":
         result["workshop_max_iterations"] = max_iter
 
-    if action in ("workshop", "build"):
+    if mode in ("workshop", "build"):
         # Council models: explicit list from mode config, or all configured models.
         # Used by workshop (design critique) and build (code review) modes.
         council_config = mode_config.get("council", [])
@@ -650,7 +643,6 @@ def main():
     if output_file:
         with open(output_file, "a") as f:
             f.write(f"mode={result['mode']}\n")
-            f.write(f"action={result['action']}\n")
             f.write(f"model={result['model']}\n")
             f.write(f"alias={result['alias']}\n")
             f.write(f"max_iterations={result['max_iterations']}\n")
@@ -692,7 +684,7 @@ def main():
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"
     print(f"Config: base=remote-dev-bot, override={override_label}")
-    print(f"Mode: {result['mode']} (action: {result['action']})")
+    print(f"Mode: {result['mode']}")
     print(f"Model alias: {result['alias']}")
     print(f"Model ID: {result['model']}")
     if comment_body:

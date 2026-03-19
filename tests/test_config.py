@@ -432,20 +432,16 @@ def config_dir(tmp_path):
         },
         "modes": {
             "resolve": {
-                "action": "pr",
                 "default_model": "claude-small",
             },
             "design": {
-                "action": "comment",
                 "default_model": "claude-small",
                 "extra_instructions": "Focus on scalability.",
             },
             "review": {
-                "action": "review",
                 "default_model": "claude-small",
             },
             "design_agentic": {
-                "action": "design",
                 "default_model": "claude-small",
                 "max_iterations": 10,
                 "extra_instructions": "You are exploring this issue.",
@@ -465,7 +461,6 @@ def test_resolve_config_resolve_default_model(config_dir):
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve")
     assert result["mode"] == "resolve"
-    assert result["action"] == "pr"
     assert result["alias"] == "claude-small"
     assert result["model"] == "anthropic/claude-sonnet-4-5"
 
@@ -482,7 +477,6 @@ def test_resolve_config_design_mode(config_dir):
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "design")
     assert result["mode"] == "design"
-    assert result["action"] == "comment"
     assert result["alias"] == "claude-small"
     assert "extra_instructions" in result
     assert "scalability" in result["extra_instructions"]
@@ -500,7 +494,6 @@ def test_resolve_config_review_mode(config_dir):
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "review")
     assert result["mode"] == "review"
-    assert result["action"] == "review"
     assert result["alias"] == "claude-small"
     assert result["model"] == "anthropic/claude-sonnet-4-5"
 
@@ -516,15 +509,16 @@ def test_resolve_config_design_agentic_mode(config_dir):
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "design_agentic")
     assert result["mode"] == "design_agentic"
-    assert result["action"] == "design"
     assert result["alias"] == "claude-small"
     assert result["model"] == "anthropic/claude-sonnet-4-5"
     assert "extra_instructions" in result
     assert "exploring" in result["extra_instructions"]
     assert "extra_files" in result
     assert result["extra_files"] == ["README.md", "AGENTS.md"]
-    assert "design_max_iterations" in result
-    assert result["design_max_iterations"] == 10
+    # design_max_iterations is only set for modes literally named "design";
+    # design_agentic uses max_iterations directly.
+    assert "design_max_iterations" not in result
+    assert result["max_iterations"] == 10
 
 
 def test_resolve_config_design_agentic_with_model(config_dir):
@@ -584,8 +578,8 @@ def test_resolve_config_mode_default_model_differs():
                     "m2": {"id": "anthropic/test-2"},
                 },
                 "modes": {
-                    "resolve": {"action": "pr", "default_model": "m1"},
-                    "design": {"action": "comment", "default_model": "m2"},
+                    "resolve": {"default_model": "m1"},
+                    "design": {"default_model": "m2"},
                 },
             },
             f,
@@ -636,7 +630,7 @@ def test_resolve_config_agent_defaults():
             {
                 "default_model": "m",
                 "models": {"m": {"id": "anthropic/test"}},
-                "modes": {"resolve": {"action": "pr"}},
+                "modes": {"resolve": {}},
             },
             f,
         )
@@ -661,7 +655,7 @@ def test_resolve_config_openhands_key_backcompat():
             {
                 "default_model": "m",
                 "models": {"m": {"id": "anthropic/test"}},
-                "modes": {"resolve": {"action": "pr"}},
+                "modes": {"resolve": {}},
                 "openhands": {"max_iterations": 42, "pr_type": "draft"},
             },
             f,
@@ -1049,7 +1043,7 @@ class TestConfigMain:
         """Resolve mode writes every key that downstream steps depend on."""
         content = self._call_main("resolve", tmp_path)
         for key in (
-            "mode", "action", "model", "alias",
+            "mode", "model", "alias",
             "max_iterations", "pr_type", "on_failure",
             "assign_issue", "assign_pr", "target_branch", "timeout_minutes",
         ):
@@ -1058,10 +1052,9 @@ class TestConfigMain:
         assert "oh_version=" not in content
         assert "commit_trailer=" not in content
 
-    def test_resolve_mode_and_action_values(self, tmp_path):
+    def test_resolve_mode_value(self, tmp_path):
         content = self._call_main("resolve", tmp_path)
         assert "mode=resolve\n" in content
-        assert "action=pr\n" in content
 
     def test_resolve_assign_values(self, tmp_path):
         """Resolve mode writes assign_issue and assign_pr as lowercase booleans."""
@@ -1084,15 +1077,13 @@ class TestConfigMain:
                 assert isinstance(files, list) and len(files) > 0
                 break
 
-    def test_design_mode_and_action_values(self, tmp_path):
+    def test_design_mode_value(self, tmp_path):
         content = self._call_main("design", tmp_path)
         assert "mode=design\n" in content
-        assert "action=design\n" in content
 
-    def test_review_mode_and_action_values(self, tmp_path):
+    def test_review_mode_value(self, tmp_path):
         content = self._call_main("review", tmp_path)
         assert "mode=review\n" in content
-        assert "action=review\n" in content
 
     def test_invalid_command_exits_one(self, tmp_path):
         with (
@@ -1146,7 +1137,6 @@ class TestConfigMain:
         """COMMENT_BODY with simple command works."""
         content = self._call_main_with_comment("/agent resolve", tmp_path)
         assert "mode=resolve\n" in content
-        assert "action=pr\n" in content
 
     def test_comment_body_with_model(self, tmp_path):
         """COMMENT_BODY with model alias works."""
@@ -1199,7 +1189,6 @@ class TestConfigMain:
             main()
         content = output_file.read_text()
         assert "mode=resolve\n" in content
-        assert "action=pr\n" in content
 
     def test_comment_body_with_existing_base_config(self, tmp_path):
         """COMMENT_BODY mode reads base config when it exists (covers main() lines 461-462)."""
@@ -1209,7 +1198,7 @@ class TestConfigMain:
         base_config = {
             "default_model": "m1",
             "models": {"m1": {"id": "anthropic/test-model"}},
-            "modes": {"resolve": {"action": "pr"}},
+            "modes": {"resolve": {}},
             "agent": {"max_iterations": 7, "pr_type": "ready"},
         }
         (base_dir / "remote-dev-bot.yaml").write_text(yaml.dump(base_config))
@@ -1357,9 +1346,8 @@ class TestWorkshopConfig:
                 "gemini-small": {"id": "gemini/gemini-2.5-flash"},
             },
             "modes": {
-                "resolve": {"action": "pr"},
+                "resolve": {},
                 "workshop": {
-                    "action": "workshop",
                     "default_model": "claude-large",
                     "max_iterations": 15,
                 },
@@ -1375,11 +1363,10 @@ class TestWorkshopConfig:
         return tmp_path, base_path
 
     def test_workshop_mode_basic(self, workshop_config_dir):
-        """Workshop mode is recognized with correct action and defaults."""
+        """Workshop mode is recognized with correct defaults."""
         tmp_path, base_path = workshop_config_dir
         result = resolve_config(base_path, "nonexistent.yaml", "workshop")
         assert result["mode"] == "workshop"
-        assert result["action"] == "workshop"
         assert result["alias"] == "claude-large"
         assert result["model"] == "anthropic/claude-opus-4-6"
 
