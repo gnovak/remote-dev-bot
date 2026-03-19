@@ -1451,3 +1451,131 @@ class TestWorkshopConfig:
             assert "alias" in m
             assert "id" in m
             assert m["id"]  # not empty
+
+
+# --- model-level extra_instructions ---
+
+
+class TestModelExtraInstructions:
+    """Tests for model-level extra_instructions on individual model entries."""
+
+    @pytest.fixture
+    def config_with_model_extra(self, tmp_path):
+        """Config where one model has extra_instructions."""
+        config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {
+                    "id": "anthropic/claude-sonnet-4-5",
+                    "extra_instructions": "Always respond tersely.",
+                },
+                "gpt-small": {
+                    "id": "openai/gpt-5.1-codex-mini",
+                },
+                "gemini-small": {
+                    "id": "gemini/gemini-2.5-flash",
+                    "extra_instructions": "Use metric units.",
+                },
+            },
+            "modes": {
+                "resolve": {"default_model": "claude-small"},
+                "workshop": {
+                    "default_model": "claude-small",
+                    "council": ["claude-small", "gpt-small", "gemini-small"],
+                },
+            },
+            "agent": {"max_iterations": 50, "pr_type": "ready"},
+        }
+        base_path = str(tmp_path / "base.yaml")
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        return tmp_path, base_path
+
+    def test_model_extra_instructions_in_result(self, config_with_model_extra):
+        """model_extra_instructions is set when the resolved model has extra_instructions."""
+        tmp_path, base_path = config_with_model_extra
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+        assert "model_extra_instructions" in result
+        assert "tersely" in result["model_extra_instructions"]
+
+    def test_model_extra_instructions_absent_when_not_configured(self, config_with_model_extra):
+        """model_extra_instructions is absent when the resolved model has none."""
+        tmp_path, base_path = config_with_model_extra
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve-gpt-small")
+        assert "model_extra_instructions" not in result
+
+    def test_model_extra_instructions_different_model(self, config_with_model_extra):
+        """model_extra_instructions reflects the resolved model's value."""
+        tmp_path, base_path = config_with_model_extra
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve-gemini-small")
+        assert "model_extra_instructions" in result
+        assert "metric" in result["model_extra_instructions"]
+
+    def test_council_models_include_model_extra_instructions(self, config_with_model_extra):
+        """Council model entries include extra_instructions when configured."""
+        tmp_path, base_path = config_with_model_extra
+        result = resolve_config(base_path, "nonexistent.yaml", "workshop")
+        council = {m["alias"]: m for m in result["council_models"]}
+        assert "extra_instructions" in council["claude-small"]
+        assert "tersely" in council["claude-small"]["extra_instructions"]
+        assert "extra_instructions" in council["gemini-small"]
+        assert "metric" in council["gemini-small"]["extra_instructions"]
+        # gpt-small has no model extra_instructions
+        assert "extra_instructions" not in council["gpt-small"]
+
+    def test_model_extra_instructions_written_to_github_output(self, tmp_path):
+        """model_extra_instructions is written to GITHUB_OUTPUT when present."""
+        # Write a custom base config with model extra_instructions
+        base_dir = tmp_path / ".remote-dev-bot"
+        base_dir.mkdir()
+        base_config = {
+            "default_model": "m1",
+            "models": {
+                "m1": {"id": "anthropic/test", "extra_instructions": "Be concise."},
+            },
+            "modes": {"resolve": {}},
+            "agent": {"max_iterations": 10, "pr_type": "ready"},
+        }
+        (base_dir / "remote-dev-bot.yaml").write_text(yaml.dump(base_config))
+
+        output_file = tmp_path / "github_output"
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            env = {k: v for k, v in os.environ.items() if k not in ("COMMENT_BODY",)}
+            env["GITHUB_OUTPUT"] = str(output_file)
+            env["COMMENT_BODY"] = "/agent resolve"
+            with patch("sys.argv", ["config.py"]), patch.dict(os.environ, env, clear=True):
+                main()
+        finally:
+            os.chdir(old_cwd)
+
+        content = output_file.read_text()
+        assert "model_extra_instructions=Be concise.\n" in content
+
+    def test_model_extra_instructions_absent_from_github_output_when_not_configured(self, tmp_path):
+        """model_extra_instructions is NOT written to GITHUB_OUTPUT when absent."""
+        base_dir = tmp_path / ".remote-dev-bot"
+        base_dir.mkdir()
+        base_config = {
+            "default_model": "m1",
+            "models": {"m1": {"id": "anthropic/test"}},
+            "modes": {"resolve": {}},
+            "agent": {"max_iterations": 10, "pr_type": "ready"},
+        }
+        (base_dir / "remote-dev-bot.yaml").write_text(yaml.dump(base_config))
+
+        output_file = tmp_path / "github_output"
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            env = {k: v for k, v in os.environ.items() if k not in ("COMMENT_BODY",)}
+            env["GITHUB_OUTPUT"] = str(output_file)
+            env["COMMENT_BODY"] = "/agent resolve"
+            with patch("sys.argv", ["config.py"]), patch.dict(os.environ, env, clear=True):
+                main()
+        finally:
+            os.chdir(old_cwd)
+
+        content = output_file.read_text()
+        assert "model_extra_instructions=" not in content

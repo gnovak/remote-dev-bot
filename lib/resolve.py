@@ -43,6 +43,8 @@ COMMIT_TRAILER = os.environ.get("COMMIT_TRAILER", "")
 ALIAS = os.environ.get("ALIAS", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
 EXTRA_FILES = json.loads(os.environ.get("EXTRA_FILES", "[]") or "[]")
+EXTRA_INSTRUCTIONS = os.environ.get("EXTRA_INSTRUCTIONS", "")
+MODEL_EXTRA_INSTRUCTIONS = os.environ.get("MODEL_EXTRA_INSTRUCTIONS", "")
 BASH_OUTPUT_LIMIT = int(os.environ.get("BASH_OUTPUT_LIMIT", "8000") or "8000")
 CONTEXT_KEEP_TOOL_RESULTS = int(os.environ.get("CONTEXT_KEEP_TOOL_RESULTS", "10") or "10")
 MAX_CONTEXT_TOKENS = int(os.environ.get("MAX_CONTEXT_TOKENS", "0") or "0")
@@ -558,6 +560,11 @@ is complete before committing — call `finish()` now.
     )
     if wrapup_hint:
         prompt += wrapup_hint
+
+    # Append mode-level and model-level extra_instructions (project/model-specific guidance)
+    extra_parts = [p for p in [EXTRA_INSTRUCTIONS, MODEL_EXTRA_INSTRUCTIONS] if p]
+    if extra_parts:
+        prompt += "\n\n" + "\n\n".join(extra_parts)
 
     return prompt
 

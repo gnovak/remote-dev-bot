@@ -154,6 +154,7 @@ def run_council_review(
     issue_body,
     issue_comments,
     design_analysis,
+    extra_instructions="",
     api_keys=None,
 ):
     """Run a single council review (non-agentic single LLM call).
@@ -168,6 +169,9 @@ def run_council_review(
         Issue context.
     design_analysis : str
         The Stage 1 design analysis to review.
+    extra_instructions : str
+        Additional instructions appended to the council reviewer system prompt.
+        Should be the combination of mode-level and model-level extra_instructions.
     api_keys : dict or None
         Optional mapping of env var names to values to set before the call.
 
@@ -197,8 +201,12 @@ def run_council_review(
         model_alias=model_alias,
     )
 
+    system_prompt = COUNCIL_REVIEW_SYSTEM_PROMPT
+    if extra_instructions:
+        system_prompt += "\n\n" + extra_instructions
+
     messages = [
-        {"role": "system", "content": COUNCIL_REVIEW_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content},
     ]
 
@@ -290,6 +298,7 @@ def run_council_code_review(
     pr_title,
     pr_body,
     pr_diff,
+    extra_instructions="",
     api_keys=None,
 ):
     """Run a single council code review (non-agentic single LLM call).
@@ -313,8 +322,12 @@ def run_council_code_review(
         model_alias=model_alias,
     )
 
+    system_prompt = COUNCIL_CODE_REVIEW_SYSTEM_PROMPT
+    if extra_instructions:
+        system_prompt += "\n\n" + extra_instructions
+
     messages = [
-        {"role": "system", "content": COUNCIL_CODE_REVIEW_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content},
     ]
 
@@ -349,12 +362,17 @@ def run_build_council(
     pr_title,
     pr_body,
     pr_diff,
+    extra_instructions="",
     post_comment_fn=None,
 ):
     """Run Stage 2 council code reviews for build mode.
 
     Runs each council model's review in parallel (non-agentic). Posts each
     review via post_comment_fn (defaults to print if None).
+
+    extra_instructions is the mode-level extra_instructions string; each council
+    member's model-level extra_instructions (from council_model["extra_instructions"])
+    is appended per-reviewer.
 
     Returns dict with council_results, total_input_tokens,
     total_output_tokens, total_cost.
@@ -401,6 +419,10 @@ def run_build_council(
                 )
                 return None
 
+        # Combine mode-level and model-level extra_instructions for this reviewer
+        model_extra = council_model.get("extra_instructions", "")
+        reviewer_extra = "\n\n".join(p for p in [extra_instructions, model_extra] if p)
+
         review_start = time.time()
         result = run_council_code_review(
             model_id=model_id,
@@ -410,6 +432,7 @@ def run_build_council(
             pr_title=pr_title,
             pr_body=pr_body,
             pr_diff=pr_diff,
+            extra_instructions=reviewer_extra,
         )
         result["elapsed"] = time.time() - review_start
         return result
@@ -535,6 +558,7 @@ def run_workshop(
     issue_body,
     issue_comments="",
     extra_instructions="",
+    council_extra_instructions="",
     extra_context="",
     max_iterations=10,
     wrapup_enabled=True,
@@ -551,10 +575,15 @@ def run_workshop(
     model_alias : str
         Human-readable alias for the design model.
     council_models : list of dict
-        Each dict has "alias" and "id" keys.
+        Each dict has "alias", "id", and optionally "extra_instructions" keys.
     issue_title, issue_body, issue_comments : str
         Issue context.
-    extra_instructions, extra_context : str
+    extra_instructions : str
+        Additional instructions for the Stage 1 design agent (mode + model combined).
+    council_extra_instructions : str
+        Mode-level extra_instructions for council reviewers (Stage 2). Each
+        reviewer's model-level extra_instructions is appended per-reviewer.
+    extra_context : str
         Additional context for the design loop.
     max_iterations : int
         Max iterations for Stage 1 design loop.
@@ -695,6 +724,10 @@ def run_workshop(
                 )
                 return None  # Signal skip
 
+        # Combine mode-level and model-level extra_instructions for this reviewer
+        model_extra = council_model.get("extra_instructions", "")
+        reviewer_extra = "\n\n".join(p for p in [council_extra_instructions, model_extra] if p)
+
         review_start = time.time()
         result = run_council_review(
             model_id=model_id,
@@ -703,6 +736,7 @@ def run_workshop(
             issue_body=issue_body,
             issue_comments=issue_comments,
             design_analysis=design_analysis,
+            extra_instructions=reviewer_extra,
         )
         result["elapsed"] = time.time() - review_start
         return result

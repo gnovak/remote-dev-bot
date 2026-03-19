@@ -384,6 +384,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         )
 
     model_id = models[alias]["id"]
+    model_extra_instructions = models[alias].get("extra_instructions", "")
 
     # Read agent settings (formerly openhands:)
     # BACKCOMPAT(v0→v1, 2026-03-05): accept openhands: as alias for agent:
@@ -503,6 +504,11 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     if "extra_instructions" in mode_config:
         result["extra_instructions"] = mode_config["extra_instructions"]
 
+    # Include model-level extra_instructions (persona / persistent preferences for this model).
+    # These are composed with mode-level extra_instructions by the caller.
+    if model_extra_instructions:
+        result["model_extra_instructions"] = model_extra_instructions
+
     # Include extra_files: all layers are additive (base + override + local + runtime args).
     # Using pre-merge configs here instead of mode_config (post-merge) so that user-provided
     # extra_files always extend the base list rather than silently replacing it.
@@ -546,18 +552,24 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             # Explicit council list — use exactly what's specified
             for council_alias in council_config:
                 if council_alias in models:
-                    council_models.append({
+                    entry = {
                         "alias": council_alias,
                         "id": models[council_alias]["id"],
-                    })
+                    }
+                    if models[council_alias].get("extra_instructions"):
+                        entry["extra_instructions"] = models[council_alias]["extra_instructions"]
+                    council_models.append(entry)
         else:
             # Default: all configured models (design model included — self-review
             # in a critic role is valuable)
             for model_alias_key, model_cfg in models.items():
-                council_models.append({
+                entry = {
                     "alias": model_alias_key,
                     "id": model_cfg["id"],
-                })
+                }
+                if model_cfg.get("extra_instructions"):
+                    entry["extra_instructions"] = model_cfg["extra_instructions"]
+                council_models.append(entry)
         result["council_models"] = council_models
 
     return result
@@ -654,6 +666,8 @@ def main():
             f.write(f"assign_pr={str(result['assign_pr']).lower()}\n")
             if "extra_instructions" in result:
                 f.write(f"extra_instructions={result['extra_instructions']}\n")
+            if "model_extra_instructions" in result:
+                f.write(f"model_extra_instructions={result['model_extra_instructions']}\n")
             if "extra_files" in result:
                 f.write(f"extra_files={json.dumps(result['extra_files'])}\n")
             if "design_max_iterations" in result:
