@@ -210,15 +210,31 @@ post_issue_comment() {
     return 1
 }
 
-# Extract cost from a Cost Summary comment body.
+# Extract cost from a cost comment or PR body.
 # Returns the cost as a decimal string (e.g., "1.23") or "0.00" if not found.
+# Handles both PR body format "| **Cost** | **$X.XX** |" and the old
+# issue comment format "| **Estimated cost** | **$X.XX** |".
 parse_cost_from_comment() {
     local body="$1"
     local result
-    # Look for "| **Estimated cost** | **$X.XX** |" pattern
+    # Look for "**$X.XX**" pattern (matches both PR body and issue comment formats)
     result=$(echo "$body" | grep -oE '\*\*\$[0-9]+\.[0-9]+\*\*' | head -1 | tr -d '*$')
     if [[ -n "$result" ]]; then
         echo "$result"
+    else
+        echo "0.00"
+    fi
+}
+
+# Fetch cost from a PR body (cost is embedded in the PR body by "Append cost to PR" step).
+# Returns cost as decimal string or "0.00" if not found.
+fetch_cost_from_pr_body() {
+    local pr_num="$1"
+    local repo="$2"
+    local pr_body
+    pr_body=$(gh api "repos/$repo/pulls/$pr_num" --jq '.body' 2>/dev/null || echo "")
+    if [[ -n "$pr_body" ]]; then
+        parse_cost_from_comment "$pr_body"
     else
         echo "0.00"
     fi
@@ -949,86 +965,121 @@ log "--- Cost Collection ---"
 total_cost=0.00
 cost_count=0
 
-# Collect costs from resolve/design test issues
+# Helper: accumulate a cost value, printing the result.
+# Usage: accumulate_cost <label> <cost_string>
+accumulate_cost() {
+    local label="$1"
+    local cost="$2"
+    if [[ -n "$cost" && "$cost" != "0.00" ]]; then
+        total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
+        ((cost_count++)) || true
+        printf "  %-25s \$%s\n" "$label" "$cost"
+    else
+        printf "  %-25s (no cost data)\n" "$label"
+    fi
+}
+
+# Helper: fetch cost for a single run.
+# Cost is now embedded in the PR body (primary) or an issue/PR comment (fallback).
+# 1. If a PR was created for the issue, read from PR body.
+# 2. Otherwise, look for a comment containing "💰 Cost" on the issue or PR.
+fetch_cost_for_issue() {
+    local issue_num="$1"
+    local repo="$2"
+    local cost="0.00"
+
+    # Check if a PR was created for this issue (branch rdb-fix-issue-$N)
+    local pr_num
+    pr_num=$(gh pr list --repo "$repo" \
+        --search "head:rdb-fix-issue-$issue_num" \
+        --json number --jq '.[0].number // empty' 2>/dev/null || echo "")
+
+    if [[ -n "$pr_num" ]]; then
+        # Cost is embedded in the PR body by "Append cost to PR" step
+        cost=$(fetch_cost_from_pr_body "$pr_num" "$repo")
+        if [[ "$cost" == "0.00" ]]; then
+            # Fallback: look for a cost comment on the PR conversation
+            local comment_body
+            comment_body=$(gh api "repos/$repo/issues/$pr_num/comments" \
+                --jq '[.[] | select(.body | contains("💰 Cost"))] | last | .body' \
+                2>/dev/null || echo "")
+            [[ -n "$comment_body" ]] && cost=$(parse_cost_from_comment "$comment_body")
+        fi
+    fi
+
+    if [[ "$cost" == "0.00" ]]; then
+        # No PR or no cost in PR — check issue comments (fallback for failed runs)
+        local comment_body
+        comment_body=$(gh api "repos/$repo/issues/$issue_num/comments" \
+            --jq '[.[] | select(.body | contains("💰 Cost"))] | last | .body' \
+            2>/dev/null || echo "")
+        [[ -n "$comment_body" ]] && cost=$(parse_cost_from_comment "$comment_body")
+    fi
+
+    echo "$cost"
+}
+
+# Collect costs from resolve/design/build test issues
 for pos in "${!issue_nums[@]}"; do
     idx="${active_indices[$pos]}"
     name="${all_names[$idx]}"
     issue_num="${issue_nums[$pos]}"
+    test_type="${all_types[$idx]}"
 
-    # Fetch cost comment from the issue
-    cost_comment=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
-        --jq '[.[] | select(.body | contains("Cost Summary"))] | last | .body' \
-        2>/dev/null || echo "")
-
-    if [[ -n "$cost_comment" ]]; then
-        cost=$(parse_cost_from_comment "$cost_comment")
-        if [[ -n "$cost" && "$cost" != "0.00" ]]; then
-            total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
-            ((cost_count++)) || true
-            printf "  %-25s \$%s\n" "$name" "$cost"
-        else
-            printf "  %-25s (no cost data)\n" "$name"
-        fi
+    if [[ "$test_type" == "build" ]]; then
+        # Build mode: cost goes into the PR body (same as resolve)
+        cost=$(fetch_cost_for_issue "$issue_num" "$TEST_REPO")
+    elif [[ "$test_type" == "workshop" ]]; then
+        # Workshop mode: cost is embedded in workshop stage comments on the issue
+        cost_body=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
+            --jq '[.[] | select(.body | contains("💰 Cost"))] | last | .body' \
+            2>/dev/null || echo "")
+        cost="0.00"
+        [[ -n "$cost_body" ]] && cost=$(parse_cost_from_comment "$cost_body")
     else
-        printf "  %-25s (no cost comment)\n" "$name"
+        # Resolve / design: PR body (if PR created) or issue comment fallback
+        cost=$(fetch_cost_for_issue "$issue_num" "$TEST_REPO")
     fi
+
+    accumulate_cost "$name" "$cost"
 done
 
-# Collect cost from rf-resolve (issue comments)
+# Collect cost from rf-resolve (resolve triggered from issue, creates a PR)
 if [[ -n "$RF_ISSUE_NUM" ]]; then
-    cost_comment=$(gh api "repos/$TEST_REPO/issues/$RF_ISSUE_NUM/comments" \
-        --jq '[.[] | select(.body | contains("Cost Summary"))] | last | .body' \
-        2>/dev/null || echo "")
-    if [[ -n "$cost_comment" ]]; then
-        cost=$(parse_cost_from_comment "$cost_comment")
-        if [[ -n "$cost" && "$cost" != "0.00" ]]; then
-            total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
-            ((cost_count++)) || true
-            printf "  %-25s \$%s\n" "rf-resolve" "$cost"
-        else
-            printf "  %-25s (no cost data)\n" "rf-resolve"
-        fi
-    else
-        printf "  %-25s (no cost comment)\n" "rf-resolve"
-    fi
+    cost=$(fetch_cost_for_issue "$RF_ISSUE_NUM" "$TEST_REPO")
+    accumulate_cost "rf-resolve" "$cost"
 fi
 
-# Collect costs from rf-review and rf-feedback (PR comments)
+# Collect costs from rf-review and rf-feedback (both are PR-trigger runs).
+# rf-review: cost is embedded in the review comment posted on the PR conversation.
+# rf-feedback: resolve re-run on the PR branch; cost is appended to the PR body
+#   (a second cost table is appended after the original rf-resolve cost table).
+# Strategy: sum cost from the last cost-containing PR comment (rf-review) plus
+#   the last cost value in the PR body (rf-feedback's appended table).
 if [[ -n "$RF_PR_NUM" ]]; then
-    cost_comment=$(gh api "repos/$TEST_REPO/issues/$RF_PR_NUM/comments" \
-        --jq '[.[] | select(.body | contains("Cost Summary"))] | last | .body' \
+    # rf-review cost: last PR comment that contains a cost table
+    rf_review_body=$(gh api "repos/$TEST_REPO/issues/$RF_PR_NUM/comments" \
+        --jq '[.[] | select(.body | contains("💰 Cost"))] | last | .body' \
         2>/dev/null || echo "")
-    if [[ -n "$cost_comment" ]]; then
-        cost=$(parse_cost_from_comment "$cost_comment")
-        if [[ -n "$cost" && "$cost" != "0.00" ]]; then
-            total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
-            ((cost_count++)) || true
-            printf "  %-25s \$%s\n" "rf-review+feedback" "$cost"
-        else
-            printf "  %-25s (no cost data)\n" "rf-review+feedback"
-        fi
-    else
-        printf "  %-25s (no cost comment)\n" "rf-review+feedback"
-    fi
+    rf_review_cost="0.00"
+    [[ -n "$rf_review_body" ]] && rf_review_cost=$(parse_cost_from_comment "$rf_review_body")
+
+    # rf-feedback cost: LAST **$X.XX** in PR body (rf-feedback appends after rf-resolve's table)
+    rf_pr_body=$(gh api "repos/$TEST_REPO/pulls/$RF_PR_NUM" --jq '.body' 2>/dev/null || echo "")
+    rf_feedback_cost_raw=$(echo "$rf_pr_body" | grep -oE '\*\*\$[0-9]+\.[0-9]+\*\*' | tail -1 | tr -d '*$')
+    rf_feedback_cost="${rf_feedback_cost_raw:-0.00}"
+
+    combined_rf_cost=$(python3 -c "print(f'{$rf_review_cost + $rf_feedback_cost:.2f}')")
+    accumulate_cost "rf-review+feedback" "$combined_rf_cost"
 fi
 
-# Collect cost from timeout test
-cost_comment=$(gh api "repos/$TEST_REPO/issues/$timeout_issue_num/comments" \
-    --jq '[.[] | select(.body | contains("Cost Summary"))] | last | .body' \
+# Collect cost from timeout test (intentionally fails — cost is in issue comment fallback)
+timeout_cost_body=$(gh api "repos/$TEST_REPO/issues/$timeout_issue_num/comments" \
+    --jq '[.[] | select(.body | contains("💰 Cost"))] | last | .body' \
     2>/dev/null || echo "")
-
-if [[ -n "$cost_comment" ]]; then
-    cost=$(parse_cost_from_comment "$cost_comment")
-    if [[ -n "$cost" && "$cost" != "0.00" ]]; then
-        total_cost=$(python3 -c "print(f'{$total_cost + $cost:.2f}')")
-        ((cost_count++)) || true
-        printf "  %-25s \$%s\n" "timeout" "$cost"
-    else
-        printf "  %-25s (no cost data)\n" "timeout"
-    fi
-else
-    printf "  %-25s (no cost comment)\n" "timeout"
-fi
+timeout_cost="0.00"
+[[ -n "$timeout_cost_body" ]] && timeout_cost=$(parse_cost_from_comment "$timeout_cost_body")
+accumulate_cost "timeout" "$timeout_cost"
 
 log ""
 log "  Total cost: \$$total_cost ($cost_count tests with cost data)"
