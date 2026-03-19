@@ -113,6 +113,16 @@ def test_parse_command_multi_segment_model():
     assert parse_command("resolve-gpt-large", KNOWN_MODES) == ("resolve", "gpt-large")
 
 
+def test_parse_command_single_word_model():
+    """Model aliases with no hyphens (single word) should work."""
+    assert parse_command("resolve-bob", KNOWN_MODES) == ("resolve", "bob")
+
+
+def test_parse_command_many_segment_model():
+    """Model aliases with multiple hyphens should be preserved in full."""
+    assert parse_command("resolve-bob-very-large", KNOWN_MODES) == ("resolve", "bob-very-large")
+
+
 def test_parse_command_bare_agent_errors():
     """Empty command string (bare /agent) should raise ValueError."""
     with pytest.raises(ValueError, match="Bare /agent is not supported"):

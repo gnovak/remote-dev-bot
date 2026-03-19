@@ -285,6 +285,11 @@ def parse_command(command_string, known_modes):
     # Normalize to lowercase for case-insensitive matching
     command_string = command_string.lower().strip()
 
+    # Split on the first hyphen only. Everything before is the verb/mode;
+    # everything after is the model alias. This means mode names MUST be
+    # single words (no hyphens) — a mode named "very-cool" would parse as
+    # verb="very", which would fail the known_modes check. Model aliases, by
+    # contrast, can have any number of hyphens (e.g. "gpt-4o-mini", "my-model").
     parts = command_string.split("-", 1)
     verb = parts[0]
 
