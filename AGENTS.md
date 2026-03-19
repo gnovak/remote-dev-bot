@@ -88,6 +88,11 @@ pytest --doctest-modules lib/config.py
 2. Add a job to `.github/workflows/remote-dev-bot.yml`
 3. `resolve_config()` in `lib/config.py` reads the mode's config from the YAML — no code change needed unless the mode has a novel output field
 
+> **Mode names must be single words (no hyphens).** The command parser splits
+> `/agent-<verb>-<model>` on the first hyphen to separate verb from model alias,
+> so a hyphenated mode name like `very-cool` would be misread as verb `very`.
+> Model aliases, which are user-defined, may contain any number of hyphens.
+
 ### Adding a new model provider (e.g., a new LLM vendor)
 
 1. Add the provider prefix to `KNOWN_PROVIDERS` in `lib/config.py` (e.g., `"newvendor/"`)
