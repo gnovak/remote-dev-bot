@@ -1128,7 +1128,7 @@ def main():
                     for line in diff_lines:
                         m = re.match(r"\s*(\S+)\s*\|\s*\d+\s*([+-]+)", line)
                         if m:
-                            fname = m.group(1)
+                            fname = os.path.basename(m.group(1))
                             plusminus = m.group(2)
                             ins = plusminus.count("+")
                             dels = plusminus.count("-")
