@@ -64,6 +64,54 @@ pytest tests/test_compile.py -v    # Run after any workflow or compile.py change
 pytest --doctest-modules lib/config.py
 ```
 
+## Codebase Index
+
+### Agent loop internals (`lib/resolve.py`)
+
+Each iteration: call `completion(model, messages, tools, max_tokens=16384)` → extract tool calls → execute each (bash / read_file / grep / finish) → append role=`tool` results → repeat. A single assistant message may have multiple tool_calls; `trim_tool_results()` drops the oldest **pairs** (assistant + all its tool results), not individual messages.
+
+**Wrapup:** At `WRAPUP_ITERATION` (default 80% of `MAX_ITERATIONS`), a user message is injected instructing the agent to commit and call `finish()` immediately. The loop still runs but the agent should stop exploring and wrap up.
+
+**Context compaction:** When estimated tokens exceed 85% of `MAX_CONTEXT_TOKENS`, `compact_messages()` in `lib/context.py` summarizes the oldest `compaction_coverage` fraction of messages via a one-shot LLM call and replaces them with the summary. Disabled by default (`max_context_tokens=0`).
+
+**`finish()` tool args:** `success` (bool), `explanation`, `pr_title`, `pr_body`, `conversation_summary`. After finish, resolve.py calls `gh pr create` and writes `/tmp/llm_usage.json` (cost/tokens) and `/tmp/resolve_status.json`.
+
+**Bash truncation:** If output > `BASH_OUTPUT_LIMIT` chars, the context gets first-half + last-half only (agent is told). Full output still appears in workflow logs.
+
+### Config → env var data flow
+
+`parse` job runs `lib/config.py`, writes outputs via `$GITHUB_OUTPUT`. Downstream jobs consume them via `${{ needs.parse.outputs.name }}` and export to Python via the job's `env:` block. Key mappings:
+
+| Config field | GITHUB_OUTPUT | resolve.py env var |
+|---|---|---|
+| model id | `model` | `LLM_MODEL` |
+| model alias | `alias` | `ALIAS` |
+| max_iterations | `max_iterations` | `MAX_ITERATIONS` |
+| extra_files | `extra_files` | `EXTRA_FILES` |
+| extra_instructions | `extra_instructions` | `EXTRA_INSTRUCTIONS` |
+| model extra_instructions | `model_extra_instructions` | `MODEL_EXTRA_INSTRUCTIONS` |
+| bash_output_limit | `bash_output_limit` | `BASH_OUTPUT_LIMIT` |
+| max_context_tokens | `max_context_tokens` | `MAX_CONTEXT_TOKENS` |
+| graceful_wrapup.threshold | `wrapup_iteration` | `WRAPUP_ITERATION` |
+| council (JSON) | `council_models` | `COUNCIL_MODELS` |
+
+### Workshop / build mechanics
+
+**Workshop Stage 1** = design mode agentic loop (`lib/design_loop.py`), reads the codebase, calls `submit_analysis()` tool, posts result as issue comment.
+
+**Workshop Stage 2** (`lib/workshop.py`): each council model gets a single non-agentic LLM call with the Stage 1 analysis as input. No codebase access. Cheap (~7K tokens each). Results posted as individual issue comments. Human checkpoint before Stage 2 — user can steer.
+
+**Build Stage 1** = resolve mode (opens a PR). **Build Stage 2** = council code review on the PR diff (same non-agentic pattern as workshop Stage 2).
+
+**`extra_instructions` composition:** mode-level `extra_instructions` + model-level `extra_instructions` are both appended to the system prompt. Council reviewers get the same composition but per their own model entry.
+
+### Key patterns
+
+- `normalize_config()` must run on each YAML layer before merging to handle legacy key renames.
+- Adding a per-invocation arg: `ALLOWED_ARGS` in `config.py` → `resolve_config()` → `main()` GITHUB_OUTPUT write → workflow `env:` block → `os.environ.get()` in `resolve.py`.
+- Adding a provider: update `KNOWN_PROVIDERS` in `config.py`; add API key check to **all five** "Determine API key" steps in the workflow (resolve, design, review, workshop, build).
+- Mode names must be single words — the command parser splits `/agent-<verb>-<model>` on the first hyphen.
+
 ## Common Tasks — Where to Look
 
 ### Adding a new per-invocation argument (e.g., `foo_bar = value` in a comment)
