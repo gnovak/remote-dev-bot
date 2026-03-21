@@ -238,6 +238,19 @@ jobs:
       - name: Install dependencies
         run: pip install PyYAML litellm
 
+      - name: Generate repo index
+        run: |
+          python3 .remote-dev-bot/lib/generate_index.py > /tmp/rdb-index.md
+          EXTRA_FILES_RAW='${{ needs.parse.outputs.extra_files }}'
+          RDB_EXTRA_FILES=$(python3 -c "
+import json, sys
+raw = sys.argv[1]
+files = json.loads(raw) if raw and raw not in ('null', '') else []
+files.append('/tmp/rdb-index.md')
+print(json.dumps(files))
+" "$EXTRA_FILES_RAW")
+          echo "RDB_EXTRA_FILES=$RDB_EXTRA_FILES" >> "$GITHUB_ENV"
+
       - name: Resolve issue
         env:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
@@ -261,7 +274,7 @@ jobs:
           WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
           STATUS_LOG_INTERVAL: ${{ needs.parse.outputs.status_log_interval }}
           ALIAS: ${{ needs.parse.outputs.alias }}
-          EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
+          EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
         run: |
@@ -662,6 +675,19 @@ jobs:
       - name: Install dependencies
         run: pip install PyYAML litellm
 
+      - name: Generate repo index
+        run: |
+          python3 .remote-dev-bot/lib/generate_index.py > /tmp/rdb-index.md
+          EXTRA_FILES_RAW='${{ needs.parse.outputs.extra_files }}'
+          RDB_EXTRA_FILES=$(python3 -c "
+import json, sys
+raw = sys.argv[1]
+files = json.loads(raw) if raw and raw not in ('null', '') else []
+files.append('/tmp/rdb-index.md')
+print(json.dumps(files))
+" "$EXTRA_FILES_RAW")
+          echo "RDB_EXTRA_FILES=$RDB_EXTRA_FILES" >> "$GITHUB_ENV"
+
       - name: Resolve issue
         env:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
@@ -685,7 +711,7 @@ jobs:
           WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
           STATUS_LOG_INTERVAL: ${{ needs.parse.outputs.status_log_interval }}
           ALIAS: ${{ needs.parse.outputs.alias }}
-          EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
+          EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
         run: |
@@ -1142,6 +1168,19 @@ jobs:
       - name: Install dependencies
         run: pip install PyYAML litellm
 
+      - name: Generate repo index
+        run: |
+          python3 .remote-dev-bot/lib/generate_index.py > /tmp/rdb-index.md
+          EXTRA_FILES_RAW='${{ needs.parse.outputs.extra_files }}'
+          RDB_EXTRA_FILES=$(python3 -c "
+import json, sys
+raw = sys.argv[1]
+files = json.loads(raw) if raw and raw not in ('null', '') else []
+files.append('/tmp/rdb-index.md')
+print(json.dumps(files))
+" "$EXTRA_FILES_RAW")
+          echo "RDB_EXTRA_FILES=$RDB_EXTRA_FILES" >> "$GITHUB_ENV"
+
       - name: Determine API key
         id: apikey
         env:
@@ -1286,7 +1325,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
+          EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           REVIEW_MAX_ITERATIONS: ${{ needs.parse.outputs.review_max_iterations }}
           REVIEW_CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.review_context_keep_tool_results }}
           REVIEW_WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
@@ -1855,6 +1894,19 @@ jobs:
       - name: Install dependencies
         run: pip install PyYAML litellm
 
+      - name: Generate repo index
+        run: |
+          python3 .remote-dev-bot/lib/generate_index.py > /tmp/rdb-index.md
+          EXTRA_FILES_RAW='${{ needs.parse.outputs.extra_files }}'
+          RDB_EXTRA_FILES=$(python3 -c "
+import json, sys
+raw = sys.argv[1]
+files = json.loads(raw) if raw and raw not in ('null', '') else []
+files.append('/tmp/rdb-index.md')
+print(json.dumps(files))
+" "$EXTRA_FILES_RAW")
+          echo "RDB_EXTRA_FILES=$RDB_EXTRA_FILES" >> "$GITHUB_ENV"
+
       - name: Determine API key
         id: apikey
         env:
@@ -1955,7 +2007,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
+          EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           DESIGN_MAX_ITERATIONS: ${{ needs.parse.outputs.design_max_iterations }}
           DESIGN_CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.design_context_keep_tool_results }}
           DESIGN_WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
@@ -2499,6 +2551,19 @@ jobs:
       - name: Install dependencies
         run: pip install PyYAML litellm
 
+      - name: Generate repo index
+        run: |
+          python3 .remote-dev-bot/lib/generate_index.py > /tmp/rdb-index.md
+          EXTRA_FILES_RAW='${{ needs.parse.outputs.extra_files }}'
+          RDB_EXTRA_FILES=$(python3 -c "
+import json, sys
+raw = sys.argv[1]
+files = json.loads(raw) if raw and raw not in ('null', '') else []
+files.append('/tmp/rdb-index.md')
+print(json.dumps(files))
+" "$EXTRA_FILES_RAW")
+          echo "RDB_EXTRA_FILES=$RDB_EXTRA_FILES" >> "$GITHUB_ENV"
+
       - name: Determine API key
         id: apikey
         env:
@@ -2606,7 +2671,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           MAX_ITERATIONS: ${{ needs.parse.outputs.workshop_max_iterations }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
-          EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
+          EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
         run: |
