@@ -242,13 +242,7 @@ jobs:
         run: |
           python3 .remote-dev-bot/lib/generate_index.py > /tmp/rdb-index.md
           EXTRA_FILES_RAW='${{ needs.parse.outputs.extra_files }}'
-          RDB_EXTRA_FILES=$(python3 -c "
-import json, sys
-raw = sys.argv[1]
-files = json.loads(raw) if raw and raw not in ('null', '') else []
-files.append('/tmp/rdb-index.md')
-print(json.dumps(files))
-" "$EXTRA_FILES_RAW")
+          RDB_EXTRA_FILES=$(python3 -c "import json,sys; raw=sys.argv[1]; files=json.loads(raw) if raw and raw not in ('null','') else []; files.append('/tmp/rdb-index.md'); print(json.dumps(files))" "$EXTRA_FILES_RAW")
           echo "RDB_EXTRA_FILES=$RDB_EXTRA_FILES" >> "$GITHUB_ENV"
 
       - name: Resolve issue
@@ -679,13 +673,7 @@ print(json.dumps(files))
         run: |
           python3 .remote-dev-bot/lib/generate_index.py > /tmp/rdb-index.md
           EXTRA_FILES_RAW='${{ needs.parse.outputs.extra_files }}'
-          RDB_EXTRA_FILES=$(python3 -c "
-import json, sys
-raw = sys.argv[1]
-files = json.loads(raw) if raw and raw not in ('null', '') else []
-files.append('/tmp/rdb-index.md')
-print(json.dumps(files))
-" "$EXTRA_FILES_RAW")
+          RDB_EXTRA_FILES=$(python3 -c "import json,sys; raw=sys.argv[1]; files=json.loads(raw) if raw and raw not in ('null','') else []; files.append('/tmp/rdb-index.md'); print(json.dumps(files))" "$EXTRA_FILES_RAW")
           echo "RDB_EXTRA_FILES=$RDB_EXTRA_FILES" >> "$GITHUB_ENV"
 
       - name: Resolve issue
@@ -1172,13 +1160,7 @@ print(json.dumps(files))
         run: |
           python3 .remote-dev-bot/lib/generate_index.py > /tmp/rdb-index.md
           EXTRA_FILES_RAW='${{ needs.parse.outputs.extra_files }}'
-          RDB_EXTRA_FILES=$(python3 -c "
-import json, sys
-raw = sys.argv[1]
-files = json.loads(raw) if raw and raw not in ('null', '') else []
-files.append('/tmp/rdb-index.md')
-print(json.dumps(files))
-" "$EXTRA_FILES_RAW")
+          RDB_EXTRA_FILES=$(python3 -c "import json,sys; raw=sys.argv[1]; files=json.loads(raw) if raw and raw not in ('null','') else []; files.append('/tmp/rdb-index.md'); print(json.dumps(files))" "$EXTRA_FILES_RAW")
           echo "RDB_EXTRA_FILES=$RDB_EXTRA_FILES" >> "$GITHUB_ENV"
 
       - name: Determine API key
@@ -1898,13 +1880,7 @@ print(json.dumps(files))
         run: |
           python3 .remote-dev-bot/lib/generate_index.py > /tmp/rdb-index.md
           EXTRA_FILES_RAW='${{ needs.parse.outputs.extra_files }}'
-          RDB_EXTRA_FILES=$(python3 -c "
-import json, sys
-raw = sys.argv[1]
-files = json.loads(raw) if raw and raw not in ('null', '') else []
-files.append('/tmp/rdb-index.md')
-print(json.dumps(files))
-" "$EXTRA_FILES_RAW")
+          RDB_EXTRA_FILES=$(python3 -c "import json,sys; raw=sys.argv[1]; files=json.loads(raw) if raw and raw not in ('null','') else []; files.append('/tmp/rdb-index.md'); print(json.dumps(files))" "$EXTRA_FILES_RAW")
           echo "RDB_EXTRA_FILES=$RDB_EXTRA_FILES" >> "$GITHUB_ENV"
 
       - name: Determine API key
@@ -2555,13 +2531,7 @@ print(json.dumps(files))
         run: |
           python3 .remote-dev-bot/lib/generate_index.py > /tmp/rdb-index.md
           EXTRA_FILES_RAW='${{ needs.parse.outputs.extra_files }}'
-          RDB_EXTRA_FILES=$(python3 -c "
-import json, sys
-raw = sys.argv[1]
-files = json.loads(raw) if raw and raw not in ('null', '') else []
-files.append('/tmp/rdb-index.md')
-print(json.dumps(files))
-" "$EXTRA_FILES_RAW")
+          RDB_EXTRA_FILES=$(python3 -c "import json,sys; raw=sys.argv[1]; files=json.loads(raw) if raw and raw not in ('null','') else []; files.append('/tmp/rdb-index.md'); print(json.dumps(files))" "$EXTRA_FILES_RAW")
           echo "RDB_EXTRA_FILES=$RDB_EXTRA_FILES" >> "$GITHUB_ENV"
 
       - name: Determine API key
