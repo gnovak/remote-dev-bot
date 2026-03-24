@@ -291,7 +291,7 @@ jobs:
           # Run agent loop under timeout. On expiry: SIGTERM first, then SIGKILL after 60s.
           # Subsequent cleanup steps run regardless via if:always().
           timeout --kill-after=60 "$TIMEOUT_SECONDS" \
-            python3 .remote-dev-bot/lib/resolve.py
+            python3 -u .remote-dev-bot/lib/resolve.py
           RESOLVE_EXIT_CODE=$?
 
           if [[ $RESOLVE_EXIT_CODE -eq 124 ]]; then
@@ -722,7 +722,7 @@ jobs:
           # Run agent loop under timeout. On expiry: SIGTERM first, then SIGKILL after 60s.
           # Subsequent cleanup steps run regardless via if:always().
           timeout --kill-after=60 "$TIMEOUT_SECONDS" \
-            python3 .remote-dev-bot/lib/resolve.py
+            python3 -u .remote-dev-bot/lib/resolve.py
           RESOLVE_EXIT_CODE=$?
 
           if [[ $RESOLVE_EXIT_CODE -eq 124 ]]; then
