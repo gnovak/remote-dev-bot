@@ -1113,7 +1113,7 @@ def main():
                     if merge_base_result.returncode == 0:
                         merge_base = merge_base_result.stdout.strip()
                         diff_result = subprocess.run(
-                            ["git", "diff", "--stat", merge_base],
+                            ["git", "diff", "--stat", merge_base, "HEAD"],
                             capture_output=True, text=True, timeout=10,
                         )
                     else:
