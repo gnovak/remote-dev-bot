@@ -1338,7 +1338,6 @@ jobs:
           # Graceful wrapup settings
           wrapup_enabled = os.environ.get("REVIEW_WRAPUP_ENABLED", "true").lower() == "true"
           wrapup_iteration = int(os.environ.get("REVIEW_WRAPUP_ITERATION", "0") or "0")
-          wrapup_injected = False
 
           # Context trimming
           context_keep_tool_results = int(os.environ.get("REVIEW_CONTEXT_KEEP_TOOL_RESULTS", "0") or "0")
@@ -1655,7 +1654,7 @@ jobs:
               # Graceful wrapup: at 80% of max_iterations, inject a user message
               # telling the agent to wrap up and call submit_review with what it has.
               if (wrapup_enabled and wrapup_iteration > 0
-                      and not wrapup_injected and iteration + 1 >= wrapup_iteration):
+                      and iteration + 1 >= wrapup_iteration):
                   remaining = max_iterations - (iteration + 1)
                   messages.append({
                       "role": "user",
@@ -1667,7 +1666,6 @@ jobs:
                           "Do not start new lines of inquiry."
                       ),
                   })
-                  wrapup_injected = True
 
           # Save usage data for the cost comment step
           with open("/tmp/llm_usage.json", "w") as f:
@@ -2015,7 +2013,6 @@ jobs:
           # Graceful wrapup settings
           wrapup_enabled = os.environ.get("DESIGN_WRAPUP_ENABLED", "true").lower() == "true"
           wrapup_iteration = int(os.environ.get("DESIGN_WRAPUP_ITERATION", "0") or "0")
-          wrapup_injected = False
 
           # Context trimming
           context_keep_tool_results = int(os.environ.get("DESIGN_CONTEXT_KEEP_TOOL_RESULTS", "0") or "0")
@@ -2294,7 +2291,7 @@ jobs:
               # Graceful wrapup: at 80% of max_iterations, inject a user message
               # telling the agent to wrap up and call submit_analysis with what it has.
               if (wrapup_enabled and wrapup_iteration > 0
-                      and not wrapup_injected and iteration + 1 >= wrapup_iteration):
+                      and iteration + 1 >= wrapup_iteration):
                   remaining = max_iterations - (iteration + 1)
                   messages.append({
                       "role": "user",
@@ -2306,7 +2303,6 @@ jobs:
                           "Do not start new lines of inquiry."
                       ),
                   })
-                  wrapup_injected = True
 
           # Save usage data for the cost comment step
           with open("/tmp/llm_usage.json", "w") as f:
