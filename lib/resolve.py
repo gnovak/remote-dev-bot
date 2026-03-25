@@ -1103,23 +1103,29 @@ def main():
             if STATUS_LOG_INTERVAL > 0 and (iteration + 1) % STATUS_LOG_INTERVAL == 0:
                 try:
                     # Get git diff --stat for ground-truth file changes.
-                    # Diff against the merge-base with the target branch so we
-                    # capture ALL changes on the branch (committed + uncommitted)
-                    # rather than only uncommitted working-tree changes.
+                    # Diff merge-base against the feature branch ref (not HEAD or
+                    # working tree) so the result is stable regardless of what the
+                    # agent has checked out or left uncommitted.  This means:
+                    #   - Shows only committed changes on the feature branch (honest)
+                    #   - Never flips to "(none)" because the agent temporarily
+                    #     checked out another branch or reset the working tree
+                    # A separate dirty-state check appends "[+dirty]" when the
+                    # working tree / index has uncommitted changes.
+                    branch_ref = _branch_created or "HEAD"
                     merge_base_result = subprocess.run(
-                        ["git", "merge-base", "HEAD", f"origin/{TARGET_BRANCH}"],
+                        ["git", "merge-base", branch_ref, f"origin/{TARGET_BRANCH}"],
                         capture_output=True, text=True, timeout=10,
                     )
                     if merge_base_result.returncode == 0:
                         merge_base = merge_base_result.stdout.strip()
                         diff_result = subprocess.run(
-                            ["git", "diff", "--stat", merge_base, "HEAD"],
+                            ["git", "diff", "--stat", merge_base, branch_ref],
                             capture_output=True, text=True, timeout=10,
                         )
                     else:
                         # Fallback: no origin or no common ancestor
                         diff_result = subprocess.run(
-                            ["git", "diff", "--stat", "HEAD"],
+                            ["git", "diff", "--stat", branch_ref],
                             capture_output=True, text=True, timeout=10,
                         )
                     diff_lines = diff_result.stdout.strip().splitlines()
@@ -1133,7 +1139,15 @@ def main():
                             ins = plusminus.count("+")
                             dels = plusminus.count("-")
                             file_changes.append(f"{fname} +{ins}/-{dels}")
+                    # Detect dirty working tree (uncommitted staged or unstaged changes)
+                    dirty_result = subprocess.run(
+                        ["git", "status", "--short"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    dirty = bool(dirty_result.stdout.strip())
                     changes_str = "  ".join(file_changes) if file_changes else "(none)"
+                    if dirty:
+                        changes_str += "  [+dirty]"
 
                     # Strip tool-call messages — the status check call omits
                     # tools=TOOLS, so Anthropic rejects history containing
