@@ -401,7 +401,7 @@ def _identify_relevant_files(extract_text, task_context, model):
 
 # --- Main entry point ---
 
-def maybe_distill(repo_context, issue_context, model):
+def maybe_distill(repo_context, issue_context, model, root="."):
     """Run context distillation pre-step.
 
     Returns (context_text, input_tokens, output_tokens, cost).
@@ -410,7 +410,7 @@ def maybe_distill(repo_context, issue_context, model):
     fallback = (repo_context, 0, 0, 0.0)
 
     try:
-        files = gather_repo_files()
+        files = gather_repo_files(root=root)
         if not files:
             print("  [Distill] No files gathered — skipping distillation")
             return fallback
