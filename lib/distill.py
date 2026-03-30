@@ -393,7 +393,7 @@ def _identify_relevant_files(extract_text, task_context, model):
     paths = []
     for line in text.strip().split("\n"):
         line = line.strip().strip("`").strip("- ")
-        if line and not line.startswith("#") and "/" in line or "." in line:
+        if line and not line.startswith("#") and ("/" in line or "." in line):
             paths.append(line)
 
     return paths, input_tokens, output_tokens, cost

@@ -106,7 +106,7 @@ class TestTruncateContent:
         assert truncated is True
         assert "A" * 200 in result
         assert "C" * 200 in result
-        assert "[..." in result
+        assert "... [" in result
         assert "chars omitted" in result
 
     def test_truncation_preserves_boundaries(self):
@@ -412,21 +412,31 @@ class TestMaybeDistill:
             for i in range(300)
         ]
         
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Relevant: mod_1.py, mod_2.py"
-        mock_response.usage = MagicMock()
-        mock_response.usage.prompt_tokens = 200
-        mock_response.usage.completion_tokens = 100
-        mock_response._hidden_params = {"response_cost": 0.02}
+        # First call: _identify_relevant_files — returns file paths (one per line)
+        identify_response = MagicMock()
+        identify_response.choices = [MagicMock()]
+        identify_response.choices[0].message.content = "mod_1.py\nmod_2.py"
+        identify_response.usage = MagicMock()
+        identify_response.usage.prompt_tokens = 200
+        identify_response.usage.completion_tokens = 50
+        identify_response._hidden_params = {"response_cost": 0.01}
+        
+        # Second call: distill — returns the distilled context
+        distill_response = MagicMock()
+        distill_response.choices = [MagicMock()]
+        distill_response.choices[0].message.content = "Distilled: mod_1.py and mod_2.py are relevant"
+        distill_response.usage = MagicMock()
+        distill_response.usage.prompt_tokens = 150
+        distill_response.usage.completion_tokens = 100
+        distill_response._hidden_params = {"response_cost": 0.02}
         
         with patch("lib.distill.gather_repo_files", return_value=medium_files), \
-             patch("lib.distill.completion", return_value=mock_response):
+             patch("lib.distill.completion", side_effect=[identify_response, distill_response]):
             result = maybe_distill("## Repo", "Fix a bug", "anthropic/claude-sonnet-4-5", root=str(tmp_path))
         
-        assert result[0] == "Relevant: mod_1.py, mod_2.py"
-        assert result[1] == 200
-        assert result[2] == 100
+        assert result[0] == "Distilled: mod_1.py and mod_2.py are relevant"
+        assert result[1] == 350   # 200 + 150
+        assert result[2] == 150   # 50 + 100
 
     def test_returns_tuple(self, tmp_path):
         """maybe_distill returns (context, input_tokens, output_tokens, cost)."""
