@@ -52,6 +52,7 @@ COMPACTION_COVERAGE = float(os.environ.get("COMPACTION_COVERAGE", "0.5") or "0.5
 COMPACTION_FACTOR = float(os.environ.get("COMPACTION_FACTOR", "0.5") or "0.5")
 # Hardcoded: fire at 85% of max to leave headroom for the summary to land
 _COMPACTION_THRESHOLD = 0.85
+DISTILL_ENABLED = os.environ.get("DISTILL_ENABLED", "false").lower() == "true"
 
 GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY", "")
@@ -520,7 +521,7 @@ description.
 """
 
 
-def build_system_prompt(repo_context, issue_context_str):
+def build_system_prompt(repo_context, issue_context_str, distillation_ran=False):
     """Build the system prompt for the resolve agent."""
     wrapup_hint = ""
     if WRAPUP_ENABLED and WRAPUP_ITERATION > 0:
@@ -560,6 +561,22 @@ is complete before committing — call `finish()` now.
     )
     if wrapup_hint:
         prompt += wrapup_hint
+
+    if distillation_ran:
+        prompt += """
+
+## Pre-Distilled Context
+
+A context distillation step has pre-selected the most relevant files for this task. \
+The '## Distilled Context' section in Repository Context contains:
+- Full content of files you'll likely need to modify
+- Key function signatures and interfaces you'll need to work with
+- Exploration boundaries — what you do NOT need to read
+
+**Prioritize the distilled context.** Start from what's provided rather than \
+exploring the codebase from scratch. Only read additional files if the distilled \
+context is missing something you specifically need.
+"""
 
     # Append mode-level and model-level extra_instructions (project/model-specific guidance)
     extra_parts = [p for p in [EXTRA_INSTRUCTIONS, MODEL_EXTRA_INSTRUCTIONS] if p]
@@ -881,7 +898,32 @@ def main():
             f"## Discussion:\n\n{comments}\n"
         )
 
-    system_prompt = build_system_prompt(repo_context, issue_context)
+    # Context distillation pre-step
+    distillation_ran = False
+    distill_input_tokens = 0
+    distill_output_tokens = 0
+    distill_cost = 0.0
+    if DISTILL_ENABLED:
+        try:
+            from lib.distill import maybe_distill
+            print("Running context distillation pre-step...")
+            distilled, distill_input_tokens, distill_output_tokens, distill_cost = maybe_distill(
+                repo_context, issue_context, LLM_MODEL
+            )
+            if distilled != repo_context:
+                agent_context = f"## Distilled Context\n\n{distilled}"
+                distillation_ran = True
+                print(f"Distillation complete: {distill_input_tokens} input tokens, {distill_output_tokens} output tokens, ${distill_cost:.4f}")
+            else:
+                agent_context = repo_context
+                print("Distillation skipped or returned original context")
+        except Exception as e:
+            print(f"Distillation failed: {e} — proceeding with full repo context")
+            agent_context = repo_context
+    else:
+        agent_context = repo_context
+
+    system_prompt = build_system_prompt(agent_context, issue_context, distillation_ran=distillation_ran)
 
     # Initialize conversation
     trigger_type = "PR" if ISSUE_TYPE == "pr" else "issue"
@@ -895,9 +937,9 @@ def main():
         },
     ]
 
-    total_input_tokens = 0
-    total_output_tokens = 0
-    total_cost = 0.0
+    total_input_tokens = distill_input_tokens
+    total_output_tokens = distill_output_tokens
+    total_cost = distill_cost
     finish_args = None
     last_iteration = 0
     no_tool_call_count = 0
