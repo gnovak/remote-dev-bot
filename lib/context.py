@@ -234,3 +234,49 @@ def compact_messages(messages, compaction_coverage, compaction_factor, llm_call_
     }
 
     return new_messages, stats
+
+
+def completion_with_retries(completion_fn, *args, **kwargs):
+    """Call a litellm completion function with retry logic for transient errors.
+
+    Retries on ServiceUnavailableError and InternalServerError (e.g., Anthropic
+    "overloaded" errors) with exponential backoff. These errors are typically
+    transient and resolve within seconds to minutes.
+
+    Args:
+        completion_fn: The litellm completion callable to wrap.
+        *args, **kwargs: Passed directly to completion_fn.
+
+    Returns:
+        The completion response on success.
+
+    Raises:
+        The last exception if all retries are exhausted.
+        Any non-retryable exception immediately.
+    """
+    import time
+    import litellm
+
+    RETRYABLE_ERRORS = (
+        litellm.exceptions.ServiceUnavailableError,
+        litellm.exceptions.InternalServerError,
+    )
+    MAX_RETRIES = 5
+    BASE_DELAY_SECS = 10
+    MAX_DELAY_SECS = 120
+
+    last_exc = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            return completion_fn(*args, **kwargs)
+        except RETRYABLE_ERRORS as exc:
+            last_exc = exc
+            if attempt >= MAX_RETRIES:
+                print(f"  [Retry] Transient error — exhausted {MAX_RETRIES} retries: {exc}")
+                raise
+            delay = min(BASE_DELAY_SECS * (2 ** attempt), MAX_DELAY_SECS)
+            print(
+                f"  [Retry] Transient error (attempt {attempt + 1}/{MAX_RETRIES}), "
+                f"retrying in {delay}s: {exc}"
+            )
+            time.sleep(delay)

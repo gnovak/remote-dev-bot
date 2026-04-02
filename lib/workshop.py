@@ -186,6 +186,7 @@ def run_council_review(
         - cost: float
     """
     from litellm import completion as litellm_completion
+    from context import completion_with_retries
 
     # Set API keys if provided
     if api_keys:
@@ -210,7 +211,8 @@ def run_council_review(
         {"role": "user", "content": user_content},
     ]
 
-    response = litellm_completion(
+    response = completion_with_retries(
+        litellm_completion,
         model=model_id,
         messages=messages,
         max_tokens=8192,
@@ -307,6 +309,7 @@ def run_council_code_review(
     input_tokens, output_tokens, cost.
     """
     from litellm import completion as litellm_completion
+    from context import completion_with_retries
 
     if api_keys:
         for key, value in api_keys.items():
@@ -331,7 +334,8 @@ def run_council_code_review(
         {"role": "user", "content": user_content},
     ]
 
-    response = litellm_completion(
+    response = completion_with_retries(
+        litellm_completion,
         model=model_id,
         messages=messages,
         max_tokens=8192,

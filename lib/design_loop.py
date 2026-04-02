@@ -257,11 +257,11 @@ def run_design_loop(
 
     # Import context trimming helper
     try:
-        from context import trim_tool_results
+        from context import trim_tool_results, completion_with_retries
     except ImportError:
         # Fallback: might be running from a different directory
         sys.path.insert(0, os.path.dirname(__file__))
-        from context import trim_tool_results
+        from context import trim_tool_results, completion_with_retries
 
     if system_prompt is None:
         system_prompt = DEFAULT_SYSTEM_PROMPT
@@ -292,7 +292,8 @@ def run_design_loop(
     for iteration in range(max_iterations):
         print(f"=== Iteration {iteration + 1}/{max_iterations} ===")
 
-        response = litellm_completion(
+        response = completion_with_retries(
+            litellm_completion,
             model=model,
             messages=messages,
             tools=TOOLS,
