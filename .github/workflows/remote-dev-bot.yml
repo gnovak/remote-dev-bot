@@ -287,6 +287,9 @@ jobs:
           TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
           echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
           echo $(date +%s) > /tmp/start_time
+          # Capture HEAD before the agent runs so post-run diff steps use the
+          # correct base regardless of branch name or remote structure.
+          git rev-parse HEAD > /tmp/agent_start_sha
 
           # Run agent loop under timeout. On expiry: SIGTERM first, then SIGKILL after 60s.
           # Subsequent cleanup steps run regardless via if:always().
@@ -517,9 +520,13 @@ jobs:
           elapsed = int(time.time()) - _st
           output_text = open("/tmp/spr_output.log").read() if os.path.exists("/tmp/spr_output.log") else ""
           import subprocess as _sp, re as _re
-          _dp = _sp.run('git diff $(git merge-base HEAD origin/main) HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
+          # Use the SHA captured before the agent started so diff is always
+          # "what the agent changed", not "everything since origin/main".
+          _base = open('/tmp/agent_start_sha').read().strip() if os.path.exists('/tmp/agent_start_sha') else None
+          _base_ref = _base or '$(git merge-base HEAD origin/main)'
+          _dp = _sp.run(f'git diff {_base_ref} HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
           diff_text = _dp.stdout or ''
-          _ss = _sp.run('git diff --shortstat $(git merge-base HEAD origin/main) HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
+          _ss = _sp.run(f'git diff --shortstat {_base_ref} HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
           shortstat = _ss.stdout.strip()
           loc_changed = 0
           _m = _re.search(r"(\d+) insertion", shortstat)
@@ -775,6 +782,9 @@ jobs:
           TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
           echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
           echo $(date +%s) > /tmp/start_time
+          # Capture HEAD before the agent runs so post-run diff steps use the
+          # correct base regardless of branch name or remote structure.
+          git rev-parse HEAD > /tmp/agent_start_sha
 
           # Run agent loop under timeout. On expiry: SIGTERM first, then SIGKILL after 60s.
           # Subsequent cleanup steps run regardless via if:always().
@@ -1121,9 +1131,13 @@ jobs:
           elapsed = int(time.time()) - _st
           output_text = open("/tmp/spr_output.log").read() if os.path.exists("/tmp/spr_output.log") else ""
           import subprocess as _sp, re as _re
-          _dp = _sp.run('git diff $(git merge-base HEAD origin/main) HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
+          # Use the SHA captured before the agent started so diff is always
+          # "what the agent changed", not "everything since origin/main".
+          _base = open('/tmp/agent_start_sha').read().strip() if os.path.exists('/tmp/agent_start_sha') else None
+          _base_ref = _base or '$(git merge-base HEAD origin/main)'
+          _dp = _sp.run(f'git diff {_base_ref} HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
           diff_text = _dp.stdout or ''
-          _ss = _sp.run('git diff --shortstat $(git merge-base HEAD origin/main) HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
+          _ss = _sp.run(f'git diff --shortstat {_base_ref} HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
           shortstat = _ss.stdout.strip()
           loc_changed = 0
           _m = _re.search(r"(\d+) insertion", shortstat)
