@@ -26,7 +26,7 @@ from litellm import completion
 # resolve.py runs from a target repo's working directory.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from lib.context import compact_messages, estimate_tokens
+from lib.context import compact_messages, completion_with_retries, estimate_tokens
 
 # --- Environment ---
 
@@ -976,7 +976,8 @@ def main():
                 })
 
             try:
-                response = completion(
+                response = completion_with_retries(
+                    completion,
                     model=LLM_MODEL,
                     messages=messages,
                     tools=TOOLS,
@@ -1110,7 +1111,8 @@ def main():
 
                     def _compaction_llm_call(prompt_messages, max_tokens):
                         """Side-channel LLM call for summarization."""
-                        resp = completion(
+                        resp = completion_with_retries(
+                            completion,
                             model=LLM_MODEL,
                             messages=prompt_messages,
                             max_tokens=max_tokens,
