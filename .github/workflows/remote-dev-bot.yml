@@ -33,6 +33,8 @@ on:
     secrets:
       ANTHROPIC_API_KEY:
         required: false
+      ANTHROPIC_AUTH_TOKEN:
+        required: false
       OPENAI_API_KEY:
         required: false
       GEMINI_API_KEY:
@@ -207,13 +209,19 @@ jobs:
           }
 
           if [[ "$MODEL" == anthropic/* ]]; then
+            AUTH_TOKEN="${{ secrets.ANTHROPIC_AUTH_TOKEN }}"
             API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
-            if [[ -z "$API_KEY" ]]; then
+            # OAuth token takes precedence over API key.
+            if [[ -n "$AUTH_TOKEN" ]]; then
+              echo "key=$AUTH_TOKEN" >> "$GITHUB_OUTPUT"
+              echo "anthropic_auth_via=oauth" >> "$GITHUB_OUTPUT"
+            elif [[ -n "$API_KEY" ]]; then
+              echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+            else
               post_no_api_key_comment "ANTHROPIC_API_KEY"
-              echo "::error::No ANTHROPIC_API_KEY secret configured for model: $MODEL"
+              echo "::error::No ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN secret configured for model: $MODEL"
               exit 1
             fi
-            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           elif [[ "$MODEL" == openai/* ]]; then
             API_KEY="${{ secrets.OPENAI_API_KEY }}"
             if [[ -z "$API_KEY" ]]; then
@@ -250,6 +258,7 @@ jobs:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
           LLM_MODEL: ${{ needs.parse.outputs.model }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
@@ -695,13 +704,19 @@ jobs:
           }
 
           if [[ "$MODEL" == anthropic/* ]]; then
+            AUTH_TOKEN="${{ secrets.ANTHROPIC_AUTH_TOKEN }}"
             API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
-            if [[ -z "$API_KEY" ]]; then
+            # OAuth token takes precedence over API key.
+            if [[ -n "$AUTH_TOKEN" ]]; then
+              echo "key=$AUTH_TOKEN" >> "$GITHUB_OUTPUT"
+              echo "anthropic_auth_via=oauth" >> "$GITHUB_OUTPUT"
+            elif [[ -n "$API_KEY" ]]; then
+              echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+            else
               post_no_api_key_comment "ANTHROPIC_API_KEY"
-              echo "::error::No ANTHROPIC_API_KEY secret configured for model: $MODEL"
+              echo "::error::No ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN secret configured for model: $MODEL"
               exit 1
             fi
-            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           elif [[ "$MODEL" == openai/* ]]; then
             API_KEY="${{ secrets.OPENAI_API_KEY }}"
             if [[ -z "$API_KEY" ]]; then
@@ -738,6 +753,7 @@ jobs:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
           LLM_MODEL: ${{ needs.parse.outputs.model }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
@@ -903,6 +919,7 @@ jobs:
       - name: Run council code review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
@@ -1312,13 +1329,19 @@ jobs:
           }
 
           if [[ "$MODEL" == anthropic/* ]]; then
+            AUTH_TOKEN="${{ secrets.ANTHROPIC_AUTH_TOKEN }}"
             API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
-            if [[ -z "$API_KEY" ]]; then
+            # OAuth token takes precedence over API key.
+            if [[ -n "$AUTH_TOKEN" ]]; then
+              echo "key=$AUTH_TOKEN" >> "$GITHUB_OUTPUT"
+              echo "anthropic_auth_via=oauth" >> "$GITHUB_OUTPUT"
+            elif [[ -n "$API_KEY" ]]; then
+              echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+            else
               post_no_api_key_comment "ANTHROPIC_API_KEY"
-              echo "::error::No ANTHROPIC_API_KEY secret configured for model: $MODEL"
+              echo "::error::No ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN secret configured for model: $MODEL"
               exit 1
             fi
-            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           elif [[ "$MODEL" == openai/* ]]; then
             API_KEY="${{ secrets.OPENAI_API_KEY }}"
             if [[ -z "$API_KEY" ]]; then
@@ -1419,6 +1442,7 @@ jobs:
         env:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
@@ -2030,13 +2054,19 @@ jobs:
           }
 
           if [[ "$MODEL" == anthropic/* ]]; then
+            AUTH_TOKEN="${{ secrets.ANTHROPIC_AUTH_TOKEN }}"
             API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
-            if [[ -z "$API_KEY" ]]; then
+            # OAuth token takes precedence over API key.
+            if [[ -n "$AUTH_TOKEN" ]]; then
+              echo "key=$AUTH_TOKEN" >> "$GITHUB_OUTPUT"
+              echo "anthropic_auth_via=oauth" >> "$GITHUB_OUTPUT"
+            elif [[ -n "$API_KEY" ]]; then
+              echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+            else
               post_no_api_key_comment "ANTHROPIC_API_KEY"
-              echo "::error::No ANTHROPIC_API_KEY secret configured for model: $MODEL"
+              echo "::error::No ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN secret configured for model: $MODEL"
               exit 1
             fi
-            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           elif [[ "$MODEL" == openai/* ]]; then
             API_KEY="${{ secrets.OPENAI_API_KEY }}"
             if [[ -z "$API_KEY" ]]; then
@@ -2093,6 +2123,7 @@ jobs:
         env:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
@@ -2679,13 +2710,19 @@ jobs:
           }
 
           if [[ "$MODEL" == anthropic/* ]]; then
+            AUTH_TOKEN="${{ secrets.ANTHROPIC_AUTH_TOKEN }}"
             API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
-            if [[ -z "$API_KEY" ]]; then
+            # OAuth token takes precedence over API key.
+            if [[ -n "$AUTH_TOKEN" ]]; then
+              echo "key=$AUTH_TOKEN" >> "$GITHUB_OUTPUT"
+              echo "anthropic_auth_via=oauth" >> "$GITHUB_OUTPUT"
+            elif [[ -n "$API_KEY" ]]; then
+              echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+            else
               post_no_api_key_comment "ANTHROPIC_API_KEY"
-              echo "::error::No ANTHROPIC_API_KEY secret configured for model: $MODEL"
+              echo "::error::No ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN secret configured for model: $MODEL"
               exit 1
             fi
-            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
           elif [[ "$MODEL" == openai/* ]]; then
             API_KEY="${{ secrets.OPENAI_API_KEY }}"
             if [[ -z "$API_KEY" ]]; then
@@ -2743,6 +2780,7 @@ jobs:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
           LLM_MODEL: ${{ needs.parse.outputs.model }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}

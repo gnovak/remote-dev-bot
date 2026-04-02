@@ -20,11 +20,32 @@ import sys
 import time
 
 import litellm
-from litellm import completion
+from litellm import completion as _litellm_completion
 
 # Ensure the rdb root is on sys.path so `lib.context` is importable when
 # resolve.py runs from a target repo's working directory.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+_ANTHROPIC_AUTH_TOKEN = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
+
+def completion(*args, **kwargs):
+    """Wrapper around litellm.completion that supports Anthropic OAuth tokens.
+
+    When ANTHROPIC_AUTH_TOKEN is set (a Claude Pro/Max subscription OAuth token),
+    injects an Authorization: Bearer header so the Anthropic API authenticates via
+    OAuth rather than the X-Api-Key mechanism used for regular API keys.
+    ANTHROPIC_AUTH_TOKEN takes precedence over ANTHROPIC_API_KEY.
+    """
+    if _ANTHROPIC_AUTH_TOKEN:
+        model = kwargs.get("model", args[0] if args else "")
+        if model.startswith(("anthropic/", "claude")):
+            headers = dict(kwargs.get("extra_headers") or {})
+            headers["Authorization"] = f"Bearer {_ANTHROPIC_AUTH_TOKEN}"
+            kwargs["extra_headers"] = headers
+            # Provide a non-empty api_key so LiteLLM doesn't raise on missing key;
+            # Anthropic will authenticate via the Bearer header instead.
+            kwargs.setdefault("api_key", _ANTHROPIC_AUTH_TOKEN)
+    return _litellm_completion(*args, **kwargs)
 
 from lib.context import compact_messages, completion_with_retries, estimate_tokens
 

@@ -292,7 +292,7 @@ least one key for whichever provider you want to use.
 > a separate key for each one and name it after the repo (e.g.,
 > "remote-dev-bot-myrepo"). This is optional — most users share one key.
 
-**For Anthropic (Claude models):**
+**For Anthropic (Claude models) — API key:**
 
 1. Go to https://console.anthropic.com/settings/keys
 2. Click "+ Create Key"
@@ -300,6 +300,25 @@ least one key for whichever provider you want to use.
 4. Leave the workspace as "Default" (unless you have a specific workspace)
 5. Click "Add"
 6. **Copy the key immediately** — you won't be able to see it again
+
+**For Anthropic (Claude models) — Claude Pro/Max subscription (OAuth token):**
+
+If you have a Claude Pro or Max subscription you can use it instead of a
+pay-per-token API key.  Store your OAuth token as `ANTHROPIC_AUTH_TOKEN`
+instead of `ANTHROPIC_API_KEY`.  If both are set, `ANTHROPIC_AUTH_TOKEN`
+takes precedence.
+
+To generate an OAuth token:
+
+1. Install Claude Code: `npm install -g @anthropic-ai/claude-code`
+2. Run `claude` and log in with your Claude Pro/Max account
+3. Run `claude setup-token` to generate an OAuth token
+4. Store the token as the `ANTHROPIC_AUTH_TOKEN` secret (see Step 2.3)
+
+> **Note:** OAuth tokens expire after approximately one hour.  For long-running
+> GitHub Actions workflows, generate a fresh token immediately before the
+> workflow runs, or keep a regular `ANTHROPIC_API_KEY` as a fallback.  Future
+> versions may add automatic token refresh.
 
 **For OpenAI (GPT models):**
 
@@ -430,6 +449,10 @@ assistant's shell) so you can paste the key when prompted.
 # Set the API key for whichever provider(s) you're using:
 gh secret set ANTHROPIC_API_KEY --repo {owner}/{repo}
 # Paste your Anthropic API key when prompted, then press Enter
+
+# --- OR, if using a Claude Pro/Max subscription OAuth token instead: ---
+gh secret set ANTHROPIC_AUTH_TOKEN --repo {owner}/{repo}
+# Paste the token from `claude setup-token` when prompted
 
 gh secret set OPENAI_API_KEY --repo {owner}/{repo}
 gh secret set GEMINI_API_KEY --repo {owner}/{repo}
