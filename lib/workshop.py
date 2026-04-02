@@ -9,9 +9,9 @@ Stage 2 — Council review: Each council model posts a structured peer critique
 of the Stage 1 design. Council reviews run simultaneously (not sequentially)
 so critiques are maximally independent.
 
-After Stage 2, the bot posts a summary comment and stops.  Human reviews the
-critiques, then optionally triggers Stage 3 (adjust) — implemented in a
-follow-up.
+After Stage 2, the bot posts a summary comment and stops. Human reviews the
+critiques, then decides to call `/agent-design` for a revised proposal or
+`/agent-resolve` to implement directly.
 """
 
 import gzip
@@ -795,9 +795,10 @@ def run_workshop(
     n = len(council_results)
     post(
         f"## Workshop Stage 2 complete — awaiting human review\n\n"
-        f"{n} model(s) have posted design critiques above. Please review, reply with "
-        f"decisions on open questions, and then post `/agent-workshop-adjust` to "
-        f"continue to Stage 3.\n"
+        f"{n} model(s) have posted design critiques above. Review the feedback and "
+        f"reply with your decisions on open questions. Then:\n"
+        f"- Post `/agent-design` to get a revised design proposal\n"
+        f"- Post `/agent-resolve` to implement directly\n"
     )
 
     # Aggregate totals
