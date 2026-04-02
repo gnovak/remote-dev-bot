@@ -836,6 +836,52 @@ def write_pr_url(pr_url):
         f.write(pr_url + "\n")
 
 
+def build_cost_table():
+    """Build a markdown cost table from /tmp/llm_usage.json and /tmp/start_time.
+
+    Returns a markdown string (starting with a blank line + heading), or ''
+    if usage data is unavailable.
+    """
+    import math
+
+    try:
+        with open("/tmp/llm_usage.json") as f:
+            d = json.load(f)
+    except Exception:
+        return ""
+
+    input_toks = int(d.get("input_tokens", 0))
+    output_toks = int(d.get("output_tokens", 0))
+    cost_val = float(d.get("cost") or 0)
+    iterations = int(d.get("iterations", 0))
+
+    try:
+        elapsed = int(time.time()) - int(open("/tmp/start_time").read().strip())
+    except Exception:
+        elapsed = 0
+
+    def _fmt_tok(n):
+        if n >= 1_000_000:
+            return f"{round(n / 1_000_000, 1)}M"
+        if n >= 1_000:
+            return f"{round(n / 1_000, 1)}K"
+        return str(n)
+
+    elapsed_fmt = f"{elapsed // 60}m {elapsed % 60}s" if elapsed >= 60 else f"{elapsed}s"
+    rounded = math.ceil(cost_val * 100) / 100
+
+    rows = [
+        ("Time", elapsed_fmt),
+        ("Iterations", str(iterations)),
+        ("Input", f"{_fmt_tok(input_toks)} tokens"),
+        ("Output", f"{_fmt_tok(output_toks)} tokens"),
+        ("**Cost**", f"**${rounded:.2f}**"),
+    ]
+    lines = ["", "### 💰 Cost", "", "| Metric | Value |", "|--------|-------|"]
+    lines += [f"| {k} | {v} |" for k, v in rows]
+    return "\n".join(lines)
+
+
 def write_status(success, explanation):
     """Write resolve status to /tmp/resolve_status.json."""
     with open("/tmp/resolve_status.json", "w") as f:
@@ -1325,7 +1371,16 @@ def main():
             except Exception as e:
                 print(f"Could not convert PR to ready: {e}")
             try:
-                comment_body = f"🤖 **Agent completed successfully.**\n\n{explanation}"
+                model_header = f"🤖 **Model:** `{ALIAS}` (`{LLM_MODEL}`)" if ALIAS else ""
+                cost_section = build_cost_table()
+                parts = []
+                if model_header:
+                    parts.append(model_header)
+                    parts.append("")
+                parts.append(f"**Agent completed successfully.**\n\n{explanation}")
+                if cost_section:
+                    parts.append(cost_section)
+                comment_body = "\n".join(parts)
                 comment_file = "/tmp/rdb_success_comment.txt"
                 with open(comment_file, "w") as f:
                     f.write(comment_body)
@@ -1334,6 +1389,7 @@ def main():
                     timeout=30,
                 )
                 print("Posted success comment")
+                open("/tmp/cost_embedded", "w").write("cost in success comment\n")
             except Exception as e:
                 print(f"Could not post success comment: {e}")
     else:

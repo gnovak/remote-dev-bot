@@ -308,12 +308,43 @@ jobs:
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          MODEL="${{ needs.parse.outputs.model }}"
+
+          # Compute cost for inclusion in the result comment
+          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
+          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
+          if [ -f /tmp/llm_usage.json ]; then
+            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
+          import json
+          d = json.load(open('/tmp/llm_usage.json'))
+          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
+          ")
+          else
+            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
+          fi
+          MAX_ITER="${MAX_ITERATIONS:-}"
+          ITERATIONS_FMT=$(python3 -c "
+          max_i = '${MAX_ITER}'
+          iters = '${ITERATIONS}'
+          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
+          ")
+          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
+          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          def fmt(n):
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
+              return str(n)
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
+          ")
 
           # Read resolve status written by resolve.py
           if [[ ! -f /tmp/resolve_status.json ]]; then
             # resolve.py crashed before writing status (OOM, import error, etc.)
-            ALIAS="${{ needs.parse.outputs.alias }}"
-            MODEL="${{ needs.parse.outputs.model }}"
             {
               echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
               echo ""
@@ -322,11 +353,22 @@ jobs:
               echo "The agent process exited unexpectedly — see run logs for details."
               echo ""
               echo "See the [workflow run logs]($RUN_URL) for full details."
+              echo ""
+              echo "### 💰 Cost"
+              echo ""
+              echo "| Metric | Value |"
+              echo "|--------|-------|"
+              echo "| Time | ${ELAPSED_FMT} |"
+              echo "| Iterations | ${ITERATIONS_FMT} |"
+              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
             } > /tmp/failure_comment.md
 
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body-file /tmp/failure_comment.md
+            echo "cost embedded" > /tmp/cost_embedded
             exit 0
           fi
 
@@ -334,8 +376,6 @@ jobs:
           EXPLANATION=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print(d.get('explanation',''))")
 
           if [[ "$SUCCESS" == "false" ]]; then
-            ALIAS="${{ needs.parse.outputs.alias }}"
-            MODEL="${{ needs.parse.outputs.model }}"
             DRAFT_PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
             {
               echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
@@ -353,13 +393,24 @@ jobs:
                 echo ""
               fi
               echo "See the [workflow run logs]($RUN_URL) for full details."
+              echo ""
+              echo "### 💰 Cost"
+              echo ""
+              echo "| Metric | Value |"
+              echo "|--------|-------|"
+              echo "| Time | ${ELAPSED_FMT} |"
+              echo "| Iterations | ${ITERATIONS_FMT} |"
+              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
             } > /tmp/failure_comment.md
 
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body-file /tmp/failure_comment.md
+            echo "cost embedded" > /tmp/cost_embedded
           fi
-          # Success case: PR was already created by resolve.py — no comment needed here
+          # Success case: success comment (with model + cost) already posted by resolve.py
 
       - name: Write step summary
         if: always()
@@ -410,12 +461,17 @@ jobs:
             --add-assignee "${{ github.event.comment.user.login }}"
 
       - name: Append cost to PR
-        if: always()
+        if: >-
+          always() &&
+          !(github.event.issue.pull_request || github.event.pull_request)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          # If the agent created a PR, append the cost table to its body.
+          # For issue triggers: append the cost table to the newly created PR body.
           # Write /tmp/cost_embedded as sentinel so the fallback step skips.
+          # Skipped for PR-triggered resolves — cost is posted as a comment instead.
+          # (gh pr edit --body-file races with the just-pushed commits and clutters
+          # the PR body with repeated cost tables on each adjustment run.)
           PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
           if [ -z "$PR_URL" ]; then
             echo "No PR URL found — fallback step will handle cost reporting"
@@ -510,9 +566,12 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          # Sentinel: if cost was embedded in PR body, skip
+          # Fallback: primary paths (resolve.py success comment, Post result comment
+          # failure) already set cost_embedded. This only fires for true edge cases
+          # (e.g., resolve.py crashed before posting its success comment, or the
+          # Post result comment step itself failed).
           if [ -f /tmp/cost_embedded ]; then
-            echo "Cost already embedded in main comment — skipping fallback"
+            echo "Cost already reported — skipping fallback"
             exit 0
           fi
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
@@ -548,11 +607,9 @@ jobs:
           print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
           {
-            echo "⚠️ Agent did not complete — partial cost:"
-            echo ""
             echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
-            echo "---"
+            echo "⚠️ Agent did not complete — partial cost:"
             echo ""
             echo "### 💰 Cost"
             echo ""
@@ -739,12 +796,43 @@ jobs:
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          MODEL="${{ needs.parse.outputs.model }}"
+
+          # Compute cost for inclusion in the result comment
+          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
+          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
+          if [ -f /tmp/llm_usage.json ]; then
+            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
+          import json
+          d = json.load(open('/tmp/llm_usage.json'))
+          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
+          ")
+          else
+            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
+          fi
+          MAX_ITER="${MAX_ITERATIONS:-}"
+          ITERATIONS_FMT=$(python3 -c "
+          max_i = '${MAX_ITER}'
+          iters = '${ITERATIONS}'
+          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
+          ")
+          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
+          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          def fmt(n):
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
+              return str(n)
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
+          ")
 
           # Read resolve status written by resolve.py
           if [[ ! -f /tmp/resolve_status.json ]]; then
             # resolve.py crashed before writing status (OOM, import error, etc.)
-            ALIAS="${{ needs.parse.outputs.alias }}"
-            MODEL="${{ needs.parse.outputs.model }}"
             {
               echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
               echo ""
@@ -753,11 +841,22 @@ jobs:
               echo "The agent process exited unexpectedly — see run logs for details."
               echo ""
               echo "See the [workflow run logs]($RUN_URL) for full details."
+              echo ""
+              echo "### 💰 Cost"
+              echo ""
+              echo "| Metric | Value |"
+              echo "|--------|-------|"
+              echo "| Time | ${ELAPSED_FMT} |"
+              echo "| Iterations | ${ITERATIONS_FMT} |"
+              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
             } > /tmp/failure_comment.md
 
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body-file /tmp/failure_comment.md
+            echo "cost embedded" > /tmp/cost_embedded
             exit 0
           fi
 
@@ -765,8 +864,6 @@ jobs:
           EXPLANATION=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print(d.get('explanation',''))")
 
           if [[ "$SUCCESS" == "false" ]]; then
-            ALIAS="${{ needs.parse.outputs.alias }}"
-            MODEL="${{ needs.parse.outputs.model }}"
             DRAFT_PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
             {
               echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
@@ -784,13 +881,24 @@ jobs:
                 echo ""
               fi
               echo "See the [workflow run logs]($RUN_URL) for full details."
+              echo ""
+              echo "### 💰 Cost"
+              echo ""
+              echo "| Metric | Value |"
+              echo "|--------|-------|"
+              echo "| Time | ${ELAPSED_FMT} |"
+              echo "| Iterations | ${ITERATIONS_FMT} |"
+              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
             } > /tmp/failure_comment.md
 
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body-file /tmp/failure_comment.md
+            echo "cost embedded" > /tmp/cost_embedded
           fi
-          # Success case: PR was already created by resolve.py — no comment needed here
+          # Success case: success comment (with model + cost) already posted by resolve.py
 
       - name: Run council code review
         env:
@@ -957,12 +1065,17 @@ jobs:
             --add-assignee "${{ github.event.comment.user.login }}"
 
       - name: Append cost to PR
-        if: always()
+        if: >-
+          always() &&
+          !(github.event.issue.pull_request || github.event.pull_request)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          # If the agent created a PR, append the cost table to its body.
+          # For issue triggers: append the cost table to the newly created PR body.
           # Write /tmp/cost_embedded as sentinel so the fallback step skips.
+          # Skipped for PR-triggered resolves — cost is posted as a comment instead.
+          # (gh pr edit --body-file races with the just-pushed commits and clutters
+          # the PR body with repeated cost tables on each adjustment run.)
           PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
           if [ -z "$PR_URL" ]; then
             echo "No PR URL found — fallback step will handle cost reporting"
@@ -1057,9 +1170,12 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          # Sentinel: if cost was embedded in PR body, skip
+          # Fallback: primary paths (resolve.py success comment, Post result comment
+          # failure) already set cost_embedded. This only fires for true edge cases
+          # (e.g., resolve.py crashed before posting its success comment, or the
+          # Post result comment step itself failed).
           if [ -f /tmp/cost_embedded ]; then
-            echo "Cost already embedded in main comment — skipping fallback"
+            echo "Cost already reported — skipping fallback"
             exit 0
           fi
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
@@ -1095,11 +1211,9 @@ jobs:
           print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
           {
-            echo "⚠️ Agent did not complete — partial cost:"
-            echo ""
             echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
-            echo "---"
+            echo "⚠️ Agent did not complete — partial cost:"
             echo ""
             echo "### 💰 Cost"
             echo ""
