@@ -1083,6 +1083,31 @@ def main():
                 total_cost += cost
             rate_limit_retries = 0
 
+            # Gemini (and possibly other providers) can return an empty choices
+            # list when a safety filter or streaming anomaly occurs.  Treat it
+            # the same as a response with no tool calls so the recovery loop
+            # handles it gracefully instead of crashing with IndexError.
+            if not response.choices:
+                print("LLM returned empty choices list — treating as no tool call")
+                no_tool_call_count += 1
+                if no_tool_call_count >= 3:
+                    print("No tool calls for 3 consecutive iterations — breaking")
+                    break
+                print(f"No tool calls (attempt {no_tool_call_count}/3) — injecting recovery message")
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Please continue working on the task using the tools available to you. "
+                            "You MUST call a tool in every response — do not describe what you would do, do it. "
+                            "If you believe the task is complete, call finish(). "
+                            "If you cannot proceed, call finish(success=False, explanation='...'). "
+                            "IMPORTANT: NEVER ask for human help. Use the tools to make progress or call finish() to stop."
+                        ),
+                    }
+                )
+                continue
+
             message = response.choices[0].message
             tool_calls = getattr(message, "tool_calls", None)
 
