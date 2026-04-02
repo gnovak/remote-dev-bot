@@ -410,12 +410,17 @@ jobs:
             --add-assignee "${{ github.event.comment.user.login }}"
 
       - name: Append cost to PR
-        if: always()
+        if: >-
+          always() &&
+          !(github.event.issue.pull_request || github.event.pull_request)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          # If the agent created a PR, append the cost table to its body.
+          # For issue triggers: append the cost table to the newly created PR body.
           # Write /tmp/cost_embedded as sentinel so the fallback step skips.
+          # Skipped for PR-triggered resolves — cost is posted as a comment instead.
+          # (gh pr edit --body-file races with the just-pushed commits and clutters
+          # the PR body with repeated cost tables on each adjustment run.)
           PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
           if [ -z "$PR_URL" ]; then
             echo "No PR URL found — fallback step will handle cost reporting"
@@ -510,10 +515,18 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          # Sentinel: if cost was embedded in PR body, skip
-          if [ -f /tmp/cost_embedded ]; then
+          # For issue triggers: skip if cost was already embedded in the new PR body.
+          # For PR-triggered resolves: always post a cost comment — cost is not
+          # embedded in the PR body (that step is skipped to avoid clutter/races).
+          ISSUE_TYPE="${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}"
+          if [ -f /tmp/cost_embedded ] && [ "$ISSUE_TYPE" != "pr" ]; then
             echo "Cost already embedded in main comment — skipping fallback"
             exit 0
+          fi
+          # Determine whether the agent completed successfully (affects comment framing)
+          SUCCESS="false"
+          if [ -f /tmp/resolve_status.json ]; then
+            SUCCESS=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('true' if d.get('success') else 'false')")
           fi
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           MODEL="${{ needs.parse.outputs.model }}"
@@ -548,7 +561,11 @@ jobs:
           print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
           {
-            echo "⚠️ Agent did not complete — partial cost:"
+            if [ "$SUCCESS" != "true" ]; then
+              echo "⚠️ Agent did not complete — partial cost:"
+            else
+              echo "💰 **Cost for this agent run:**"
+            fi
             echo ""
             echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
@@ -957,12 +974,17 @@ jobs:
             --add-assignee "${{ github.event.comment.user.login }}"
 
       - name: Append cost to PR
-        if: always()
+        if: >-
+          always() &&
+          !(github.event.issue.pull_request || github.event.pull_request)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          # If the agent created a PR, append the cost table to its body.
+          # For issue triggers: append the cost table to the newly created PR body.
           # Write /tmp/cost_embedded as sentinel so the fallback step skips.
+          # Skipped for PR-triggered resolves — cost is posted as a comment instead.
+          # (gh pr edit --body-file races with the just-pushed commits and clutters
+          # the PR body with repeated cost tables on each adjustment run.)
           PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
           if [ -z "$PR_URL" ]; then
             echo "No PR URL found — fallback step will handle cost reporting"
@@ -1057,10 +1079,18 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          # Sentinel: if cost was embedded in PR body, skip
-          if [ -f /tmp/cost_embedded ]; then
+          # For issue triggers: skip if cost was already embedded in the new PR body.
+          # For PR-triggered resolves: always post a cost comment — cost is not
+          # embedded in the PR body (that step is skipped to avoid clutter/races).
+          ISSUE_TYPE="${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}"
+          if [ -f /tmp/cost_embedded ] && [ "$ISSUE_TYPE" != "pr" ]; then
             echo "Cost already embedded in main comment — skipping fallback"
             exit 0
+          fi
+          # Determine whether the agent completed successfully (affects comment framing)
+          SUCCESS="false"
+          if [ -f /tmp/resolve_status.json ]; then
+            SUCCESS=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('true' if d.get('success') else 'false')")
           fi
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           MODEL="${{ needs.parse.outputs.model }}"
@@ -1095,7 +1125,11 @@ jobs:
           print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
           ")
           {
-            echo "⚠️ Agent did not complete — partial cost:"
+            if [ "$SUCCESS" != "true" ]; then
+              echo "⚠️ Agent did not complete — partial cost:"
+            else
+              echo "💰 **Cost for this agent run:**"
+            fi
             echo ""
             echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
