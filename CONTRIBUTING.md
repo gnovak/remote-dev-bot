@@ -58,7 +58,7 @@ Three separate GitHub identities are used so each role is cleanly separated:
 - Installed on all `gnovak` repos (blanket install). Only repos with `RDB_APP_PRIVATE_KEY` secret actually use it. Currently configured on: `gnovak/remote-dev-bot`, `gnovak/remote-dev-bot-test`
 - Permissions (all Read & write): Contents, Issues, Pull Requests, Workflows, Actions, Checks
   - **Workflows** is included because this app devs rdb itself, so the agent may need to modify `.github/workflows/` files. Regular rdb users should *not* grant this — the runbook intentionally omits it.
-  - **Actions + Checks** are included so the agent can inspect CI logs and check run results when debugging ("PR XYZ is failing, dig into the logs"). The OpenHands sandbox has `gh` CLI and GitHub API access, so these work. Regular rdb users don't need these unless they specifically want the agent to debug CI.
+  - **Actions + Checks** are included so the agent can inspect CI logs and check run results when debugging ("PR XYZ is failing, dig into the logs"). The agent sandbox has `gh` CLI and GitHub API access, so these work. Regular rdb users don't need these unless they specifically want the agent to debug CI.
 - Webhooks: inactive (tokens are generated on-demand via `actions/create-github-app-token`)
 - Private key stored as `RDB_APP_PRIVATE_KEY` secret; App ID stored as `RDB_APP_ID` variable
 
@@ -189,9 +189,9 @@ the `e2e-test` branch pointer works and how to trigger test runs.
 #### Keeping defaults in sync
 
 `lib/config.py` and `scripts/compile.py` both have a fallback default for
-`openhands.version` (used when the config file has no `openhands` section).
-These must stay in sync. Both currently default to `"1.4.0"`. Each has a
-`# NOTE: keep in sync` comment pointing to the other.
+`agent.version` (used when the config file has no `agent` section).
+These must stay in sync. Each has a `# NOTE: keep in sync` comment pointing
+to the other.
 
 ### E2E tests (`tests/e2e.sh`)
 
