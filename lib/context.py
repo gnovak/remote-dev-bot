@@ -5,12 +5,116 @@ resolve, design, and review modes.
 """
 
 
+import json
+import re
+
+
+# Patterns that indicate a bash command is a "write" operation.
+# Write operation results are protected from being dropped by trim_tool_results,
+# so context about what was actually changed is preserved longer.
+_WRITE_BASH_PATTERNS = [
+    r"\bgit\s+commit\b",           # git commit
+    r"\bgit\s+push\b",             # git push
+    r"\bgit\s+add\b",              # git add
+    r"\bgit\s+merge\b",            # git merge
+    r"\bgit\s+rebase\b",           # git rebase
+    r"\bgit\s+reset\b",            # git reset
+    r"\bgit\s+checkout\s+-b\b",   # git checkout -b (branch creation)
+    r"\bgit\s+branch\s+",          # git branch operations
+    r"\bgit\s+tag\b",              # git tag
+    r"\bgit\s+rm\b",               # git rm
+    r"\bgit\s+mv\b",               # git mv
+    r">>?\s*[\w/]",                 # output redirection (>, >>)
+    r"\bsed\s+-i\b",               # sed -i (in-place edit)
+    r"\bpatch\b",                   # patch command
+    r"\btouch\b",                   # touch (create file)
+    r"\bcp\b",                      # cp (copy file)
+    r"\bmv\b",                      # mv (move file)
+    r"\brm\b",                      # rm (delete file)
+    r"\bmkdir\b",                   # mkdir
+    r"\bcat\s+>",                   # cat > (write to file)
+    r"\btee\b",                     # tee (write to file)
+    r"\bpip\s+install\b",          # pip install
+    r"\bnpm\s+install\b",          # npm install
+    r"\bapt\s+install\b",          # apt install
+    r"\bchmod\b",                   # chmod
+    r"\bchown\b",                   # chown
+]
+
+_WRITE_PATTERN_RE = re.compile("|".join(_WRITE_BASH_PATTERNS), re.IGNORECASE)
+
+
+def _is_write_bash_command(command):
+    """Return True if a bash command appears to be a write/modification operation.
+
+    Write operations (file edits, git commits, git push) are more valuable to
+    keep in context because they represent changes that were actually made.
+    Read operations (cat, ls, grep) can be dropped more aggressively.
+    """
+    return bool(_WRITE_PATTERN_RE.search(command))
+
+
+def _build_tool_call_map(messages):
+    """Build a mapping from tool_call_id to {name, arguments}.
+
+    Scans all assistant messages with tool_calls and returns a dict mapping
+    each tool_call_id to the function name and arguments string.
+    """
+    call_map = {}
+    for msg in messages:
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            for tc in msg["tool_calls"]:
+                if isinstance(tc, dict):
+                    tc_id = tc.get("id")
+                    fn = tc.get("function", {})
+                    if tc_id:
+                        call_map[tc_id] = {
+                            "name": fn.get("name", ""),
+                            "arguments": fn.get("arguments", ""),
+                        }
+    return call_map
+
+
+def _is_write_tool_result(tool_call_id, call_map):
+    """Return True if the tool call with this ID was a write/modification operation.
+
+    Read-only tools (read_file, grep) are always droppable.
+    Bash commands that modify files or run git write operations are protected.
+    finish() calls are also droppable (they only appear at end of run).
+    """
+    info = call_map.get(tool_call_id, {})
+    tool_name = info.get("name", "")
+
+    # read_file and grep are always read-only
+    if tool_name in ("read_file", "grep", "finish"):
+        return False
+
+    # bash calls may be reads or writes — check the command
+    if tool_name == "bash":
+        args_str = info.get("arguments", "")
+        try:
+            args = json.loads(args_str)
+            command = args.get("command", args_str)
+        except (json.JSONDecodeError, AttributeError):
+            command = args_str
+        return _is_write_bash_command(command)
+
+    # Unknown tool — conservatively treat as write to avoid dropping
+    return True
+
+
 def trim_tool_results(messages, keep_n):
     """Remove oldest tool call/result pairs, keeping the last keep_n pairs.
 
     Preserves all assistant text content and the system prompt.
     Operates on OpenAI-format messages where tool calls are in assistant messages
     (role="assistant", tool_calls=[...]) and results are role="tool" messages.
+
+    Drop policy (smart ordering):
+    - Read-only results (read_file, grep, read-style bash) are dropped first.
+    - Write results (git commit/push, file edits) are dropped only if necessary
+      after all read-only results have been exhausted.
+    - This preserves context about what was actually changed for longer.
     """
     if keep_n <= 0:
         return messages
@@ -23,11 +127,38 @@ def trim_tool_results(messages, keep_n):
 
     # Number of pairs to drop
     n_drop = len(tool_result_indices) - keep_n
-    indices_to_drop = set(tool_result_indices[:n_drop])
 
-    # Also find the assistant messages that contain tool_calls for the pairs we're dropping.
-    # Each assistant message with tool_calls is immediately followed by one or more tool messages.
-    # We scan backwards from each tool_result index to find its owning assistant message.
+    # Build tool call map to classify each result as read vs write
+    call_map = _build_tool_call_map(messages)
+
+    # Classify tool results: separate read-only from write results
+    # (preserving chronological order within each group)
+    read_indices = []
+    write_indices = []
+    for idx in tool_result_indices:
+        tool_call_id = messages[idx].get("tool_call_id")
+        if _is_write_tool_result(tool_call_id, call_map):
+            write_indices.append(idx)
+        else:
+            read_indices.append(idx)
+
+    # Build the set of indices to drop:
+    # Drop oldest read-only results first, then oldest write results if needed.
+    indices_to_drop = set()
+
+    # Drop from read-only pool first (oldest first)
+    for idx in read_indices:
+        if len(indices_to_drop) >= n_drop:
+            break
+        indices_to_drop.add(idx)
+
+    # If we still need to drop more, drop from write pool (oldest first)
+    for idx in write_indices:
+        if len(indices_to_drop) >= n_drop:
+            break
+        indices_to_drop.add(idx)
+
+    # Now remove the selected tool results and update their assistant messages
     dropped_tool_call_ids = set()
     for idx in indices_to_drop:
         dropped_tool_call_ids.add(messages[idx].get("tool_call_id"))
