@@ -72,6 +72,7 @@ jobs:
       council_models: ${{ steps.parse.outputs.council_models }}
       extra_instructions: ${{ steps.parse.outputs.extra_instructions }}
       model_extra_instructions: ${{ steps.parse.outputs.model_extra_instructions }}
+      debug_logging: ${{ steps.parse.outputs.debug_logging }}
 
     steps:
       - name: Generate app token
@@ -272,6 +273,7 @@ jobs:
           EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
+          DEBUG_LOGGING: ${{ needs.parse.outputs.debug_logging }}
         run: |
           ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
           ISSUE_TYPE="${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}"
@@ -766,6 +768,7 @@ jobs:
           EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
+          DEBUG_LOGGING: ${{ needs.parse.outputs.debug_logging }}
         run: |
           ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
           ISSUE_TYPE="${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}"

@@ -52,6 +52,7 @@ COMPACTION_COVERAGE = float(os.environ.get("COMPACTION_COVERAGE", "0.5") or "0.5
 COMPACTION_FACTOR = float(os.environ.get("COMPACTION_FACTOR", "0.5") or "0.5")
 # Hardcoded: fire at 85% of max to leave headroom for the summary to land
 _COMPACTION_THRESHOLD = 0.85
+DEBUG_LOGGING = os.environ.get("DEBUG_LOGGING", "false").lower() == "true"
 DISTILL_ENABLED = os.environ.get("DISTILL_ENABLED", "false").lower() == "true"
 
 GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
@@ -1049,6 +1050,8 @@ def main():
             if WRAPUP_ENABLED and WRAPUP_ITERATION > 0 and iteration + 1 >= WRAPUP_ITERATION:
                 remaining = MAX_ITERATIONS - WRAPUP_ITERATION
                 print(f"  [Wrapup] Injecting wrapup message at iteration {iteration + 1}")
+                if DEBUG_LOGGING:
+                    print(f"  [DEBUG] Wrapup injected at iteration {iteration + 1}")
                 messages.append({
                     "role": "user",
                     "content": (
@@ -1064,6 +1067,13 @@ def main():
                         "Do NOT start any new work. Push and finish now."
                     ),
                 })
+
+            # Debug logging: per-iteration context stats
+            if DEBUG_LOGGING:
+                ctx_tokens = estimate_tokens(messages)
+                print(f"  [DEBUG] Iteration {iteration + 1}: context ~{ctx_tokens} tokens, "
+                      f"messages={len(messages)}, "
+                      f"cumulative input={total_input_tokens}, output={total_output_tokens}")
 
             try:
                 response = completion_with_retries(
@@ -1204,6 +1214,8 @@ def main():
                 else:
                     tool_result = execute_tool(tool_name, arguments)
 
+                if DEBUG_LOGGING:
+                    print(f"  [DEBUG] Tool result size: {len(tool_result)} chars")
                 messages.append(
                     {
                         "role": "tool",
