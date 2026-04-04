@@ -3,10 +3,11 @@ name: Remote Dev Bot
 # Reusable workflow — called by thin shims in target repos.
 # See .github/workflows/agent.yml for the shim template.
 #
-# Supports three modes via /agent-<mode>[-<model>] or /agent <mode> [<model>]:
-#   /agent-resolve[-<model>] or /agent resolve [<model>]  — run LiteLLM agent loop to resolve the issue, open a PR
-#   /agent-design[-<model>] or /agent design [<model>]    — post a design analysis comment (no code changes)
-#   /agent-review[-<model>] or /agent review [<model>]    — post a code review comment on a PR (no code changes)
+# Supports modes via /agent-<mode>[-<model>] or /agent <mode> [<model>]:
+#   /agent-resolve[-<model>] or /agent resolve [<model>]     — run LiteLLM agent loop to resolve the issue, open a PR
+#   /agent-design[-<model>] or /agent design [<model>]       — post a design analysis comment (no code changes)
+#   /agent-review[-<model>] or /agent review [<model>]       — post a code review comment on a PR (no code changes)
+#   /agent-reconcile[-<model>] or /agent reconcile [<model>] — rebase PR onto base branch, resolve conflicts, force-push
 # Both dash and space separators are supported for mobile-friendly typing.
 #
 # Arguments can be passed on subsequent lines:
@@ -1962,6 +1963,296 @@ jobs:
           gh pr comment "$PR_NUMBER" \
             --repo "${{ github.repository }}" \
             --body-file /tmp/cost_comment_fallback.md
+
+  # --- Mode: reconcile — rebase PR onto base branch, resolve conflicts, force-push ---
+  reconcile:
+    needs: parse
+    if: needs.parse.outputs.mode == 'reconcile'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate app token
+        if: vars.RDB_APP_ID != ''
+        uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ vars.RDB_APP_ID }}
+          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+
+      - name: Checkout target repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Checkout remote-dev-bot lib
+        uses: actions/checkout@v5
+        with:
+          repository: gnovak/remote-dev-bot
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          ref: ${{ inputs.rdb_ref }}
+          path: .remote-dev-bot
+          sparse-checkout: |
+            /lib/
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Determine API key
+        id: apikey
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          MODEL="${{ needs.parse.outputs.model }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+
+          MODEL_HEADER="🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+          NO_API_KEY_WARNING="⚠️ **No API key configured for this model.**"
+          post_no_api_key_comment() {
+            local secret_name="$1"
+            {
+              printf '%s\n\n' "${MODEL_HEADER}"
+              printf '%s\n\n' "${NO_API_KEY_WARNING}"
+              printf 'The selected model \`%s\` (\`%s\`) requires an \`%s\` secret, but none was found.\n\n' "${ALIAS}" "${MODEL}" "${secret_name}"
+              printf '**To fix:** Add your API key as a repository secret:\n'
+              printf '\`\`\`bash\n'
+              printf 'gh secret set %s --repo ${{ github.repository }}\n' "${secret_name}"
+              printf '\`\`\`\n'
+              printf 'Then re-trigger the bot by commenting the same command again.\n'
+            } > /tmp/no_api_key_comment.md
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/no_api_key_comment.md
+          }
+
+          if [[ "$MODEL" == anthropic/* ]]; then
+            API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "ANTHROPIC_API_KEY"
+              echo "::error::No ANTHROPIC_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+          elif [[ "$MODEL" == openai/* ]]; then
+            API_KEY="${{ secrets.OPENAI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "OPENAI_API_KEY"
+              echo "::error::No OPENAI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+          elif [[ "$MODEL" == gemini/* ]]; then
+            API_KEY="${{ secrets.GEMINI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "GEMINI_API_KEY"
+              echo "::error::No GEMINI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Unknown model provider for: $MODEL"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: pip install PyYAML litellm
+
+      - name: Verify this is a PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          PR_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          IS_PR=${{ (github.event.issue.pull_request || github.event.pull_request) && 'true' || 'false' }}
+          if [[ "$IS_PR" != "true" ]]; then
+            ALIAS="${{ needs.parse.outputs.alias }}"
+            MODEL="${{ needs.parse.outputs.model }}"
+            printf '🤖 **Model:** `%s` (`%s`)\n\n⚠️ `/agent-reconcile` only works on pull requests, not issues.\n' \
+              "${ALIAS}" "${MODEL}" > /tmp/reconcile_not_pr.md
+            gh issue comment "$PR_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/reconcile_not_pr.md
+            exit 1
+          fi
+
+      - name: Reconcile PR
+        env:
+          LLM_API_KEY: ${{ steps.apikey.outputs.key }}
+          LLM_MODEL: ${{ needs.parse.outputs.model }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GITHUB_USERNAME: ${{ github.repository_owner }}
+          GIT_USERNAME: ${{ github.repository_owner }}
+          PR_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          MAX_ITERATIONS: ${{ needs.parse.outputs.max_iterations }}
+          WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
+          WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
+          ALIAS: ${{ needs.parse.outputs.alias }}
+          EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
+          MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
+        run: |
+          PR_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+
+          # Determine base branch from the PR
+          BASE_BRANCH=$(gh pr view "$PR_NUMBER" --json baseRefName --jq '.baseRefName')
+          export BASE_BRANCH
+          echo "Reconciling PR #${PR_NUMBER} onto base branch: ${BASE_BRANCH}"
+
+          TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
+          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          echo "Reconcile timeout: ${TIMEOUT_MINUTES} minutes"
+          echo $(date +%s) > /tmp/start_time
+
+          timeout --kill-after=60 "$TIMEOUT_SECONDS" \
+            python3 .remote-dev-bot/lib/reconcile.py
+          RECONCILE_EXIT_CODE=$?
+
+          if [[ $RECONCILE_EXIT_CODE -eq 124 ]]; then
+            echo "::warning::Reconciler timed out after ${TIMEOUT_MINUTES} minutes. Cleanup steps will still run."
+          fi
+
+          exit $RECONCILE_EXIT_CODE
+
+      - name: Post result comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          PR_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          if [[ ! -f /tmp/resolve_status.json ]]; then
+            ALIAS="${{ needs.parse.outputs.alias }}"
+            MODEL="${{ needs.parse.outputs.model }}"
+            {
+              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo ""
+              echo "### ⚠️ Reconcile agent exited unexpectedly"
+              echo ""
+              echo "See the [workflow run logs]($RUN_URL) for full details."
+            } > /tmp/failure_comment.md
+            gh pr comment "$PR_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/failure_comment.md
+            exit 0
+          fi
+
+          SUCCESS=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('true' if d.get('success') else 'false')")
+          EXPLANATION=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print(d.get('explanation',''))")
+
+          if [[ "$SUCCESS" == "false" ]]; then
+            ALIAS="${{ needs.parse.outputs.alias }}"
+            MODEL="${{ needs.parse.outputs.model }}"
+            {
+              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo ""
+              echo "### ⚠️ Reconcile could not be completed"
+              echo ""
+              if [[ -n "$EXPLANATION" ]]; then
+                echo "$EXPLANATION"
+                echo ""
+              fi
+              echo "See the [workflow run logs]($RUN_URL) for full details."
+            } > /tmp/failure_comment.md
+            gh pr comment "$PR_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/failure_comment.md
+          fi
+          # Success case: reconcile.py already posted the success comment
+
+      - name: Write step summary
+        if: always()
+        env:
+          ALIAS: ${{ needs.parse.outputs.alias }}
+          LLM_MODEL: ${{ needs.parse.outputs.model }}
+        run: |
+          if [ -f /tmp/llm_usage.json ]; then
+            cost=$(python3 -c "import json; d=json.load(open('/tmp/llm_usage.json')); print(f\"\${d.get('cost',0):.2f}\")")
+            iters=$(python3 -c "import json; d=json.load(open('/tmp/llm_usage.json')); print(d.get('iterations',0))")
+          else
+            cost="unknown"
+            iters="unknown"
+          fi
+          if [ -f /tmp/resolve_status.json ]; then
+            success=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('✅' if d.get('success') else '❌')")
+            explanation=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print(d.get('explanation','')[:200])")
+          else
+            success="❓"
+            explanation="No status recorded"
+          fi
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## Reconcile Run Summary
+          | | |
+          |---|---|
+          | **Result** | $success |
+          | **Cost** | \$$cost |
+          | **Iterations** | $iters |
+          | **Model** | ${{ env.ALIAS }} (${{ env.LLM_MODEL }}) |
+
+          **Status:** $explanation
+          EOF
+
+      - name: Post cost comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          PR_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          MODEL="${{ needs.parse.outputs.model }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
+          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
+          if [ -f /tmp/llm_usage.json ]; then
+            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
+          import json
+          d = json.load(open('/tmp/llm_usage.json'))
+          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
+          ")
+          else
+            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
+          fi
+          MAX_ITER="${{ needs.parse.outputs.max_iterations }}"
+          ITERATIONS_FMT=$(python3 -c "
+          max_i = '${MAX_ITER}'
+          iters = '${ITERATIONS}'
+          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
+          ")
+          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
+          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          def fmt(n):
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
+              return str(n)
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
+          ")
+          {
+            echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+            echo ""
+            echo "---"
+            echo ""
+            echo "### 💰 Cost"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Time | ${ELAPSED_FMT} |"
+            echo "| Iterations | ${ITERATIONS_FMT} |"
+            echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+            echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+            printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+          } > /tmp/cost_comment.md
+          gh pr comment "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --body-file /tmp/cost_comment.md
 
   # --- Mode: design — multi-round agentic loop with tool calling ---
   design:
