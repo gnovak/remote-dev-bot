@@ -70,6 +70,16 @@ _issue_title: str = ""               # set after issue/PR context is fetched
 
 # --- Utilities ---
 
+def _should_cache(model: str) -> bool:
+    """Return True if the model provider supports explicit cache_control markers.
+
+    Anthropic and Gemini both use the same cache_control block syntax; LiteLLM
+    translates to each provider's native API.  OpenAI caches automatically for
+    any repeating prefix ≥ 1024 tokens — no code changes needed there.
+    """
+    return model.startswith(("anthropic/", "claude", "gemini/", "vertex_ai/"))
+
+
 def run(cmd, *, check=True, timeout=60):
     """Run a shell command, return combined stdout+stderr."""
     result = subprocess.run(
@@ -976,13 +986,31 @@ def main():
 
     # Initialize conversation
     trigger_type = "PR" if ISSUE_TYPE == "pr" else "issue"
+    initial_user_text = f"Please resolve {trigger_type} #{ISSUE_NUMBER} as described above."
+
+    if _should_cache(LLM_MODEL):
+        # Attach a cache_control marker so providers cache the static initial
+        # context (system prompt + first user message).  LiteLLM translates
+        # this to Anthropic's cache breakpoint API or Gemini's /cachedContent.
+        # Gemini also accepts an optional TTL; include it for long runs.
+        cache_control: dict = {"type": "ephemeral"}
+        if LLM_MODEL.startswith(("gemini/", "vertex_ai/")):
+            cache_control["ttl"] = "3600s"
+        initial_user_content = [
+            {
+                "type": "text",
+                "text": initial_user_text,
+                "cache_control": cache_control,
+            }
+        ]
+    else:
+        initial_user_content = initial_user_text
+
     messages = [
         {"role": "system", "content": system_prompt},
         {
             "role": "user",
-            "content": (
-                f"Please resolve {trigger_type} #{ISSUE_NUMBER} as described above."
-            ),
+            "content": initial_user_content,
         },
     ]
 
@@ -1212,6 +1240,30 @@ def main():
                             f"[Context compaction] {stats['messages_compacted']} messages summarized, "
                             f"tokens {total_tokens:,} → {new_total:,} ({ratio:.1f}% reduction)",
                         ))
+
+                        # Re-anchor the cache marker on the new last static message.
+                        # After compaction the summary message is at index 1 — it
+                        # becomes the new cached prefix boundary for Anthropic/Gemini.
+                        if _should_cache(LLM_MODEL) and len(messages) > 1:
+                            new_static = messages[1]
+                            content = new_static.get("content")
+                            cache_control: dict = {"type": "ephemeral"}
+                            if LLM_MODEL.startswith(("gemini/", "vertex_ai/")):
+                                cache_control["ttl"] = "3600s"
+                            if isinstance(content, str):
+                                new_static["content"] = [
+                                    {
+                                        "type": "text",
+                                        "text": content,
+                                        "cache_control": cache_control,
+                                    }
+                                ]
+                            elif isinstance(content, list) and content:
+                                # Move marker to the last block in the list
+                                for block in content:
+                                    block.pop("cache_control", None)
+                                if isinstance(content[-1], dict):
+                                    content[-1]["cache_control"] = cache_control
 
             if done:
                 break
