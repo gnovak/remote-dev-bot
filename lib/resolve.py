@@ -66,6 +66,7 @@ GIT_USERNAME = (
 # Sentinels for top-level cleanup handler
 _branch_created: str | None = None  # set as soon as branch is known
 _pr_created: bool = False            # set when any PR (draft or real) is successfully created
+_issue_title: str = ""               # set after issue/PR context is fetched
 
 # --- Utilities ---
 
@@ -905,7 +906,7 @@ def write_usage(input_tokens, output_tokens, cost, iterations):
 # --- Main agent loop ---
 
 def main():
-    global _branch_created, _pr_created
+    global _branch_created, _pr_created, _issue_title
     # Set up branch
     print(f"Setting up branch for {ISSUE_TYPE} #{ISSUE_NUMBER}...")
     branch = setup_branch()
@@ -929,6 +930,7 @@ def main():
     # Gather issue/PR context
     if ISSUE_TYPE == "pr":
         title, body, branches, comments, diff = get_pr_context()
+        _issue_title = title
         issue_context = (
             f"## Pull Request #{ISSUE_NUMBER}: {title}\n\n"
             f"**Branches:** {branches}\n\n"
@@ -938,6 +940,7 @@ def main():
         )
     else:
         title, body, comments = get_issue_context()
+        _issue_title = title
         issue_context = (
             f"## Issue #{ISSUE_NUMBER}: {title}\n\n"
             f"{body}\n\n"
@@ -1353,7 +1356,7 @@ def main():
                     f"**Agent's last status:** {last_status}\n\n"
                     f"Fixes #{ISSUE_NUMBER}"
                 )
-                pr_url = create_pr(branch, f"WIP: partial work on #{ISSUE_NUMBER}", draft_body, draft=True)
+                pr_url = create_pr(branch, _issue_title or f"WIP on issue #{ISSUE_NUMBER}", draft_body, draft=True)
                 write_pr_url(pr_url)
                 print(f"Created draft PR for partial work: {pr_url}")
                 _pr_created = True
@@ -1428,7 +1431,7 @@ def main():
                     _body = _body + ("\n\n" if _body else "") + _fixes
                 pr_url = create_pr(
                     branch,
-                    f"[Draft] Fix for issue #{ISSUE_NUMBER}",
+                    _issue_title or f"Fix for issue #{ISSUE_NUMBER}",
                     _body,
                     draft=True,
                 )
@@ -1459,7 +1462,7 @@ def _cleanup():
                 )
                 pr_url = create_pr(
                     _branch_created,
-                    f"WIP: partial work on #{ISSUE_NUMBER}",
+                    _issue_title or f"WIP on issue #{ISSUE_NUMBER}",
                     draft_body,
                     draft=True
                 )
