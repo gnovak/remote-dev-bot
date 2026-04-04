@@ -288,12 +288,11 @@ jobs:
           TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
           echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
           echo $(date +%s) > /tmp/start_time
-          # Capture HEAD before the agent runs so post-run diff steps use the
-          # correct base regardless of branch name or remote structure.
-          git rev-parse HEAD > /tmp/agent_start_sha
-
           # Run agent loop under timeout. On expiry: SIGTERM first, then SIGKILL after 60s.
           # Subsequent cleanup steps run regardless via if:always().
+          # /tmp/agent_start_sha is written by resolve.py/setup_branch() after
+          # branching from TARGET_BRANCH — gives correct diff base even when
+          # the workflow checkout lands on a different branch (e.g. main).
           timeout --kill-after=60 "$TIMEOUT_SECONDS" \
             python3 -u .remote-dev-bot/lib/resolve.py
           RESOLVE_EXIT_CODE=$?
@@ -521,8 +520,8 @@ jobs:
           elapsed = int(time.time()) - _st
           output_text = open("/tmp/spr_output.log").read() if os.path.exists("/tmp/spr_output.log") else ""
           import subprocess as _sp, re as _re
-          # Use the SHA captured before the agent started so diff is always
-          # "what the agent changed", not "everything since origin/main".
+          # SHA written by resolve.py/setup_branch() after branching — reflects
+          # the true diff base regardless of what the workflow checked out.
           _base = open('/tmp/agent_start_sha').read().strip() if os.path.exists('/tmp/agent_start_sha') else None
           _base_ref = _base or '$(git merge-base HEAD origin/main)'
           _dp = _sp.run(f'git diff {_base_ref} HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
@@ -783,12 +782,11 @@ jobs:
           TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
           echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
           echo $(date +%s) > /tmp/start_time
-          # Capture HEAD before the agent runs so post-run diff steps use the
-          # correct base regardless of branch name or remote structure.
-          git rev-parse HEAD > /tmp/agent_start_sha
-
           # Run agent loop under timeout. On expiry: SIGTERM first, then SIGKILL after 60s.
           # Subsequent cleanup steps run regardless via if:always().
+          # /tmp/agent_start_sha is written by resolve.py/setup_branch() after
+          # branching from TARGET_BRANCH — gives correct diff base even when
+          # the workflow checkout lands on a different branch (e.g. main).
           timeout --kill-after=60 "$TIMEOUT_SECONDS" \
             python3 -u .remote-dev-bot/lib/resolve.py
           RESOLVE_EXIT_CODE=$?
@@ -1132,8 +1130,8 @@ jobs:
           elapsed = int(time.time()) - _st
           output_text = open("/tmp/spr_output.log").read() if os.path.exists("/tmp/spr_output.log") else ""
           import subprocess as _sp, re as _re
-          # Use the SHA captured before the agent started so diff is always
-          # "what the agent changed", not "everything since origin/main".
+          # SHA written by resolve.py/setup_branch() after branching — reflects
+          # the true diff base regardless of what the workflow checked out.
           _base = open('/tmp/agent_start_sha').read().strip() if os.path.exists('/tmp/agent_start_sha') else None
           _base_ref = _base or '$(git merge-base HEAD origin/main)'
           _dp = _sp.run(f'git diff {_base_ref} HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)

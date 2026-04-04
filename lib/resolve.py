@@ -138,6 +138,19 @@ def setup_branch():
         branch = _find_available_branch(ISSUE_NUMBER)
         run(f"git checkout -b {branch}")
 
+    # Record the current HEAD as the diff base for post-run cost metrics.
+    # This must happen after branch setup: for issue triggers the workflow's
+    # initial checkout lands on the default branch (main), but the agent
+    # branches from TARGET_BRANCH (e.g. dev), so capturing HEAD here — after
+    # `git checkout -b` — gives the correct base. For PR triggers the PR
+    # branch is checked out directly, so HEAD is also correct here.
+    import subprocess as _subprocess
+    sha = _subprocess.run(
+        ["git", "rev-parse", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    with open("/tmp/agent_start_sha", "w") as _f:
+        _f.write(sha)
+
     return branch
 
 
