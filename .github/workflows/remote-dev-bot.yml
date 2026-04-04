@@ -267,7 +267,6 @@ jobs:
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
           STATUS_LOG_INTERVAL: ${{ needs.parse.outputs.status_log_interval }}
-          DEBUG_LOGGING: ${{ needs.parse.outputs.debug_logging }}
           ALIAS: ${{ needs.parse.outputs.alias }}
           EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
@@ -763,7 +762,6 @@ jobs:
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
           STATUS_LOG_INTERVAL: ${{ needs.parse.outputs.status_log_interval }}
-          DEBUG_LOGGING: ${{ needs.parse.outputs.debug_logging }}
           ALIAS: ${{ needs.parse.outputs.alias }}
           EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
