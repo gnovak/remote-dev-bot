@@ -73,6 +73,7 @@ jobs:
       extra_instructions: ${{ steps.parse.outputs.extra_instructions }}
       model_extra_instructions: ${{ steps.parse.outputs.model_extra_instructions }}
       debug_logging: ${{ steps.parse.outputs.debug_logging }}
+      distill_enabled: ${{ steps.parse.outputs.distill_enabled }}
 
     steps:
       - name: Generate app token
@@ -274,6 +275,7 @@ jobs:
           EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
           DEBUG_LOGGING: ${{ needs.parse.outputs.debug_logging }}
+          DISTILL_ENABLED: ${{ needs.parse.outputs.distill_enabled }}
         run: |
           ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
           ISSUE_TYPE="${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}"
@@ -769,6 +771,7 @@ jobs:
           EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
           DEBUG_LOGGING: ${{ needs.parse.outputs.debug_logging }}
+          DISTILL_ENABLED: ${{ needs.parse.outputs.distill_enabled }}
         run: |
           ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
           ISSUE_TYPE="${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}"
