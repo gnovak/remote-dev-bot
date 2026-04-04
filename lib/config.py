@@ -103,6 +103,7 @@ ALLOWED_ARGS = {
     "max_context_tokens": int,       # hard cap on context window (0 = model max)
     "compaction_coverage": float,    # fraction of messages to compact (oldest end)
     "compaction_factor": float,      # fraction of selected content to remove
+    "debug_logging": bool,           # enable verbose per-iteration debug tracing to stdout
 }
 
 
@@ -454,6 +455,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     compaction_coverage = args.get("compaction_coverage", oh.get("compaction_coverage", 0.5))
     compaction_factor = args.get("compaction_factor", oh.get("compaction_factor", 0.5))
 
+    debug_logging = bool(args.get("debug_logging", oh.get("debug_logging", False)))
+
     # Validate compaction params
     if not (0 < compaction_coverage <= 1):
         raise ValueError(
@@ -499,6 +502,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     result["max_context_tokens"] = max_context_tokens
     result["compaction_coverage"] = compaction_coverage
     result["compaction_factor"] = compaction_factor
+    result["debug_logging"] = debug_logging
 
     # Include extra_instructions if the mode defines one (appended to canonical prompt)
     if "extra_instructions" in mode_config:
@@ -694,6 +698,7 @@ def main():
             f.write(f"max_context_tokens={result['max_context_tokens']}\n")
             f.write(f"compaction_coverage={result['compaction_coverage']}\n")
             f.write(f"compaction_factor={result['compaction_factor']}\n")
+            f.write(f"debug_logging={str(result['debug_logging']).lower()}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"
