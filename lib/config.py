@@ -532,7 +532,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             print(f"  {key}: {value}")
         print()
 
-    # Include max_iterations for agentic loop modes (design, review, workshop).
+    # Include max_iterations for agentic loop modes (design, review, workshop, reconcile).
     # Use max_iter (already resolved, including any inline arg override) rather than
     # mode_config["max_iterations"] so that e.g. `max_iterations = 20` in the comment
     # body is honoured for design and review modes, not just for resolve.
@@ -542,6 +542,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         result["review_max_iterations"] = max_iter
     if mode == "workshop":
         result["workshop_max_iterations"] = max_iter
+    if mode == "reconcile":
+        result["reconcile_max_iterations"] = max_iter
 
     if mode in ("workshop", "build"):
         # Council models: explicit list from mode config, or all configured models.
@@ -676,6 +678,8 @@ def main():
                 f.write(f"review_max_iterations={result['review_max_iterations']}\n")
             if "workshop_max_iterations" in result:
                 f.write(f"workshop_max_iterations={result['workshop_max_iterations']}\n")
+            if "reconcile_max_iterations" in result:
+                f.write(f"reconcile_max_iterations={result['reconcile_max_iterations']}\n")
             if "council_models" in result:
                 f.write(f"council_models={json.dumps(result['council_models'])}\n")
 

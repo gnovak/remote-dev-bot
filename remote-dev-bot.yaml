@@ -82,6 +82,13 @@ modes:
       - gpt-small
       - gemini-small
 
+  reconcile:
+    default_model: claude-small
+    max_iterations: 50       # Iteration limit for the rebase + conflict resolution loop
+    extra_files:
+      - AGENTS.md
+      - README.md
+
 
 models:
   claude-small:
