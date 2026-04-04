@@ -34,9 +34,14 @@ Number of recent tool call/result pairs to keep in the conversation context.
 Older pairs are replaced with a placeholder. This prevents O(N²) context growth
 over long runs. Set to `0` to keep all tool results.
 
+Drop order is smart: **read-only results** (file reads, grep) are dropped first;
+**write results** (git commits, file edits) are protected and only dropped if
+necessary after all read-only results have been exhausted. This keeps
+"what was actually changed" context longer than "what was explored" context.
+
 Configurable in `remote-dev-bot.yaml` under `agent:`, or as an inline arg.
 
-- **Default:** `10`
+- **Default:** `20`
 - **Lower values:** Smaller context, lower cost, but agent may "forget" earlier work
 - **Higher values / 0:** Full history; safe but expensive on long runs
 

@@ -140,7 +140,7 @@ agent:
   # Number of recent tool call/result pairs to keep in context. Older pairs
   # are replaced with a placeholder to prevent O(N²) token growth on long runs.
   # Set to 0 to keep all tool results (not recommended for runs > ~20 iterations).
-  context_keep_tool_results: 10
+  context_keep_tool_results: 20
   # Context window compaction: when the context grows too large, the oldest
   # messages are summarized by the LLM and replaced with a compact summary.
   # Set max_context_tokens to 0 to disable compaction entirely.

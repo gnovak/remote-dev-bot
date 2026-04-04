@@ -328,7 +328,7 @@ agent:
   # Number of recent tool call/result pairs kept in context. Older pairs are
   # replaced with a placeholder to prevent O(N²) token growth on long runs.
   # Set to 0 to keep all results. (default: 10)
-  context_keep_tool_results: 10
+  context_keep_tool_results: 20
 ```
 
 You can also override `max_iterations`, `branch`, and `context` on a
