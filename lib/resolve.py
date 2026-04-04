@@ -53,7 +53,7 @@ COMPACTION_FACTOR = float(os.environ.get("COMPACTION_FACTOR", "0.5") or "0.5")
 # Hardcoded: fire at 85% of max to leave headroom for the summary to land
 _COMPACTION_THRESHOLD = 0.85
 DEBUG_LOGGING = os.environ.get("DEBUG_LOGGING", "false").lower() == "true"
-DISTILL_ENABLED = os.environ.get("DISTILL_ENABLED", "false").lower() == "true"
+DISTILL_ENABLED = os.environ.get("DISTILL_ENABLED", "true").lower() == "true"
 
 GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY", "")

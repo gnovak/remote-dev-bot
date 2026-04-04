@@ -104,6 +104,7 @@ ALLOWED_ARGS = {
     "compaction_coverage": float,    # fraction of messages to compact (oldest end)
     "compaction_factor": float,      # fraction of selected content to remove
     "debug_logging": bool,           # enable verbose per-iteration debug tracing to stdout
+    "distill_enabled": bool,         # run distillation pre-pass before agent loop
 }
 
 
@@ -173,6 +174,14 @@ def parse_args(lines):
                 result[name] = float(value)
             except ValueError:
                 raise ValueError(f"Argument '{name}' must be a number, got: {value}")
+        elif arg_type == bool:
+            low = value.lower()
+            if low in ("true", "yes", "1"):
+                result[name] = True
+            elif low in ("false", "no", "0"):
+                result[name] = False
+            else:
+                raise ValueError(f"Argument '{name}' must be true/false, got: {value}")
         elif arg_type == list:
             # Split on whitespace for list values
             result[name] = value.split()
@@ -457,6 +466,9 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
 
     debug_logging = bool(args.get("debug_logging", oh.get("debug_logging", False)))
 
+    # Context distillation pre-pass
+    distill_enabled = args.get("distill_enabled", oh.get("distill_enabled", True))
+
     # Validate compaction params
     if not (0 < compaction_coverage <= 1):
         raise ValueError(
@@ -503,6 +515,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     result["compaction_coverage"] = compaction_coverage
     result["compaction_factor"] = compaction_factor
     result["debug_logging"] = debug_logging
+    result["distill_enabled"] = distill_enabled
 
     # Include extra_instructions if the mode defines one (appended to canonical prompt)
     if "extra_instructions" in mode_config:
@@ -703,6 +716,7 @@ def main():
             f.write(f"compaction_coverage={result['compaction_coverage']}\n")
             f.write(f"compaction_factor={result['compaction_factor']}\n")
             f.write(f"debug_logging={str(result['debug_logging']).lower()}\n")
+            f.write(f"distill_enabled={str(result['distill_enabled']).lower()}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"

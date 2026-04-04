@@ -160,6 +160,9 @@ agent:
   # Fraction of the selected messages to actually summarize and replace.
   # 0.5 = replace 50% of the selected range, keeping the rest verbatim.
   compaction_factor: 0.5
+  # Distillation pre-pass: compress codebase context before the agent loop starts.
+  # Reduces initial context size and quadratic token cost growth on long runs.
+  distill_enabled: true
   # Graceful wrap-up: inject instructions when approaching max iterations.
   # This helps the agent commit partial work before hitting the limit.
   graceful_wrapup:
