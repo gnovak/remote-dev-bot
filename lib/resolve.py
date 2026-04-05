@@ -1418,7 +1418,7 @@ def main():
                 input_cost_per_token = model_info.get("input_cost_per_token", 0)
                 if input_cost_per_token:
                     cost_saved = total_tokens_saved * input_cost_per_token
-                    cost_saved_str = f" (~${cost_saved:.2f} saved)"
+                    cost_saved_str = f", ~${cost_saved:.2f} saved"
             except Exception:
                 pass  # cost estimate is optional; skip if unavailable
             distillation_summary = (
