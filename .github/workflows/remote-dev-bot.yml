@@ -2100,7 +2100,6 @@ jobs:
           EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
           EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
-          STATUS_LOG_INTERVAL: ${{ needs.parse.outputs.status_log_interval }}
         run: |
           PR_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
 
