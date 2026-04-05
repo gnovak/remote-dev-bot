@@ -44,6 +44,7 @@ MAX_CONTEXT_TOKENS = int(os.environ.get("MAX_CONTEXT_TOKENS", "0") or "0")
 COMPACTION_COVERAGE = float(os.environ.get("COMPACTION_COVERAGE", "0.5") or "0.5")
 COMPACTION_FACTOR = float(os.environ.get("COMPACTION_FACTOR", "0.5") or "0.5")
 _COMPACTION_THRESHOLD = 0.85
+STATUS_LOG_INTERVAL = int(os.environ.get("STATUS_LOG_INTERVAL", "0") or "0")
 
 GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY", "")
@@ -541,6 +542,7 @@ def main():
     finish_args = None
     last_iteration = 0
     no_tool_call_count = 0
+    status_log = []  # list of (iteration, status_text) tuples
 
     rate_limit_retries = 0
     MAX_RATE_LIMIT_RETRIES = 3
@@ -691,8 +693,94 @@ def main():
             if done:
                 break
 
+            # Rolling status log: every STATUS_LOG_INTERVAL iterations, make a
+            # side-channel API call to ask the agent for a brief status update.
+            if STATUS_LOG_INTERVAL > 0 and (iteration + 1) % STATUS_LOG_INTERVAL == 0:
+                try:
+                    # Get git diff --stat for ground-truth file changes.
+                    branch_ref = "HEAD"
+                    diff_result = subprocess.run(
+                        ["git", "diff", "--stat", f"origin/{BASE_BRANCH}...{branch_ref}"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    if diff_result.returncode != 0:
+                        diff_result = subprocess.run(
+                            ["git", "diff", "--stat", branch_ref],
+                            capture_output=True, text=True, timeout=10,
+                        )
+                    diff_lines = diff_result.stdout.strip().splitlines()
+                    file_changes = []
+                    for line in diff_lines:
+                        m = re.match(r"\s*(\S+)\s*\|\s*\d+\s*([+-]+)", line)
+                        if m:
+                            fname = os.path.basename(m.group(1))
+                            plusminus = m.group(2)
+                            ins = plusminus.count("+")
+                            dels = plusminus.count("-")
+                            file_changes.append(f"{fname} +{ins}/-{dels}")
+                    dirty_result = subprocess.run(
+                        ["git", "status", "--short"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    dirty = bool(dirty_result.stdout.strip())
+                    changes_str = "  ".join(file_changes) if file_changes else "(none)"
+                    if dirty:
+                        changes_str += "  [+dirty]"
+
+                    # Strip tool-call messages for the status check call.
+                    text_messages = [
+                        m for m in messages
+                        if m.get("role") in ("system", "user")
+                        or (m.get("role") == "assistant" and not m.get("tool_calls"))
+                    ]
+                    status_messages = text_messages + [
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Changes: {changes_str}\n\n"
+                                "STATUS CHECK: One sentence only — what are you currently doing? "
+                                "Be concrete (name files/functions). No preamble."
+                            ),
+                        }
+                    ]
+                    status_response = completion(
+                        model=LLM_MODEL,
+                        messages=status_messages,
+                        max_tokens=128,
+                    )
+                    status_text = ""
+                    first_sentence = ""
+                    if status_response.choices:
+                        sc = status_response.choices[0].message
+                        if hasattr(sc, "content") and sc.content:
+                            raw = sc.content.strip()
+                            first_sentence = re.split(r"(?<=[.!?])\s|\n", raw)[0]
+                            status_text = f"{first_sentence}  \n\u00a0\u00a0\u00a0\u00a0[Changes: {changes_str}]"
+                    if status_text:
+                        status_log.append((iteration + 1, status_text))
+                        print(f"  [Status log iter {iteration + 1}]: {first_sentence[:100]}")
+                except Exception as e:
+                    print(f"  [Status log] failed at iteration {iteration + 1}: {e}")
+
     finally:
         write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1)
+
+    # Post status log to the PR if collected.
+    if status_log and PR_NUMBER and GITHUB_REPO:
+        try:
+            log_text = "\n\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
+            model_header = f"\U0001f916 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n" if ALIAS else ""
+            comment_body = f"## Agent Status Log\n\n{model_header}{log_text}"
+            comment_file = "/tmp/rdb_status_log_comment.txt"
+            with open(comment_file, "w") as f:
+                f.write(comment_body)
+            run(
+                f"gh pr comment {PR_NUMBER} --repo {GITHUB_REPO} --body-file {comment_file}",
+                check=False,
+                timeout=30,
+            )
+        except Exception as e:
+            print(f"Could not post status log comment: {e}")
 
     if finish_args is None:
         write_status(False, "Agent exhausted all iterations without calling finish()")
