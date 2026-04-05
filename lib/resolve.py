@@ -976,9 +976,12 @@ def main():
     distill_input_tokens = 0
     distill_output_tokens = 0
     distill_cost = 0.0
+    pre_distill_tokens = 0  # token estimate before distillation
+    post_distill_tokens = 0  # token estimate after distillation (0 = distillation did not run)
     if DISTILL_ENABLED:
         try:
             from lib.distill import maybe_distill
+            pre_distill_tokens = len(repo_context) // 4
             print("Running context distillation pre-step...")
             distilled, distill_input_tokens, distill_output_tokens, distill_cost = maybe_distill(
                 repo_context, issue_context, LLM_MODEL
@@ -986,6 +989,7 @@ def main():
             if distilled != repo_context:
                 agent_context = f"## Distilled Context\n\n{distilled}"
                 distillation_ran = True
+                post_distill_tokens = len(distilled) // 4
                 print(f"Distillation complete: {distill_input_tokens} input tokens, {distill_output_tokens} output tokens, ${distill_cost:.4f}")
             else:
                 agent_context = repo_context
@@ -1391,11 +1395,41 @@ def main():
     finally:
         write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1)
 
+    # Compute distillation savings summary (if distillation ran)
+    distillation_summary = ""
+    if distillation_ran and pre_distill_tokens > 0 and post_distill_tokens > 0:
+        try:
+            actual_iterations = last_iteration + 1
+            tokens_saved_per_iter = pre_distill_tokens - post_distill_tokens
+            total_tokens_saved = tokens_saved_per_iter * actual_iterations
+            # Estimate cost saved using LiteLLM model pricing
+            cost_saved_str = ""
+            try:
+                import litellm
+                model_info = litellm.get_model_info(LLM_MODEL)
+                input_cost_per_token = model_info.get("input_cost_per_token", 0)
+                if input_cost_per_token:
+                    cost_saved = total_tokens_saved * input_cost_per_token
+                    cost_saved_str = f" (~${cost_saved:.4f} saved)"
+            except Exception:
+                pass  # cost estimate is optional; skip if unavailable
+            distillation_summary = (
+                f"**Distillation:** {pre_distill_tokens:,} tokens → {post_distill_tokens:,} tokens "
+                f"({tokens_saved_per_iter:,} saved/iter × {actual_iterations} iters = "
+                f"{total_tokens_saved:,} total input tokens saved{cost_saved_str})"
+            )
+            print(f"Distillation savings: {distillation_summary}")
+        except Exception as e:
+            print(f"Could not compute distillation savings: {e}")
+
     # Post rolling status log as issue comment (if any entries were collected)
     if status_log and ISSUE_NUMBER and GITHUB_REPO:
         try:
             log_text = "\n\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
-            comment_body = f"## Agent Status Log\n\n{log_text}"
+            if distillation_summary:
+                comment_body = f"## Agent Status Log\n\n{distillation_summary}\n\n{log_text}"
+            else:
+                comment_body = f"## Agent Status Log\n\n{log_text}"
             comment_file = "/tmp/rdb_status_log_comment.txt"
             with open(comment_file, "w") as f:
                 f.write(comment_body)
