@@ -1050,6 +1050,8 @@ def main():
             from lib.distill import maybe_distill
             pre_distill_tokens = len(repo_context) // 4
             print("Running context distillation pre-step...")
+            # Estimate tokens before distillation so we can measure savings
+            undistilled_tokens = estimate_tokens([{"content": repo_context}])
             distilled, distill_input_tokens, distill_output_tokens, distill_cost = maybe_distill(
                 repo_context, issue_context, LLM_MODEL
             )
@@ -1058,6 +1060,7 @@ def main():
                 distillation_ran = True
                 post_distill_tokens = len(distilled) // 4
                 print(f"Distillation complete: {distill_input_tokens} input tokens, {distill_output_tokens} output tokens, ${distill_cost:.4f}")
+                print(f"  [Distillation] {distillation_summary}")
             else:
                 agent_context = repo_context
                 print("Distillation skipped or returned original context")
@@ -1108,6 +1111,9 @@ def main():
     last_iteration = 0
     no_tool_call_count = 0
     status_log = []  # list of (iteration, status_text) tuples
+    # Add distillation summary as first status log entry if distillation ran
+    if distillation_summary:
+        status_log.append((0, f"**Distillation summary:** {distillation_summary}"))
     transient_error_counter = [0]  # mutable counter for transient API errors
 
     rate_limit_retries = 0
@@ -1122,13 +1128,24 @@ def main():
             # This is more effective than the system prompt hint alone — the agent
             # is deep in context by this point and needs a fresh, visible reminder.
             if WRAPUP_ENABLED and WRAPUP_ITERATION > 0 and iteration + 1 >= WRAPUP_ITERATION:
-                remaining = MAX_ITERATIONS - WRAPUP_ITERATION
-                print(f"  [Wrapup] Injecting wrapup message at iteration {iteration + 1}")
+                remaining = MAX_ITERATIONS - (iteration + 1)
+                is_final = (iteration + 1 == MAX_ITERATIONS)
+                print(f"  [Wrapup] Injecting {'FINAL' if is_final else 'wrapup'} message at iteration {iteration + 1}")
                 if DEBUG_LOGGING:
                     print(f"  [DEBUG] Wrapup injected at iteration {iteration + 1}")
-                messages.append({
-                    "role": "user",
-                    "content": (
+                if is_final:
+                    wrapup_content = (
+                        f"🚨 FINAL ITERATION — {iteration + 1} of {MAX_ITERATIONS}. "
+                        "THIS IS YOUR LAST TOOL CALL. There are NO more iterations after this.\n\n"
+                        "You MUST do exactly these two things and nothing else:\n"
+                        "1. `git add -A && git commit -m \"WIP: partial implementation\" && git push origin HEAD`\n"
+                        "2. Call `finish(success=False, explanation=\"...\")` — this is mandatory.\n\n"
+                        "If you do not call finish(), the run is marked as failure and ALL unpushed "
+                        "work is permanently lost when this runner shuts down. "
+                        "Do not read files. Do not make changes. Commit, push, finish."
+                    )
+                else:
+                    wrapup_content = (
                         f"⚠️ WRAP UP NOW — iteration {iteration + 1} of {MAX_ITERATIONS}. "
                         f"Only {remaining} iteration(s) remain after this one.\n\n"
                         "**First, right now, before anything else: push whatever you have.**\n"
@@ -1139,8 +1156,8 @@ def main():
                         "3. Call `finish(success=False, explanation=\"...\")` describing "
                         "what was done and what remains.\n\n"
                         "Do NOT start any new work. Push and finish now."
-                    ),
-                })
+                    )
+                messages.append({"role": "user", "content": wrapup_content})
 
             # Debug logging: per-iteration context stats
             if DEBUG_LOGGING:
