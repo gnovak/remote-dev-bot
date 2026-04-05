@@ -367,7 +367,7 @@ def compact_messages(messages, compaction_coverage, compaction_factor, llm_call_
     return new_messages, stats
 
 
-def completion_with_retries(completion_fn, *args, **kwargs):
+def completion_with_retries(completion_fn, *args, transient_error_counter=None, **kwargs):
     """Call a litellm completion function with retry logic for transient errors.
 
     Retries on ServiceUnavailableError and InternalServerError (e.g., Anthropic
@@ -377,6 +377,9 @@ def completion_with_retries(completion_fn, *args, **kwargs):
     Args:
         completion_fn: The litellm completion callable to wrap.
         *args, **kwargs: Passed directly to completion_fn.
+        transient_error_counter: Optional mutable list of one int. If provided,
+            its first element is incremented each time a transient error occurs
+            (including retries and the final exhausted-retries failure).
 
     Returns:
         The completion response on success.
@@ -403,9 +406,13 @@ def completion_with_retries(completion_fn, *args, **kwargs):
         except RETRYABLE_ERRORS as exc:
             last_exc = exc
             if attempt >= MAX_RETRIES:
+                if transient_error_counter is not None:
+                    transient_error_counter[0] += 1
                 print(f"  [Retry] Transient error — exhausted {MAX_RETRIES} retries: {exc}")
                 raise
             delay = min(BASE_DELAY_SECS * (2 ** attempt), MAX_DELAY_SECS)
+            if transient_error_counter is not None:
+                transient_error_counter[0] += 1
             print(
                 f"  [Retry] Transient error (attempt {attempt + 1}/{MAX_RETRIES}), "
                 f"retrying in {delay}s: {exc}"
