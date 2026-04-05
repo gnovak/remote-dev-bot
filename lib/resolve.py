@@ -1395,6 +1395,14 @@ def main():
     finally:
         write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1)
 
+    def _fmt_tokens(n):
+        """Format a token count as a human-readable string: '1.3 M', '73 K', '850'."""
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f} M"
+        if n >= 1_000:
+            return f"{n / 1_000:.0f} K"
+        return str(n)
+
     # Compute distillation savings summary (if distillation ran)
     distillation_summary = ""
     if distillation_ran and pre_distill_tokens > 0 and post_distill_tokens > 0:
@@ -1410,13 +1418,13 @@ def main():
                 input_cost_per_token = model_info.get("input_cost_per_token", 0)
                 if input_cost_per_token:
                     cost_saved = total_tokens_saved * input_cost_per_token
-                    cost_saved_str = f" (~${cost_saved:.4f} saved)"
+                    cost_saved_str = f" (~${cost_saved:.2f} saved)"
             except Exception:
                 pass  # cost estimate is optional; skip if unavailable
             distillation_summary = (
-                f"**Distillation:** {pre_distill_tokens:,} tokens → {post_distill_tokens:,} tokens "
-                f"({tokens_saved_per_iter:,} saved/iter × {actual_iterations} iters = "
-                f"{total_tokens_saved:,} total input tokens saved{cost_saved_str})"
+                f"**Distillation:** {_fmt_tokens(pre_distill_tokens)} tokens → {_fmt_tokens(post_distill_tokens)} tokens "
+                f"({_fmt_tokens(tokens_saved_per_iter)} saved/iter × {actual_iterations} iters = "
+                f"{_fmt_tokens(total_tokens_saved)} tokens saved{cost_saved_str})"
             )
             print(f"Distillation savings: {distillation_summary}")
         except Exception as e:
