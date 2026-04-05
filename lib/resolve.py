@@ -1035,6 +1035,7 @@ def main():
     last_iteration = 0
     no_tool_call_count = 0
     status_log = []  # list of (iteration, status_text) tuples
+    transient_error_counter = [0]  # mutable counter for transient API errors
 
     rate_limit_retries = 0
     MAX_RATE_LIMIT_RETRIES = 3
@@ -1082,6 +1083,7 @@ def main():
                     messages=messages,
                     tools=TOOLS,
                     max_tokens=16384,
+                    transient_error_counter=transient_error_counter,
                 )
             except litellm.exceptions.RateLimitError as exc:
                 rate_limit_retries += 1
@@ -1374,7 +1376,11 @@ def main():
                             # Keep only the first sentence to prevent tool-call XML sprawl
                             raw = sc.content.strip()
                             first_sentence = re.split(r"(?<=[.!?])\s|\n", raw)[0]
-                            status_text = f"{first_sentence}  \n\u00a0\u00a0\u00a0\u00a0[Changes: {changes_str}]"
+                            transient_note = (
+                                f" | ⚠️ {transient_error_counter[0]} transient API error(s)"
+                                if transient_error_counter[0] > 0 else ""
+                            )
+                            status_text = f"{first_sentence}  \n\u00a0\u00a0\u00a0\u00a0[Changes: {changes_str}{transient_note}]"
                     if status_text:
                         status_log.append((iteration + 1, status_text))
                         print(f"  [Status log iter {iteration + 1}]: {first_sentence[:100]}")
