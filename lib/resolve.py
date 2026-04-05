@@ -879,6 +879,8 @@ def build_cost_table():
     output_toks = int(d.get("output_tokens", 0))
     cost_val = float(d.get("cost") or 0)
     iterations = int(d.get("iterations", 0))
+    cache_read_toks = int(d.get("cache_read_tokens", 0))
+    cache_creation_toks = int(d.get("cache_creation_tokens", 0))
 
     try:
         elapsed = int(time.time()) - int(open("/tmp/start_time").read().strip())
@@ -900,8 +902,23 @@ def build_cost_table():
         ("Iterations", str(iterations)),
         ("Input", f"{_fmt_tok(input_toks)} tokens"),
         ("Output", f"{_fmt_tok(output_toks)} tokens"),
-        ("**Cost**", f"**${rounded:.2f}**"),
     ]
+    if cache_read_toks > 0:
+        rows.append(("Cache read", f"{_fmt_tok(cache_read_toks)} tokens"))
+    if cache_creation_toks > 0:
+        rows.append(("Cache write", f"{_fmt_tok(cache_creation_toks)} tokens"))
+    if cache_read_toks > 0 or cache_creation_toks > 0:
+        # Estimate cache savings: cache reads are billed at ~10% of normal input price;
+        # without caching those tokens would have been billed at 100%.
+        # Savings ≈ cache_read_tokens * normal_input_price * 0.9
+        # We approximate using the observed average input token price.
+        uncached_input = input_toks - cache_read_toks
+        if uncached_input > 0 and input_toks > 0:
+            avg_input_price = cost_val / (input_toks + output_toks) if (input_toks + output_toks) > 0 else 0
+            # Rough savings: cache_read_toks would have cost full price but cost ~10%
+            cache_savings = cache_read_toks * avg_input_price * 0.9
+            rows.append(("Cache savings (est.)", f"~${cache_savings:.4f}"))
+    rows.append(("**Cost**", f"**${rounded:.2f}**"))
     lines = ["", "### 💰 Cost", "", "| Metric | Value |", "|--------|-------|"]
     lines += [f"| {k} | {v} |" for k, v in rows]
     return "\n".join(lines)
@@ -913,7 +930,8 @@ def write_status(success, explanation):
         json.dump({"success": success, "explanation": explanation}, f)
 
 
-def write_usage(input_tokens, output_tokens, cost, iterations):
+def write_usage(input_tokens, output_tokens, cost, iterations,
+                cache_read_tokens=0, cache_creation_tokens=0):
     """Write token usage to /tmp/llm_usage.json."""
     with open("/tmp/llm_usage.json", "w") as f:
         json.dump(
@@ -922,6 +940,8 @@ def write_usage(input_tokens, output_tokens, cost, iterations):
                 "output_tokens": output_tokens,
                 "cost": cost,
                 "iterations": iterations,
+                "cache_read_tokens": cache_read_tokens,
+                "cache_creation_tokens": cache_creation_tokens,
             },
             f,
         )
@@ -1035,6 +1055,8 @@ def main():
     total_input_tokens = distill_input_tokens
     total_output_tokens = distill_output_tokens
     total_cost = distill_cost
+    total_cache_read_tokens = 0
+    total_cache_creation_tokens = 0
     finish_args = None
     last_iteration = 0
     no_tool_call_count = 0
@@ -1138,6 +1160,11 @@ def main():
             if usage:
                 total_input_tokens += getattr(usage, "prompt_tokens", 0)
                 total_output_tokens += getattr(usage, "completion_tokens", 0)
+                # Prompt caching token details (normalized by LiteLLM across providers)
+                prompt_details = getattr(usage, "prompt_tokens_details", None)
+                if prompt_details:
+                    total_cache_read_tokens += getattr(prompt_details, "cached_tokens", 0) or 0
+                    total_cache_creation_tokens += getattr(prompt_details, "cache_creation_input_tokens", 0) or 0
             cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
             if cost:
                 total_cost += cost
@@ -1393,7 +1420,9 @@ def main():
 
     # Write usage data (always, even on exception)
     finally:
-        write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1)
+        write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1,
+                    cache_read_tokens=total_cache_read_tokens,
+                    cache_creation_tokens=total_cache_creation_tokens)
 
     def _fmt_tokens(n):
         """Format a token count as a human-readable string: '1.3 M', '73 K', '850'."""

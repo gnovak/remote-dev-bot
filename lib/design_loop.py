@@ -284,6 +284,8 @@ def run_design_loop(
     total_input_tokens = 0
     total_output_tokens = 0
     total_cost = 0.0
+    total_cache_read_tokens = 0
+    total_cache_creation_tokens = 0
     final_analysis = None
     last_response = None
     wrapup_injected = False
@@ -305,6 +307,11 @@ def run_design_loop(
         if usage:
             total_input_tokens += getattr(usage, "prompt_tokens", 0)
             total_output_tokens += getattr(usage, "completion_tokens", 0)
+            # Prompt caching token details (normalized by LiteLLM across providers)
+            prompt_details = getattr(usage, "prompt_tokens_details", None)
+            if prompt_details:
+                total_cache_read_tokens += getattr(prompt_details, "cached_tokens", 0) or 0
+                total_cache_creation_tokens += getattr(prompt_details, "cache_creation_input_tokens", 0) or 0
         cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
         if cost:
             total_cost += cost
@@ -378,6 +385,8 @@ def run_design_loop(
         "output_tokens": total_output_tokens,
         "cost": total_cost,
         "iterations": (iteration + 1) if max_iterations > 0 else 0,
+        "cache_read_tokens": total_cache_read_tokens,
+        "cache_creation_tokens": total_cache_creation_tokens,
     }
 
 
