@@ -1479,10 +1479,11 @@ def main():
     if status_log and ISSUE_NUMBER and GITHUB_REPO:
         try:
             log_text = "\n\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
+            model_header = f"\U0001f916 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n" if ALIAS else ""
             if distillation_summary:
-                comment_body = f"## Agent Status Log\n\n{distillation_summary}\n\n{log_text}"
+                comment_body = f"## Agent Status Log\n\n{model_header}{distillation_summary}\n\n{log_text}"
             else:
-                comment_body = f"## Agent Status Log\n\n{log_text}"
+                comment_body = f"## Agent Status Log\n\n{model_header}{log_text}"
             comment_file = "/tmp/rdb_status_log_comment.txt"
             with open(comment_file, "w") as f:
                 f.write(comment_body)
