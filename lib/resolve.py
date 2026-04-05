@@ -1019,6 +1019,8 @@ def main():
             from lib.distill import maybe_distill
             pre_distill_tokens = len(repo_context) // 4
             print("Running context distillation pre-step...")
+            # Estimate tokens before distillation so we can measure savings
+            undistilled_tokens = estimate_tokens([{"content": repo_context}])
             distilled, distill_input_tokens, distill_output_tokens, distill_cost = maybe_distill(
                 repo_context, issue_context, LLM_MODEL
             )
@@ -1027,6 +1029,7 @@ def main():
                 distillation_ran = True
                 post_distill_tokens = len(distilled) // 4
                 print(f"Distillation complete: {distill_input_tokens} input tokens, {distill_output_tokens} output tokens, ${distill_cost:.4f}")
+                print(f"  [Distillation] {distillation_summary}")
             else:
                 agent_context = repo_context
                 print("Distillation skipped or returned original context")
@@ -1077,6 +1080,9 @@ def main():
     last_iteration = 0
     no_tool_call_count = 0
     status_log = []  # list of (iteration, status_text) tuples
+    # Add distillation summary as first status log entry if distillation ran
+    if distillation_summary:
+        status_log.append((0, f"**Distillation summary:** {distillation_summary}"))
     transient_error_counter = [0]  # mutable counter for transient API errors
 
     rate_limit_retries = 0
