@@ -488,6 +488,7 @@ At that point only {remaining} iteration(s) remain. If the rebase is not complet
 def main():
     print(f"Setting up branch for PR #{PR_NUMBER}...")
     branch, head_sha = setup_branch()
+    open('/tmp/agent_start_sha', 'w').write(head_sha)
     print(f"Working on branch: {branch} (HEAD: {head_sha[:8]})")
 
     # Gather repository context
