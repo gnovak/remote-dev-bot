@@ -380,7 +380,40 @@ jobs:
           fi
 
           SUCCESS=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('true' if d.get('success') else 'false')")
+          NO_OP=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('true' if d.get('no_op') else 'false')")
           EXPLANATION=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print(d.get('explanation',''))")
+
+          if [[ "$NO_OP" == "true" ]]; then
+            {
+              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo ""
+              echo "### ℹ️ No change needed"
+              echo ""
+              echo "The agent investigated this issue and determined that no code change is required."
+              echo ""
+              if [[ -n "$EXPLANATION" ]]; then
+                echo "**Agent's findings:**"
+                echo ""
+                echo "$EXPLANATION"
+                echo ""
+              fi
+              echo "### 💰 Cost"
+              echo ""
+              echo "| Metric | Value |"
+              echo "|--------|-------|"
+              echo "| Time | ${ELAPSED_FMT} |"
+              echo "| Iterations | ${ITERATIONS_FMT} |"
+              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+            } > /tmp/noop_comment.md
+
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/noop_comment.md
+            echo "cost embedded" > /tmp/cost_embedded
+            exit 0
+          fi
 
           if [[ "$SUCCESS" == "false" ]]; then
             DRAFT_PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
@@ -433,7 +466,7 @@ jobs:
             iters="unknown"
           fi
           if [ -f /tmp/resolve_status.json ]; then
-            success=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('✅' if d.get('success') else '❌')")
+            success=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('✅ (no change needed)' if d.get('no_op') else ('✅' if d.get('success') else '❌'))")
             explanation=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print(d.get('explanation','')[:200])")
           else
             success="❓"
@@ -876,7 +909,40 @@ jobs:
           fi
 
           SUCCESS=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('true' if d.get('success') else 'false')")
+          NO_OP=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('true' if d.get('no_op') else 'false')")
           EXPLANATION=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print(d.get('explanation',''))")
+
+          if [[ "$NO_OP" == "true" ]]; then
+            {
+              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo ""
+              echo "### ℹ️ No change needed"
+              echo ""
+              echo "The agent investigated this issue and determined that no code change is required."
+              echo ""
+              if [[ -n "$EXPLANATION" ]]; then
+                echo "**Agent's findings:**"
+                echo ""
+                echo "$EXPLANATION"
+                echo ""
+              fi
+              echo "### 💰 Cost"
+              echo ""
+              echo "| Metric | Value |"
+              echo "|--------|-------|"
+              echo "| Time | ${ELAPSED_FMT} |"
+              echo "| Iterations | ${ITERATIONS_FMT} |"
+              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+            } > /tmp/noop_comment.md
+
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/noop_comment.md
+            echo "cost embedded" > /tmp/cost_embedded
+            exit 0
+          fi
 
           if [[ "$SUCCESS" == "false" ]]; then
             DRAFT_PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
@@ -930,6 +996,12 @@ jobs:
           PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
 
           if [[ -z "$PR_URL" ]]; then
+            # Check if this was an intentional no-op — if so, skip silently
+            NO_OP=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')) if __import__('os').path.exists('/tmp/resolve_status.json') else {}; print('true' if d.get('no_op') else 'false')")
+            if [[ "$NO_OP" == "true" ]]; then
+              echo "Agent signaled no_op — no PR to review. Skipping council review."
+              exit 0
+            fi
             echo "No PR URL found — resolve may have failed. Posting notice and skipping council review."
             gh issue comment "$ISSUE_NUMBER" \
               --repo "$GITHUB_REPO" \
@@ -1045,7 +1117,7 @@ jobs:
             iters="unknown"
           fi
           if [ -f /tmp/resolve_status.json ]; then
-            success=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('✅' if d.get('success') else '❌')")
+            success=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print('✅ (no change needed)' if d.get('no_op') else ('✅' if d.get('success') else '❌'))")
             explanation=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')); print(d.get('explanation','')[:200])")
           else
             success="❓"

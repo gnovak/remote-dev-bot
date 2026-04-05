@@ -524,6 +524,7 @@ Each commit message should describe what that unit of work does — treat them a
   - For issue triggers: the workflow creates a PR from your branch to the target branch
   - For PR triggers: the workflow records the PR URL; no new PR is created
 - If you cannot complete: call `finish(success=False, explanation="...")` describing what you tried and why it failed
+- **If investigation shows no change is needed**: call `no_op(reason="...")` instead of finish(). Use this when the code is already correct, the reported bug does not exist, or the requested change should deliberately not be made. The workflow will post your explanation as a comment and mark the run as success without creating a PR. Do NOT call finish(success=True) with empty commits in this case.
 - Before calling finish: verify your changes work (run tests if they exist, check the code compiles)
 
 **PR title**: Use imperative mood describing the change, not the issue number.
@@ -750,6 +751,33 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "no_op",
+            "description": (
+                "Signal that the investigation is complete and no code change is needed. "
+                "Use this when you have investigated the issue and determined that the code "
+                "is already correct, the reported problem does not exist, or the requested "
+                "change should not be made. "
+                "The workflow will post an explanatory comment on the issue and mark the "
+                "run as success without creating a PR."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": (
+                            "Clear explanation of what was investigated and why no change "
+                            "is needed. This will be posted as a comment on the issue."
+                        ),
+                    },
+                },
+                "required": ["reason"],
+            },
+        },
+    },
 ]
 
 
@@ -940,10 +968,13 @@ def build_cost_table():
     return "\n".join(lines)
 
 
-def write_status(success, explanation):
+def write_status(success, explanation, no_op=False):
     """Write resolve status to /tmp/resolve_status.json."""
+    payload = {"success": success, "explanation": explanation}
+    if no_op:
+        payload["no_op"] = True
     with open("/tmp/resolve_status.json", "w") as f:
-        json.dump({"success": success, "explanation": explanation}, f)
+        json.dump(payload, f)
 
 
 def write_usage(input_tokens, output_tokens, cost, iterations,
@@ -1260,6 +1291,10 @@ def main():
                     finish_args = arguments
                     done = True
                     tool_result = "finish() received. Task loop ending."
+                elif tool_name == "no_op":
+                    finish_args = {"_no_op": True, "reason": arguments.get("reason", "")}
+                    done = True
+                    tool_result = "no_op() received. Task loop ending."
                 else:
                     tool_result = execute_tool(tool_name, arguments)
 
@@ -1533,6 +1568,13 @@ def main():
                 _pr_created = True
             except Exception as e:
                 print(f"Could not create draft PR: {e}")
+        return
+
+    # Handle no_op: agent investigated and determined no change is needed
+    if finish_args.get("_no_op"):
+        reason = finish_args.get("reason", "")
+        write_status(True, reason, no_op=True)
+        print(f"Agent signaled no_op: {reason}")
         return
 
     success = finish_args.get("success", False)
