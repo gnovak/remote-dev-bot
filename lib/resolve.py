@@ -139,6 +139,22 @@ def setup_branch():
         branch = _find_available_branch(ISSUE_NUMBER)
         run(f"git checkout -b {branch}")
 
+    # Exclude .remote-dev-bot from git tracking so the agent doesn't
+    # accidentally commit the checkout directory as a submodule reference.
+    # Uses .git/info/exclude (local-only, not committed to the repo).
+    exclude_file = os.path.join(".git", "info", "exclude")
+    os.makedirs(os.path.dirname(exclude_file), exist_ok=True)
+    exclude_entry = ".remote-dev-bot"
+    existing = ""
+    if os.path.exists(exclude_file):
+        with open(exclude_file, "r") as ef:
+            existing = ef.read()
+    if exclude_entry not in existing.splitlines():
+        with open(exclude_file, "a") as ef:
+            if existing and not existing.endswith("\n"):
+                ef.write("\n")
+            ef.write(exclude_entry + "\n")
+
     # Record the current HEAD as the diff base for post-run cost metrics.
     # This must happen after branch setup: for issue triggers the workflow's
     # initial checkout lands on the default branch (main), but the agent
