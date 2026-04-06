@@ -76,18 +76,31 @@ def _build_tool_call_map(messages):
 
 
 def _is_write_tool_result(tool_call_id, call_map):
-    """Return True if the tool call with this ID was a write/modification operation.
+    """Return True if the tool call with this ID was a write/modification operation,
+    OR if it is a read_file/grep result that should be protected from early dropping.
 
-    Read-only tools (read_file, grep) are always droppable.
-    Bash commands that modify files or run git write operations are protected.
-    finish() calls are also droppable (they only appear at end of run).
+    Drop priority (lowest = dropped first):
+      1. Bash read-only commands (ls, cat, git log, etc.) — dropped first
+      2. read_file / grep results — dropped second (kept longer as reference material)
+      3. Bash write operations (git commit/push, file edits) — dropped last
+      4. finish() calls — droppable (they only appear at end of run)
+
+    In trim_tool_results, "write" means "protected / drop later".
+    read_file and grep are treated as protected so they survive longer in context,
+    since they are the primary reference material the agent uses to understand
+    the codebase and should not be discarded before write-operation records.
     """
     info = call_map.get(tool_call_id, {})
     tool_name = info.get("name", "")
 
-    # read_file and grep are always read-only
-    if tool_name in ("read_file", "grep", "finish"):
+    # finish() calls are always droppable
+    if tool_name == "finish":
         return False
+
+    # read_file and grep are reference material — protect them like write ops
+    # so they are dropped AFTER plain bash read commands
+    if tool_name in ("read_file", "grep"):
+        return True
 
     # bash calls may be reads or writes — check the command
     if tool_name == "bash":
@@ -111,10 +124,11 @@ def trim_tool_results(messages, keep_n):
     (role="assistant", tool_calls=[...]) and results are role="tool" messages.
 
     Drop policy (smart ordering):
-    - Read-only results (read_file, grep, read-style bash) are dropped first.
-    - Write results (git commit/push, file edits) are dropped only if necessary
-      after all read-only results have been exhausted.
-    - This preserves context about what was actually changed for longer.
+    - Bash read-only results (ls, cat, git log, etc.) are dropped first.
+    - read_file and grep results are dropped second — they are reference material
+      that the agent needs to understand the codebase, so they are protected longer.
+    - Bash write results (git commit/push, file edits) are dropped last.
+    - This preserves context about file contents and what was actually changed.
     """
     if keep_n <= 0:
         return messages
