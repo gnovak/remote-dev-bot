@@ -338,7 +338,12 @@ def run_design_loop(
             except json.JSONDecodeError:
                 arguments = {}
 
-            print(f"  Tool: {tool_name}({list(arguments.keys())})")
+            if tool_name == "bash":
+                print(f"  Tool: bash({arguments.get('command', '')[:80]!r})")
+            elif tool_name in ("read_file", "grep", "finish"):
+                print(f"  Tool: {tool_name}({arguments})")
+            else:
+                print(f"  Tool: {tool_name}({list(arguments.keys())})")
             result = execute_tool(tool_name, arguments)
 
             if tool_name == "submit_analysis":
