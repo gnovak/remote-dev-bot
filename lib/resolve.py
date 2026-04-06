@@ -1045,6 +1045,7 @@ def main():
     distill_cost = 0.0
     pre_distill_tokens = 0  # token estimate before distillation
     post_distill_tokens = 0  # token estimate after distillation (0 = distillation did not run)
+    distillation_summary = ""
     if DISTILL_ENABLED:
         try:
             from lib.distill import maybe_distill
@@ -1060,7 +1061,7 @@ def main():
                 distillation_ran = True
                 post_distill_tokens = len(distilled) // 4
                 print(f"Distillation complete: {distill_input_tokens} input tokens, {distill_output_tokens} output tokens, ${distill_cost:.4f}")
-                print(f"  [Distillation] {distillation_summary}")
+                print(f"  [Distillation] {pre_distill_tokens} tokens -> {post_distill_tokens} tokens")
             else:
                 agent_context = repo_context
                 print("Distillation skipped or returned original context")
