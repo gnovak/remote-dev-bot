@@ -1446,44 +1446,87 @@ def main():
                     if dirty:
                         changes_str += "  [+dirty]"
 
-                    # Strip tool-call messages — the status check call omits
-                    # tools=TOOLS, so Anthropic rejects history containing
-                    # tool_calls/tool roles. Keep only text turns.
-                    text_messages = [
-                        m for m in messages
-                        if m.get("role") in ("system", "user")
-                        or (m.get("role") == "assistant" and not m.get("tool_calls"))
-                    ]
-                    status_messages = text_messages + [
-                        {
-                            "role": "user",
-                            "content": (
-                                f"Changes: {changes_str}\n\n"
-                                "STATUS CHECK: One sentence only — what are you currently doing? "
-                                "Be concrete (name files/functions). No preamble."
-                            ),
-                        }
-                    ]
-                    status_response = completion(
-                        model=LLM_MODEL,
-                        messages=status_messages,
-                        max_tokens=128,
-                    )
-                    status_text = ""
-                    if status_response.choices:
-                        sc = status_response.choices[0].message
-                        if hasattr(sc, "content") and sc.content:
-                            # Keep only the first sentence to prevent tool-call XML sprawl
-                            raw = sc.content.strip()
-                            first_sentence = re.split(r"(?<=[.!?])\s|\n", raw)[0]
-                            transient_note = (
-                                f" | ⚠️ {transient_error_counter[0]} transient API error(s)"
-                                if transient_error_counter[0] > 0 else ""
-                            )
-                            status_text = f"{first_sentence}  \n\u00a0\u00a0\u00a0\u00a0[Changes: {changes_str}{transient_note}]"
-                    if status_text:
-                        status_log.append((iteration + 1, status_text))
-                        print(f"  [Status log iter {iteration + 1}]: {first_sentence[:100]}")
+                    # Determine whether any changes exist (committed or dirty)
+                    has_changes = bool(file_changes or dirty)
+
+                    if not has_changes:
+                        # Exploration phase: record a single "Exploring" entry,
+                        # then suppress further status calls until changes appear.
+                        already_exploring = any(
+                            "Exploring" in entry[1] for entry in status_log
+                        )
+                        if not already_exploring:
+                            status_log.append((iteration + 1, "Exploring codebase — no changes yet"))
+                            print(f"  [Status log iter {iteration + 1}]: Exploring codebase — no changes yet")
+                        # else: suppress — no new information to report
+                    else:
+                        # Extract the last ~5 tool calls from the message history
+                        # to give the status model concrete ground-truth context.
+                        recent_calls = []
+                        for msg in reversed(messages):
+                            if msg.get("role") == "assistant":
+                                # litellm / OpenAI format: tool_calls list
+                                for tc in msg.get("tool_calls") or []:
+                                    name = tc.get("function", {}).get("name", "?")
+                                    raw_args = tc.get("function", {}).get("arguments", "{}")
+                                    try:
+                                        args = json.loads(raw_args)
+                                    except Exception:
+                                        args = {}
+                                    arg_repr = str(list(args.values())[0])[:60] if args else ""
+                                    recent_calls.append(f"{name}({arg_repr!r})")
+                                # Anthropic native format: content list with type=tool_use
+                                msg_content = msg.get("content", [])
+                                if isinstance(msg_content, list):
+                                    for block in msg_content:
+                                        if isinstance(block, dict) and block.get("type") == "tool_use":
+                                            name = block.get("name", "?")
+                                            inp = block.get("input", {})
+                                            arg_repr = str(list(inp.values())[0])[:60] if inp else ""
+                                            recent_calls.append(f"{name}({arg_repr!r})")
+                            if len(recent_calls) >= 5:
+                                break
+                        recent_calls_str = ", ".join(reversed(recent_calls)) or "(none)"
+
+                        # Strip tool-call messages — the status check call omits
+                        # tools=TOOLS, so Anthropic rejects history containing
+                        # tool_calls/tool roles. Keep only text turns.
+                        text_messages = [
+                            m for m in messages
+                            if m.get("role") in ("system", "user")
+                            or (m.get("role") == "assistant" and not m.get("tool_calls"))
+                        ]
+                        status_messages = text_messages + [
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"Recent tool calls: {recent_calls_str}\n"
+                                    f"Files changed: {changes_str}\n\n"
+                                    "STATUS CHECK: One sentence — what specific work are you doing right now? "
+                                    "Name the file or function. No preamble."
+                                ),
+                            }
+                        ]
+                        status_response = completion(
+                            model=LLM_MODEL,
+                            messages=status_messages,
+                            max_tokens=128,
+                        )
+                        status_text = ""
+                        if status_response.choices:
+                            sc = status_response.choices[0].message
+                            if hasattr(sc, "content") and sc.content:
+                                # Keep only the first sentence to prevent tool-call XML sprawl
+                                raw = sc.content.strip()
+                                first_sentence = re.split(r"(?<=[.!?])\s|\n", raw)[0]
+                                transient_note = (
+                                    f" | ⚠️ {transient_error_counter[0]} transient API error(s)"
+                                    if transient_error_counter[0] > 0 else ""
+                                )
+                                status_text = f"{first_sentence}  \n\u00a0\u00a0\u00a0\u00a0[Changes: {changes_str}{transient_note}]"
+                        if status_text:
+                            status_log.append((iteration + 1, status_text))
+                            print(f"  [Status log iter {iteration + 1}]: {first_sentence[:100]}")
                 except Exception as e:
                     print(f"  [Status log] failed at iteration {iteration + 1}: {e}")
 
