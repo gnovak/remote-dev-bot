@@ -307,6 +307,25 @@ jobs:
 
           exit $RESOLVE_EXIT_CODE
 
+      - name: Safety-net push
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          # If the agent made commits but forgot to push, or exhausted iterations without
+          # calling finish(), save the work now. Skipped for no_op runs (nothing to push).
+          NO_OP=$(python3 -c "import json,os; d=json.load(open('/tmp/resolve_status.json')) if os.path.exists('/tmp/resolve_status.json') else {}; print('true' if d.get('no_op') else 'false')" 2>/dev/null || echo "false")
+          if [[ "$NO_OP" == "true" ]]; then
+            echo "no_op run — skipping safety-net push"
+            exit 0
+          fi
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "WIP: auto-saved by workflow (agent did not commit before exiting)"
+            echo "Committed uncommitted changes"
+          fi
+          git push origin HEAD 2>/dev/null || echo "Push failed or nothing to push"
+
       - name: Post result comment
         if: always()
         env:
@@ -835,6 +854,25 @@ jobs:
           fi
 
           exit $RESOLVE_EXIT_CODE
+
+      - name: Safety-net push
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          # If the agent made commits but forgot to push, or exhausted iterations without
+          # calling finish(), save the work now. Skipped for no_op runs (nothing to push).
+          NO_OP=$(python3 -c "import json,os; d=json.load(open('/tmp/resolve_status.json')) if os.path.exists('/tmp/resolve_status.json') else {}; print('true' if d.get('no_op') else 'false')" 2>/dev/null || echo "false")
+          if [[ "$NO_OP" == "true" ]]; then
+            echo "no_op run — skipping safety-net push"
+            exit 0
+          fi
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "WIP: auto-saved by workflow (agent did not commit before exiting)"
+            echo "Committed uncommitted changes"
+          fi
+          git push origin HEAD 2>/dev/null || echo "Push failed or nothing to push"
 
       - name: Post result comment
         if: always()
