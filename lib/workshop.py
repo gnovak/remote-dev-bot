@@ -823,3 +823,428 @@ def run_workshop(
         "total_output_tokens": total_output,
         "total_cost": total_cost,
     }
+
+
+# ---------------------------------------------------------------------------
+# Delegate orchestration (6-stage autonomous pipeline)
+# ---------------------------------------------------------------------------
+
+DESIGN_REVISION_SYSTEM_PROMPT = (
+    "You are a senior software architect. You previously produced a design proposal "
+    "for a GitHub issue, and your peers on a design council have critiqued it. "
+    "Your task is to revise the design based on the council's feedback.\n\n"
+    "Read the original design and each council critique carefully. Then produce "
+    "a revised design that:\n"
+    "- Addresses valid concerns raised by reviewers\n"
+    "- Explains why you rejected any concerns you disagree with\n"
+    "- Incorporates useful alternative suggestions\n"
+    "- Resolves open questions where possible\n\n"
+    "Output a complete, revised design proposal (not just a diff from the original)."
+)
+
+CODE_REVISION_SYSTEM_PROMPT = (
+    "You are a senior software engineer. You previously implemented a solution "
+    "for a GitHub issue, and your peers on a code review council have reviewed "
+    "the resulting pull request. Your task is to describe what changes should be "
+    "made to address the code review feedback.\n\n"
+    "Read the original PR diff and each code review carefully. Then produce "
+    "a revision plan that:\n"
+    "- Addresses valid concerns raised by reviewers\n"
+    "- Explains why you rejected any concerns you disagree with\n"
+    "- Incorporates useful suggestions\n"
+    "- Lists specific files and changes to make\n\n"
+    "Be concrete and actionable — the implementation agent will use your plan."
+)
+
+
+def _run_revision_call(
+    *,
+    model_id,
+    system_prompt,
+    user_content,
+    extra_instructions="",
+    max_tokens=8192,
+):
+    """Run a single non-agentic LLM call for design/code revision.
+
+    Returns dict with keys: text, input_tokens, output_tokens, cost.
+    """
+    from litellm import completion as litellm_completion
+    from context import completion_with_retries
+
+    if extra_instructions:
+        system_prompt += "\n\n" + extra_instructions
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+
+    response = completion_with_retries(
+        litellm_completion,
+        model=model_id,
+        messages=messages,
+        max_tokens=max_tokens,
+    )
+
+    usage = getattr(response, "usage", None)
+    input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+    output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
+    cost = getattr(response, "_hidden_params", {}).get("response_cost", None) or 0.0
+
+    text = response.choices[0].message.content or ""
+
+    return {
+        "text": text,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cost": cost,
+    }
+
+
+def run_delegate(
+    *,
+    model,
+    model_alias,
+    council_models,
+    issue_title,
+    issue_body,
+    issue_comments="",
+    extra_instructions="",
+    council_extra_instructions="",
+    extra_context="",
+    max_iterations=15,
+    wrapup_enabled=True,
+    wrapup_iteration=0,
+    context_keep_tool_results=0,
+    post_comment_fn=None,
+):
+    """Run the full delegate pipeline (6 stages, no human checkpoints).
+
+    Stages:
+        1. Design loop (agentic, same as /agent-design)
+        2. Council design review (parallel, same as /agent-workshop Stage 2)
+        3. Design revision — main agent reads critiques, updates design
+        4. Implementation / resolve (agentic, same as /agent-resolve)
+        5. Council code review (parallel, same as /agent-build Stage 2)
+        6. Code revision plan — main agent reads code reviews, describes fixes
+
+    Parameters
+    ----------
+    model : str
+        LiteLLM model ID for the main agent (design + resolve).
+    model_alias : str
+        Human-readable alias for the main agent.
+    council_models : list of dict
+        Each dict has "alias", "id", and optionally "extra_instructions".
+    issue_title, issue_body, issue_comments : str
+        Issue context.
+    extra_instructions : str
+        Additional instructions for the main agent (mode + model combined).
+    council_extra_instructions : str
+        Mode-level extra_instructions for council reviewers.
+    extra_context : str
+        Additional context for agentic loops.
+    max_iterations : int
+        Max iterations for agentic loops (design + resolve).
+    wrapup_enabled : bool
+        Whether graceful wrapup is enabled.
+    wrapup_iteration : int
+        Iteration at which to inject wrapup message.
+    context_keep_tool_results : int
+        Number of recent tool results to keep.
+    post_comment_fn : callable or None
+        Function to post a comment.
+
+    Returns
+    -------
+    dict with keys:
+        - design_result: dict from Stage 1
+        - council_results: list of dicts from Stage 2
+        - revised_design: dict from Stage 3
+        - resolve_result: dict from Stage 4 (placeholder — resolve runs externally)
+        - code_review_results: list of dicts from Stage 5 (placeholder)
+        - total_input_tokens: int
+        - total_output_tokens: int
+        - total_cost: float
+    """
+    from design_loop import run_design_loop, has_agent_command
+    import concurrent.futures
+
+    def post(body):
+        if post_comment_fn:
+            post_comment_fn(body)
+        else:
+            print(body)
+
+    all_input_tokens = 0
+    all_output_tokens = 0
+    all_cost = 0.0
+
+    # =======================================================================
+    # Stage 1: Design
+    # =======================================================================
+    post(
+        f"## 🚀 Delegate Stage 1/6 — Design\n\n"
+        f"Running design exploration with `{model_alias}` (`{model}`)...\n"
+    )
+
+    design_start = time.time()
+    design_result = run_design_loop(
+        model=model,
+        issue_title=issue_title,
+        issue_body=issue_body,
+        issue_comments=issue_comments,
+        extra_instructions=extra_instructions,
+        extra_context=extra_context,
+        max_iterations=max_iterations,
+        wrapup_enabled=wrapup_enabled,
+        wrapup_iteration=wrapup_iteration,
+        context_keep_tool_results=context_keep_tool_results,
+    )
+    design_elapsed = time.time() - design_start
+
+    design_analysis = design_result.get("analysis", "")
+    all_input_tokens += design_result.get("input_tokens", 0)
+    all_output_tokens += design_result.get("output_tokens", 0)
+    all_cost += design_result.get("cost", 0.0)
+
+    if not design_analysis:
+        post(
+            "⚠️ **Delegate Stage 1 did not produce a design.** "
+            "The design agent may have exhausted all iterations without "
+            "calling `submit_analysis`. Aborting delegate pipeline."
+        )
+        return {
+            "design_result": design_result,
+            "council_results": [],
+            "revised_design": None,
+            "total_input_tokens": all_input_tokens,
+            "total_output_tokens": all_output_tokens,
+            "total_cost": all_cost,
+        }
+
+    if has_agent_command(design_analysis):
+        post(
+            "⚠️ **Agent loop blocked!** The design analysis contained "
+            "`/agent` command(s). Aborting delegate pipeline for safety."
+        )
+        return {
+            "design_result": design_result,
+            "council_results": [],
+            "revised_design": None,
+            "total_input_tokens": all_input_tokens,
+            "total_output_tokens": all_output_tokens,
+            "total_cost": all_cost,
+        }
+
+    design_cost_table = _build_cost_table(
+        input_tokens=design_result.get("input_tokens", 0),
+        output_tokens=design_result.get("output_tokens", 0),
+        cost=design_result.get("cost", 0.0),
+        elapsed=design_elapsed,
+        output_text=design_analysis,
+    )
+    post(
+        f"🤖 **Model:** `{model_alias}` (`{model}`)\n\n"
+        f"{design_analysis}\n\n"
+        f"---\n"
+        f"_Design analysis by `/agent-delegate` Stage 1 (`{model_alias}`)_\n\n"
+        f"{design_cost_table}"
+    )
+
+    # =======================================================================
+    # Stage 2: Council Design Review
+    # =======================================================================
+    council_results = []
+    if council_models:
+        post(
+            f"## 🏛️ Delegate Stage 2/6 — Council Design Review\n\n"
+            f"Requesting critiques from {len(council_models)} council member(s): "
+            f"{', '.join('`' + m['alias'] + '`' for m in council_models)}...\n"
+        )
+
+        def _run_single_review(council_model):
+            model_id = council_model["id"]
+            key_name = _get_required_api_key_name(model_id)
+            if key_name is not None:
+                key_value = os.environ.get(key_name, "")
+                if not key_value:
+                    print(
+                        f"Skipping {council_model['alias']} — API key not configured "
+                        f"({key_name} is empty or missing)",
+                        flush=True,
+                    )
+                    return None
+
+            model_extra = council_model.get("extra_instructions", "")
+            reviewer_extra = "\n\n".join(p for p in [council_extra_instructions, model_extra] if p)
+
+            review_start = time.time()
+            result = run_council_review(
+                model_id=model_id,
+                model_alias=council_model["alias"],
+                issue_title=issue_title,
+                issue_body=issue_body,
+                issue_comments=issue_comments,
+                design_analysis=design_analysis,
+                extra_instructions=reviewer_extra,
+            )
+            result["elapsed"] = time.time() - review_start
+            return result
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(council_models)) as executor:
+            futures = {
+                executor.submit(_run_single_review, cm): cm
+                for cm in council_models
+            }
+            for future in concurrent.futures.as_completed(futures):
+                cm = futures[future]
+                try:
+                    result = future.result()
+                    if result is None:
+                        continue
+                    council_results.append(result)
+                except Exception as e:
+                    council_results.append({
+                        "review": f"⚠️ Error during review: {e}",
+                        "model_alias": cm["alias"],
+                        "model_id": cm["id"],
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "cost": 0.0,
+                        "elapsed": 0.0,
+                    })
+
+        for cr in council_results:
+            if has_agent_command(cr["review"]):
+                post(
+                    f"⚠️ **Agent loop blocked!** Review from `{cr['model_alias']}` "
+                    f"contained `/agent` command(s). Blocked for safety."
+                )
+            else:
+                cost_table = _build_cost_table(
+                    input_tokens=cr.get("input_tokens", 0),
+                    output_tokens=cr.get("output_tokens", 0),
+                    cost=cr.get("cost", 0.0),
+                    elapsed=cr.get("elapsed", 0.0),
+                    output_text=cr.get("review", ""),
+                )
+                post(
+                    f"🤖 **Council reviewer:** `{cr['model_alias']}` (`{cr['model_id']}`)\n\n"
+                    f"{cr['review']}\n\n"
+                    f"---\n"
+                    f"_Council review by `/agent-delegate` Stage 2 (`{cr['model_alias']}`)_\n\n"
+                    f"{cost_table}"
+                )
+
+            all_input_tokens += cr.get("input_tokens", 0)
+            all_output_tokens += cr.get("output_tokens", 0)
+            all_cost += cr.get("cost", 0.0)
+    else:
+        post(
+            "## 🏛️ Delegate Stage 2/6 — Council Design Review\n\n"
+            "⚠️ No council models configured. Skipping council design review.\n"
+        )
+
+    # =======================================================================
+    # Stage 3: Design Revision
+    # =======================================================================
+    post(
+        f"## 🔄 Delegate Stage 3/6 — Design Revision\n\n"
+        f"Main agent (`{model_alias}`) is revising the design based on council feedback...\n"
+    )
+
+    critiques_text = "\n\n---\n\n".join(
+        f"### Critique by {cr['model_alias']}\n\n{cr['review']}"
+        for cr in council_results
+        if not has_agent_command(cr.get("review", ""))
+    )
+
+    revision_user_content = (
+        f"## Original Design Proposal\n\n{design_analysis}\n\n"
+        f"## Council Critiques\n\n{critiques_text}\n\n"
+        f"---\n\n"
+        f"Please produce a revised, complete design proposal that addresses "
+        f"the council's feedback."
+    )
+
+    revision_start = time.time()
+    revision_result = _run_revision_call(
+        model_id=model,
+        system_prompt=DESIGN_REVISION_SYSTEM_PROMPT,
+        user_content=revision_user_content,
+        extra_instructions=extra_instructions,
+        max_tokens=8192,
+    )
+    revision_elapsed = time.time() - revision_start
+
+    revised_design = revision_result["text"]
+    all_input_tokens += revision_result["input_tokens"]
+    all_output_tokens += revision_result["output_tokens"]
+    all_cost += revision_result["cost"]
+
+    if has_agent_command(revised_design):
+        post(
+            "⚠️ **Agent loop blocked!** The revised design contained "
+            "`/agent` command(s). Blocked for safety."
+        )
+    else:
+        revision_cost_table = _build_cost_table(
+            input_tokens=revision_result["input_tokens"],
+            output_tokens=revision_result["output_tokens"],
+            cost=revision_result["cost"],
+            elapsed=revision_elapsed,
+            output_text=revised_design,
+        )
+        post(
+            f"🤖 **Model:** `{model_alias}` (`{model}`)\n\n"
+            f"{revised_design}\n\n"
+            f"---\n"
+            f"_Revised design by `/agent-delegate` Stage 3 (`{model_alias}`)_\n\n"
+            f"{revision_cost_table}"
+        )
+
+    # =======================================================================
+    # Stages 4-6: Implementation + Code Review + Revision
+    # =======================================================================
+    # Stages 4-6 (resolve, code review council, code revision) require the
+    # resolve agent infrastructure (branch setup, tool execution, PR creation)
+    # which runs as a separate workflow job.  The revised design from Stage 3
+    # is passed to the resolve job via the stage3_revised_design output.
+    #
+    # The workflow job for delegate mode will:
+    #   - Run Stages 1-3 here (design + council + revision)
+    #   - Pass the revised design to the resolve step as extra context
+    #   - After resolve creates a PR, run Stage 5 (council code review)
+    #   - Post Stage 6 (code revision plan) as a comment
+
+    post(
+        f"## Delegate Stages 1-3 complete\n\n"
+        f"Design exploration, council review, and design revision are done.\n"
+        f"Proceeding to implementation (Stage 4)...\n"
+    )
+
+    # Build aggregate cost table for Stages 1-3
+    stages_1_3_cost_table = _build_cost_table(
+        input_tokens=all_input_tokens,
+        output_tokens=all_output_tokens,
+        cost=all_cost,
+        elapsed=time.time() - design_start,
+        output_text=revised_design,
+    )
+    post(
+        f"### 📊 Delegate Stages 1-3 Aggregate Cost\n\n"
+        f"{stages_1_3_cost_table}"
+    )
+
+    return {
+        "design_result": design_result,
+        "design_analysis": design_analysis,
+        "council_results": council_results,
+        "revised_design": revised_design,
+        "revision_result": revision_result,
+        "total_input_tokens": all_input_tokens,
+        "total_output_tokens": all_output_tokens,
+        "total_cost": all_cost,
+    }
