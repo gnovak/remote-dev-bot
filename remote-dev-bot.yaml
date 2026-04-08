@@ -51,6 +51,12 @@ modes:
     extra_files:
       - AGENTS.md
       - README.md
+    # Council: models that review the PR when `council = true` inline arg is used.
+    # Defaults to all configured models if not specified.
+    council:
+      - claude-small
+      - gpt-small
+      - gemini-small
 
   workshop:
     default_model: claude-small  # Model for design stage (Stage 1)

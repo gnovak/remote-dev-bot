@@ -1453,6 +1453,124 @@ class TestWorkshopConfig:
             assert m["id"]  # not empty
 
 
+# --- review mode council ---
+
+
+class TestReviewCouncil:
+    """Tests for council = true inline arg on review mode."""
+
+    @pytest.fixture
+    def review_council_config_dir(self, tmp_path):
+        """Create a temp dir with config that includes review mode with council list."""
+        config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "gpt-small": {"id": "openai/gpt-4o-mini"},
+                "gemini-small": {"id": "gemini/gemini-2.5-flash"},
+            },
+            "modes": {
+                "resolve": {},
+                "review": {
+                    "max_iterations": 10,
+                    "council": ["claude-small", "gpt-small", "gemini-small"],
+                },
+            },
+            "agent": {
+                "max_iterations": 50,
+                "pr_type": "ready",
+            },
+        }
+        base_path = str(tmp_path / "base.yaml")
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        return tmp_path, base_path
+
+    def test_review_without_council_has_no_council_models(self, review_council_config_dir):
+        """Without council=true, review mode does not emit council_models."""
+        tmp_path, base_path = review_council_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "review")
+        assert "council_models" not in result
+
+    def test_review_with_council_true_emits_council_models(self, review_council_config_dir):
+        """With council=true, review mode emits council_models."""
+        tmp_path, base_path = review_council_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "review",
+            args={"council": True},
+        )
+        assert "council_models" in result
+
+    def test_review_council_uses_explicit_list(self, review_council_config_dir):
+        """With council=true, the explicit council list from config is used."""
+        tmp_path, base_path = review_council_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "review",
+            args={"council": True},
+        )
+        aliases = [m["alias"] for m in result["council_models"]]
+        assert aliases == ["claude-small", "gpt-small", "gemini-small"]
+
+    def test_review_council_defaults_to_all_models_when_no_explicit_list(self, tmp_path):
+        """When council=true but no council list in config, falls back to all models."""
+        config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "gpt-small": {"id": "openai/gpt-4o-mini"},
+            },
+            "modes": {
+                "resolve": {},
+                "review": {"max_iterations": 10},
+            },
+            "agent": {"max_iterations": 50, "pr_type": "ready"},
+        }
+        base_path = str(tmp_path / "base.yaml")
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "review",
+            args={"council": True},
+        )
+        aliases = [m["alias"] for m in result["council_models"]]
+        assert "claude-small" in aliases
+        assert "gpt-small" in aliases
+
+    def test_review_council_models_have_id(self, review_council_config_dir):
+        """Each council model entry has both alias and id."""
+        tmp_path, base_path = review_council_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "review",
+            args={"council": True},
+        )
+        for m in result["council_models"]:
+            assert "alias" in m
+            assert "id" in m
+            assert m["id"]
+
+    def test_review_council_false_does_not_emit_council_models(self, review_council_config_dir):
+        """Explicitly setting council=false does not emit council_models."""
+        tmp_path, base_path = review_council_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "review",
+            args={"council": False},
+        )
+        assert "council_models" not in result
+
+    def test_council_inline_arg_parsed_from_string(self):
+        """council = true is parseable as a bool inline arg."""
+        lines = ["council = true"]
+        args = parse_args(lines)
+        assert args.get("council") is True
+
+    def test_council_inline_arg_false_parsed(self):
+        """council = false is parseable as bool False."""
+        lines = ["council = false"]
+        args = parse_args(lines)
+        assert args.get("council") is False
+
+
+
 # --- model-level extra_instructions ---
 
 

@@ -105,6 +105,7 @@ ALLOWED_ARGS = {
     "compaction_factor": float,      # fraction of selected content to remove
     "debug_logging": bool,           # enable verbose per-iteration debug tracing to stdout
     "distill_enabled": bool,         # run distillation pre-pass before agent loop
+    "council": bool,               # run council code review (review mode)
 }
 
 
@@ -562,7 +563,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     if mode == "reconcile":
         result["reconcile_max_iterations"] = max_iter
 
-    if mode in ("workshop", "build"):
+    if mode in ("workshop", "build") or (mode == "review" and args.get("council", False)):
         # Council models: explicit list from mode config, or all configured models.
         # Used by workshop (design critique) and build (code review) modes.
         council_config = mode_config.get("council", [])
