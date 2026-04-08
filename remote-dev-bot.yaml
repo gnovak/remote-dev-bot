@@ -6,6 +6,7 @@
 #   /agent-review    — code review on a PR, post comment
 #   /agent-workshop  — design analysis + multi-model council critique
 #   /agent-build     — implement issue + multi-model council code review
+#   /agent-delegate  — full design-to-implementation cycle with no human pauses
 #
 # To use a specific model, append it: /agent-resolve-claude-large
 # This works for any mode. See models: below for available aliases.
@@ -95,6 +96,21 @@ modes:
       - AGENTS.md
       - README.md
 
+
+  delegate:
+    default_model: claude-small
+    max_iterations: 15       # Iteration limit for the design loop (Stage 1)
+    extra_files:
+      - README.md
+      - CONTRIBUTING.md
+      - AGENTS.md
+      - CLAUDE.md
+      - .gemini/GEMINI.md
+    # Council: models that review design and code. Defaults to all configured models.
+    council:
+      - claude-small
+      - gpt-small
+      - gemini-small
 
 models:
   claude-small:
