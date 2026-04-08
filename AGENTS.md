@@ -31,6 +31,8 @@ Remote Dev Bot — a GitHub Action that runs an AI coding agent to resolve issue
 - `lib/context.py` — shared context management: `trim_tool_results` (drop old tool call pairs), `compact_messages` (LLM-summarize oldest messages), `estimate_tokens`
 - `lib/config.py` — config parsing: `parse_invocation`, `parse_args`, `resolve_config`, `normalize_config`, `ALLOWED_ARGS`; called by the workflow and unit tests
 - `lib/feedback.py` — install feedback collection: `InstallReport`, `InstallProblem`, `report_problems`; used during runbook execution
+- `lib/distill.py` — context distillation pre-pass: `maybe_distill(repo_context, issue_context, model, root)` runs before the agent loop; three tiers by repo size (small=full codebase, medium=structural extract, large=skip); returns `(context_text, input_tokens, output_tokens, cost)`
+- `lib/generate_index.py` — static AST-based repo index generator: walks Python source, extracts function signatures and dataclass fields; run as `python lib/generate_index.py [root_dir]`; no LLM required; output can go in `extra_files`
 - `scripts/compile.py` — compiles `remote-dev-bot.yml` → `dist/agent-resolve.yml`, `dist/agent-design.yml`, `dist/agent-review.yml`; finds steps by **name** not index
 
 **Tests** (`tests/`):
@@ -72,6 +74,8 @@ Each iteration: call `completion(model, messages, tools, max_tokens=16384)` → 
 
 **Wrapup:** At `WRAPUP_ITERATION` (default 80% of `MAX_ITERATIONS`), a user message is injected instructing the agent to commit and call `finish()` immediately. The loop still runs but the agent should stop exploring and wrap up.
 
+**Context distillation:** Before the main loop, if `DISTILL_ENABLED=true` (default), `lib/distill.py:maybe_distill()` runs a single non-agentic LLM call to produce a task-specific trimmed context. Small repos (<100K tokens): sends full codebase. Medium repos (<300K): sends structural extract + identifies relevant files. Large repos: skips distillation. The distilled context replaces `repo_context` as the initial context, and `build_system_prompt()` adds a note telling the agent it has been pre-distilled.
+
 **Context compaction:** When estimated tokens exceed 85% of `MAX_CONTEXT_TOKENS`, `compact_messages()` in `lib/context.py` summarizes the oldest `compaction_coverage` fraction of messages via a one-shot LLM call and replaces them with the summary. Disabled by default (`max_context_tokens=0`).
 
 **`finish()` tool args:** `success` (bool), `explanation`, `pr_title`, `pr_body`, `conversation_summary`. After finish, resolve.py calls `gh pr create` and writes `/tmp/llm_usage.json` (cost/tokens) and `/tmp/resolve_status.json`.
@@ -93,6 +97,7 @@ Each iteration: call `completion(model, messages, tools, max_tokens=16384)` → 
 | bash_output_limit | `bash_output_limit` | `BASH_OUTPUT_LIMIT` |
 | max_context_tokens | `max_context_tokens` | `MAX_CONTEXT_TOKENS` |
 | graceful_wrapup.threshold | `wrapup_iteration` | `WRAPUP_ITERATION` |
+| distill_enabled | `distill_enabled` | `DISTILL_ENABLED` |
 | council (JSON) | `council_models` | `COUNCIL_MODELS` |
 
 ### Workshop / build mechanics
