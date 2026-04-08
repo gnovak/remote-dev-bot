@@ -403,6 +403,62 @@ def get_pr_context():
     return title, body, f"{head} -> {base}", comments, diff
 
 
+
+
+def parse_linked_issues(pr_body):
+    """Parse linked issue numbers from PR body.
+
+    Looks for patterns like 'Fixes #N', 'Closes #N', 'Resolves #N'
+    (case-insensitive, with optional 'owner/repo#N' syntax).
+    Returns a list of issue number strings (just the numbers, no '#').
+    """
+    if not pr_body:
+        return []
+    # Match: Fixes #123, Closes #123, Resolves #123
+    # Also handles: Fix #123, Close #123, Resolve #123
+    # And: Fixes owner/repo#123
+    pattern = r'(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s+(?:[\w.-]+/[\w.-]+)?#(\d+)'
+    matches = re.findall(pattern, pr_body, re.IGNORECASE)
+    # Deduplicate while preserving order
+    seen = set()
+    result = []
+    for m in matches:
+        if m not in seen:
+            seen.add(m)
+            result.append(m)
+    return result
+
+
+def fetch_linked_issue(issue_number):
+    """Fetch a linked issue's title, body, and comments from GitHub API.
+
+    Returns (title, body, comments_text) or None on failure.
+    """
+    try:
+        issue_json = run(
+            f"gh api repos/{GITHUB_REPO}/issues/{issue_number}", timeout=30
+        )
+        data = json.loads(issue_json)
+        title = data.get("title", "")
+        body = data.get("body", "") or ""
+
+        comments_json = run(
+            f"gh api 'repos/{GITHUB_REPO}/issues/{issue_number}/comments?per_page=100'",
+            timeout=30,
+        )
+        comments_data = json.loads(comments_json)
+        comments = ""
+        for c in comments_data:
+            user = c["user"]["login"]
+            comment_body = c.get("body", "")
+            comments += f"--- @{user} ---\n{comment_body}\n\n"
+
+        return title, body, comments
+    except Exception as e:
+        print(f"Failed to fetch linked issue #{issue_number}: {e}")
+        return None
+
+
 # --- Build system prompt ---
 
 SECURITY_RULES = """
@@ -1038,6 +1094,43 @@ def main():
             f"## Discussion:\n\n{comments}\n"
         )
 
+    # Fetch and compress linked issue context (PR triggers only)
+    linked_issue_context = ""
+    linked_issue_tokens = 0
+    linked_issue_output_tokens = 0
+    linked_issue_cost = 0.0
+    if ISSUE_TYPE == "pr" and DISTILL_ENABLED:
+        linked_numbers = parse_linked_issues(body)
+        if linked_numbers:
+            print(f"Found linked issue(s): {', '.join('#' + n for n in linked_numbers)}")
+            for linked_num in linked_numbers:
+                result = fetch_linked_issue(linked_num)
+                if result is None:
+                    continue
+                ltitle, lbody, lcomments = result
+                try:
+                    from lib.distill import compress_linked_issue
+                    print(f"  Compressing linked issue #{linked_num} context...")
+                    compressed, inp, out, cost = compress_linked_issue(
+                        ltitle, lbody, lcomments, body, diff, LLM_MODEL
+                    )
+                    linked_issue_tokens += inp
+                    linked_issue_output_tokens += out
+                    linked_issue_cost += cost
+                    if compressed and compressed.strip():
+                        linked_issue_context += (
+                            f"## Linked Issue #{linked_num}: {ltitle}\n\n"
+                            f"{compressed}\n\n"
+                        )
+                        print(f"  Compressed issue #{linked_num}: {inp} input tokens, "
+                              f"{out} output tokens, ${cost:.4f}")
+                    else:
+                        print(f"  Compression returned empty for issue #{linked_num}")
+                except Exception as e:
+                    print(f"  Failed to compress linked issue #{linked_num}: {e}")
+        else:
+            print("No linked issues found in PR body")
+
     # Context distillation pre-step
     distillation_ran = False
     distill_input_tokens = 0
@@ -1071,6 +1164,10 @@ def main():
     else:
         agent_context = repo_context
 
+    # Prepend linked issue context to the issue context if available
+    if linked_issue_context:
+        issue_context = linked_issue_context + issue_context
+
     system_prompt = build_system_prompt(agent_context, issue_context, distillation_ran=distillation_ran)
 
     # Initialize conversation
@@ -1103,9 +1200,9 @@ def main():
         },
     ]
 
-    total_input_tokens = distill_input_tokens
-    total_output_tokens = distill_output_tokens
-    total_cost = distill_cost
+    total_input_tokens = distill_input_tokens + linked_issue_tokens
+    total_output_tokens = distill_output_tokens + linked_issue_output_tokens
+    total_cost = distill_cost + linked_issue_cost
     total_cache_read_tokens = 0
     total_cache_creation_tokens = 0
     finish_args = None
