@@ -1697,3 +1697,113 @@ class TestModelExtraInstructions:
 
         content = output_file.read_text()
         assert "model_extra_instructions=" not in content
+
+
+# --- resolve_config: delegate mode ---
+
+
+class TestDelegateConfig:
+    """Tests for delegate mode configuration."""
+
+    @pytest.fixture
+    def delegate_config_dir(self, tmp_path):
+        """Create a temp dir with config that includes delegate mode."""
+        config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "claude-large": {"id": "anthropic/claude-opus-4-6"},
+                "gpt-small": {"id": "openai/gpt-4o-mini"},
+                "gemini-small": {"id": "gemini/gemini-2.5-flash"},
+            },
+            "modes": {
+                "resolve": {},
+                "delegate": {
+                    "default_model": "claude-small",
+                    "max_iterations": 15,
+                    "council": ["claude-small", "gpt-small", "gemini-small"],
+                },
+            },
+            "agent": {
+                "max_iterations": 50,
+                "pr_type": "ready",
+            },
+        }
+        base_path = str(tmp_path / "base.yaml")
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        return tmp_path, base_path
+
+    def test_delegate_mode_basic(self, delegate_config_dir):
+        """Delegate mode is recognized with correct defaults."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert result["mode"] == "delegate"
+        assert result["alias"] == "claude-small"
+        assert result["model"] == "anthropic/claude-sonnet-4-20250514"
+
+    def test_delegate_mode_with_model(self, delegate_config_dir):
+        """Delegate mode accepts explicit model alias."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate-claude-large")
+        assert result["mode"] == "delegate"
+        assert result["alias"] == "claude-large"
+        assert result["model"] == "anthropic/claude-opus-4-6"
+
+    def test_delegate_max_iterations(self, delegate_config_dir):
+        """Delegate mode outputs delegate_max_iterations."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert result["delegate_max_iterations"] == 15
+
+    def test_delegate_max_iterations_override_via_args(self, delegate_config_dir):
+        """Inline args override delegate max_iterations."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "delegate",
+            args={"max_iterations": 25},
+        )
+        assert result["delegate_max_iterations"] == 25
+
+    def test_delegate_council_models(self, delegate_config_dir):
+        """Delegate mode resolves council models from explicit list."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        council = result["council_models"]
+        aliases = [m["alias"] for m in council]
+        assert "claude-small" in aliases
+        assert "gpt-small" in aliases
+        assert "gemini-small" in aliases
+
+    def test_delegate_default_council_all_models(self, delegate_config_dir):
+        """Without explicit council, delegate mode defaults to all models."""
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        del config["modes"]["delegate"]["council"]
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        council = result["council_models"]
+        aliases = [m["alias"] for m in council]
+        assert len(aliases) == 4  # all four models
+        assert "claude-small" in aliases
+        assert "claude-large" in aliases
+        assert "gpt-small" in aliases
+        assert "gemini-small" in aliases
+
+    def test_delegate_council_models_have_id(self, delegate_config_dir):
+        """Each delegate council model entry has both alias and id."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        for m in result["council_models"]:
+            assert "alias" in m
+            assert "id" in m
+            assert m["id"]  # not empty
+
+    def test_delegate_no_workshop_max_iterations(self, delegate_config_dir):
+        """Delegate mode does NOT set workshop_max_iterations."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert "workshop_max_iterations" not in result
