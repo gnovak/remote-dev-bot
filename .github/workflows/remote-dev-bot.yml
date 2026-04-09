@@ -158,6 +158,8 @@ jobs:
 
       - name: Checkout target repository
         uses: actions/checkout@v5
+        with:
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Checkout remote-dev-bot lib
         uses: actions/checkout@v5
@@ -706,6 +708,8 @@ jobs:
 
       - name: Checkout target repository
         uses: actions/checkout@v5
+        with:
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Checkout remote-dev-bot lib
         uses: actions/checkout@v5
@@ -1377,6 +1381,7 @@ jobs:
       - name: Checkout target repository
         uses: actions/checkout@v5
         with:
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           fetch-depth: 0
 
       - name: Checkout remote-dev-bot config
@@ -2096,6 +2101,7 @@ jobs:
       - name: Checkout target repository
         uses: actions/checkout@v5
         with:
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           fetch-depth: 0
 
       - name: Checkout remote-dev-bot lib
@@ -2426,6 +2432,8 @@ jobs:
 
       - name: Checkout target repository
         uses: actions/checkout@v5
+        with:
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Checkout remote-dev-bot config
         uses: actions/checkout@v5
@@ -3075,6 +3083,8 @@ jobs:
 
       - name: Checkout target repository
         uses: actions/checkout@v5
+        with:
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Checkout remote-dev-bot config
         uses: actions/checkout@v5

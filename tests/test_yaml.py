@@ -85,6 +85,50 @@ def test_agent_has_max_iterations(bot_config):
     assert isinstance(bot_config["agent"]["max_iterations"], int)
 
 
+# --- Checkout token checks ---
+
+
+@pytest.fixture
+def workflow_jobs():
+    return load_yaml(REPO_ROOT / ".github/workflows/remote-dev-bot.yml")["jobs"]
+
+
+APP_TOKEN_EXPR = "steps.app-token.outputs.token"
+
+
+def test_all_checkout_target_steps_use_app_token(workflow_jobs):
+    """Every job's 'Checkout target repository' step must pass the app token.
+
+    Without this, actions/checkout configures the git credential with the
+    default github.token, which lacks workflows:write permission. Pushes
+    that touch .github/workflows/ will be rejected by GitHub.
+
+    Regression test for issue #463.
+    """
+    for job_name, job in workflow_jobs.items():
+        for step in job.get("steps", []):
+            if step.get("name") == "Checkout target repository":
+                token = step.get("with", {}).get("token", "")
+                assert APP_TOKEN_EXPR in token, (
+                    f"Job '{job_name}': Checkout target repository must use "
+                    f"the app token (got: {token!r}). Without this, git push "
+                    f"cannot update workflow files."
+                )
+
+
+def test_dogfood_has_workflows_write_permission():
+    """dogfood.yml must include workflows:write so the fallback github.token
+    can push workflow file changes when no app token is configured.
+
+    Regression test for issue #463.
+    """
+    dogfood = load_yaml(REPO_ROOT / ".github/workflows/dogfood.yml")
+    permissions = dogfood.get("permissions", {})
+    assert permissions.get("workflows") == "write", (
+        "dogfood.yml must have 'workflows: write' in permissions"
+    )
+
+
 # --- Security checks ---
 
 
