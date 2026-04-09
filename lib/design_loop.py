@@ -193,7 +193,10 @@ DEFAULT_SYSTEM_PROMPT = (
     "focus on architecture: components, data flow, key interfaces. Do NOT write implementation-level code.\n"
     "- If the issue is an **implementation spec** (e.g., specific function signatures, config schemas), "
     "go deeper: file-level changes, function signatures, edge cases, test strategy.\n"
-    "- If the issue is a **bug report**, focus on root-cause analysis and the minimal fix.\n\n"
+    "- If the issue is a **bug report**, focus on root-cause analysis and the minimal fix.\n"
+    "- If the issue is an **exploratory question** (e.g., feasibility assessment, data availability, "
+    "'is X possible?'), focus on answering the question directly. Explore the codebase and data as needed, "
+    "give a clear answer, and skip the implementation-plan scaffolding.\n\n"
     "Match the level of detail the issue author is asking for — don't over-specify when they want boxes-and-arrows, "
     "and don't under-specify when they want an implementation plan."
 )
