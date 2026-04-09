@@ -961,7 +961,8 @@ def build_cost_table():
             avg_input_price = cost_val / (input_toks + output_toks) if (input_toks + output_toks) > 0 else 0
             # Rough savings: cache_read_toks would have cost full price but cost ~10%
             cache_savings = cache_read_toks * avg_input_price * 0.9
-            rows.append(("Cache savings (est.)", f"~${cache_savings:.4f}"))
+            rounded_savings = math.ceil(cache_savings * 100) / 100
+            rows.append(("Cache savings (est.)", f"~${rounded_savings:.2f}"))
     rows.append(("**Cost**", f"**${rounded:.2f}**"))
     lines = ["", "### 💰 Cost", "", "| Metric | Value |", "|--------|-------|"]
     lines += [f"| {k} | {v} |" for k, v in rows]
