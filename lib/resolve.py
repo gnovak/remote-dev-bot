@@ -1402,6 +1402,13 @@ def main():
 
             # Rolling status log: every STATUS_LOG_INTERVAL iterations, make a side-channel
             # API call to ask the agent for a brief status update.
+            # At iteration 1, immediately record "Exploring" so the status shows Iter 1,
+            # not the first STATUS_LOG_INTERVAL iteration.
+            if STATUS_LOG_INTERVAL > 0 and iteration == 0:
+                already_exploring = any("Exploring" in entry[1] for entry in status_log)
+                if not already_exploring:
+                    status_log.append((1, "Exploring codebase — no changes yet"))
+                    print("  [Status log iter 1]: Exploring codebase — no changes yet")
             if STATUS_LOG_INTERVAL > 0 and (iteration + 1) % STATUS_LOG_INTERVAL == 0:
                 try:
                     # Get git diff --stat for ground-truth file changes.
