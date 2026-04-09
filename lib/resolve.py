@@ -30,7 +30,7 @@ from lib.context import compact_messages, completion_with_retries, estimate_toke
 
 # --- Environment ---
 
-ISSUE_NUMBER = os.environ["ISSUE_NUMBER"]
+ISSUE_NUMBER = os.environ.get("ISSUE_NUMBER", "")
 ISSUE_TYPE = os.environ.get("ISSUE_TYPE", "issue")   # "issue" | "pr"
 TARGET_BRANCH = os.environ.get("TARGET_BRANCH", "main")
 PR_TYPE = os.environ.get("PR_TYPE", "ready")          # "ready" | "draft"
