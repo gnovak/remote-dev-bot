@@ -477,3 +477,81 @@ def maybe_distill(repo_context, issue_context, model, root="."):
     except Exception as e:
         print(f"  [Distill] Distillation failed: {e} — proceeding with full repo context")
         return fallback
+
+
+# --- Linked issue compression ---
+
+LINKED_ISSUE_COMPRESS_SYSTEM_PROMPT = """\
+You are a context compressor for a coding agent. You receive the full body and \
+comment thread of a linked GitHub issue, along with the PR body and diff that \
+references it.
+
+Your job: extract ONLY what the coding agent needs to act on the PR. That means:
+- The settled design decisions and approach agreed upon
+- Relevant data structures, APIs, or file paths mentioned
+- Specific requirements, constraints, or acceptance criteria
+- Any implementation guidance or architectural notes
+
+Omit:
+- Debates and back-and-forth that led to the final decision (only keep the conclusion)
+- Status updates, bot comments, and administrative noise
+- Duplicate information already present in the PR body or diff
+- Exploratory ideas that were rejected
+
+Be concise. The output feeds directly into a coding agent's working context."""
+
+LINKED_ISSUE_COMPRESS_OUTPUT_TOKENS = 4_096
+
+
+def compress_linked_issue(issue_title, issue_body, issue_comments,
+                          pr_body, pr_diff, model):
+    """Compress a linked issue's context into a task-relevant summary.
+
+    Makes a single non-agentic LLM call to distill the linked issue body
+    and comments into the key decisions and requirements.
+
+    Returns (compressed_text, input_tokens, output_tokens, cost).
+    Raises on LLM failure.
+    """
+    messages = [
+        {"role": "system", "content": LINKED_ISSUE_COMPRESS_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"## Linked Issue: {issue_title}\n\n"
+                f"### Issue Body\n\n{issue_body}\n\n"
+                f"### Issue Discussion\n\n{issue_comments}\n\n"
+                f"## PR Body\n\n{pr_body}\n\n"
+                f"## PR Diff\n\n```diff\n{pr_diff}\n```\n\n"
+                "## Instructions\n\n"
+                "Summarize the linked issue context that is relevant to this PR. "
+                "Focus on:\n"
+                "1. **Settled decisions** — what approach was agreed on\n"
+                "2. **Requirements** — what must the implementation do\n"
+                "3. **Key details** — specific files, functions, data structures, "
+                "or APIs mentioned\n"
+                "4. **Constraints** — any limitations or things to avoid\n\n"
+                "Output a concise summary (not the full thread). "
+                "Skip anything already covered in the PR body or diff."
+            ),
+        },
+    ]
+
+    response = completion(
+        model=model,
+        messages=messages,
+        max_tokens=LINKED_ISSUE_COMPRESS_OUTPUT_TOKENS,
+    )
+
+    text = ""
+    if response.choices:
+        msg = response.choices[0].message
+        if hasattr(msg, "content") and msg.content:
+            text = msg.content
+
+    usage = getattr(response, "usage", None)
+    input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+    output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
+    cost = getattr(response, "_hidden_params", {}).get("response_cost", 0.0) or 0.0
+
+    return text, input_tokens, output_tokens, cost

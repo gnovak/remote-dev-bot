@@ -485,3 +485,211 @@ class TestConstants:
         assert DISTILL_SMALL_REPO_LIMIT > 0
         assert DISTILL_STRUCT_EXTRACT_LIMIT > DISTILL_SMALL_REPO_LIMIT
         assert DISTILL_OUTPUT_TOKENS > 0
+
+
+# ---------------------------------------------------------------------------
+# compress_linked_issue
+# ---------------------------------------------------------------------------
+
+from lib.distill import (
+    compress_linked_issue,
+    LINKED_ISSUE_COMPRESS_OUTPUT_TOKENS,
+    LINKED_ISSUE_COMPRESS_SYSTEM_PROMPT,
+)
+
+
+class TestCompressLinkedIssue:
+    def test_returns_compressed_text(self):
+        """compress_linked_issue returns (text, input_tokens, output_tokens, cost)."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Summary: implement X using Y approach"
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 500
+        mock_response.usage.completion_tokens = 100
+        mock_response._hidden_params = {"response_cost": 0.005}
+
+        with patch("lib.distill.completion", return_value=mock_response) as mock_comp:
+            text, inp, out, cost = compress_linked_issue(
+                "Issue title",
+                "Issue body text",
+                "--- @user ---\nSome comment\n\n",
+                "PR body text",
+                "diff content",
+                "anthropic/claude-sonnet-4-5",
+            )
+
+        assert text == "Summary: implement X using Y approach"
+        assert inp == 500
+        assert out == 100
+        assert cost == 0.005
+        # Verify LLM was called once
+        mock_comp.assert_called_once()
+
+    def test_passes_all_context_to_llm(self):
+        """Verify the LLM call includes issue title, body, comments, PR body, and diff."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "compressed"
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 100
+        mock_response.usage.completion_tokens = 50
+        mock_response._hidden_params = {"response_cost": 0.001}
+
+        with patch("lib.distill.completion", return_value=mock_response) as mock_comp:
+            compress_linked_issue(
+                "My Issue Title",
+                "The issue body",
+                "--- @dev ---\nDesign comment\n\n",
+                "PR fixes things",
+                "+added line\n-removed line",
+                "anthropic/claude-sonnet-4-5",
+            )
+
+        call_args = mock_comp.call_args
+        messages = call_args[1]["messages"] if "messages" in call_args[1] else call_args[0][1]
+        user_msg = [m for m in messages if m["role"] == "user"][0]["content"]
+        system_msg = [m for m in messages if m["role"] == "system"][0]["content"]
+
+        # Check all context pieces are included
+        assert "My Issue Title" in user_msg
+        assert "The issue body" in user_msg
+        assert "Design comment" in user_msg
+        assert "PR fixes things" in user_msg
+        assert "+added line" in user_msg
+        # Check system prompt is the compression one
+        assert system_msg == LINKED_ISSUE_COMPRESS_SYSTEM_PROMPT
+
+    def test_uses_correct_max_tokens(self):
+        """Verify the LLM call uses the linked issue compression token budget."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "compressed"
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 100
+        mock_response.usage.completion_tokens = 50
+        mock_response._hidden_params = {"response_cost": 0.001}
+
+        with patch("lib.distill.completion", return_value=mock_response) as mock_comp:
+            compress_linked_issue(
+                "title", "body", "comments", "pr body", "diff", "anthropic/claude-sonnet-4-5"
+            )
+
+        call_args = mock_comp.call_args
+        assert call_args[1]["max_tokens"] == LINKED_ISSUE_COMPRESS_OUTPUT_TOKENS
+
+    def test_handles_empty_response(self):
+        """Empty LLM response returns empty string."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = ""
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 100
+        mock_response.usage.completion_tokens = 0
+        mock_response._hidden_params = {"response_cost": 0.001}
+
+        with patch("lib.distill.completion", return_value=mock_response):
+            text, inp, out, cost = compress_linked_issue(
+                "title", "body", "comments", "pr body", "diff", "anthropic/claude-sonnet-4-5"
+            )
+
+        assert text == ""
+
+    def test_handles_no_choices(self):
+        """Response with empty choices list returns empty string."""
+        mock_response = MagicMock()
+        mock_response.choices = []
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 50
+        mock_response.usage.completion_tokens = 0
+        mock_response._hidden_params = {"response_cost": 0.0}
+
+        with patch("lib.distill.completion", return_value=mock_response):
+            text, inp, out, cost = compress_linked_issue(
+                "title", "body", "comments", "pr body", "diff", "anthropic/claude-sonnet-4-5"
+            )
+
+        assert text == ""
+
+    def test_propagates_llm_exceptions(self):
+        """LLM errors are propagated to the caller."""
+        with patch("lib.distill.completion", side_effect=Exception("API down")):
+            with pytest.raises(Exception, match="API down"):
+                compress_linked_issue(
+                    "title", "body", "comments", "pr body", "diff", "anthropic/claude-sonnet-4-5"
+                )
+
+    def test_output_token_budget_constant(self):
+        """The output token budget is 4096."""
+        assert LINKED_ISSUE_COMPRESS_OUTPUT_TOKENS == 4_096
+
+
+# ---------------------------------------------------------------------------
+# parse_linked_issues (from lib/resolve.py)
+# ---------------------------------------------------------------------------
+
+from lib.resolve import parse_linked_issues
+
+
+class TestParseLinkedIssues:
+    def test_fixes_hash(self):
+        assert parse_linked_issues("Fixes #123") == ["123"]
+
+    def test_closes_hash(self):
+        assert parse_linked_issues("Closes #456") == ["456"]
+
+    def test_resolves_hash(self):
+        assert parse_linked_issues("Resolves #789") == ["789"]
+
+    def test_case_insensitive(self):
+        assert parse_linked_issues("fixes #100") == ["100"]
+        assert parse_linked_issues("FIXES #200") == ["200"]
+        assert parse_linked_issues("Fixes #300") == ["300"]
+
+    def test_fix_singular(self):
+        assert parse_linked_issues("Fix #42") == ["42"]
+
+    def test_close_singular(self):
+        assert parse_linked_issues("Close #42") == ["42"]
+
+    def test_resolve_singular(self):
+        assert parse_linked_issues("Resolve #42") == ["42"]
+
+    def test_fixed_past_tense(self):
+        assert parse_linked_issues("Fixed #42") == ["42"]
+
+    def test_closed_past_tense(self):
+        assert parse_linked_issues("Closed #42") == ["42"]
+
+    def test_resolved_past_tense(self):
+        assert parse_linked_issues("Resolved #42") == ["42"]
+
+    def test_multiple_issues(self):
+        body = "Fixes #10\nCloses #20\nResolves #30"
+        assert parse_linked_issues(body) == ["10", "20", "30"]
+
+    def test_deduplication(self):
+        body = "Fixes #10\nAlso fixes #10"
+        assert parse_linked_issues(body) == ["10"]
+
+    def test_with_repo_prefix(self):
+        body = "Fixes owner/repo#123"
+        assert parse_linked_issues(body) == ["123"]
+
+    def test_empty_body(self):
+        assert parse_linked_issues("") == []
+        assert parse_linked_issues(None) == []
+
+    def test_no_linked_issues(self):
+        assert parse_linked_issues("This PR adds a feature") == []
+
+    def test_embedded_in_text(self):
+        body = "This PR fixes #42 by refactoring the parser"
+        assert parse_linked_issues(body) == ["42"]
+
+    def test_multiple_on_same_line(self):
+        body = "Fixes #1, closes #2"
+        # Both should be found
+        result = parse_linked_issues(body)
+        assert "1" in result
+        assert "2" in result
