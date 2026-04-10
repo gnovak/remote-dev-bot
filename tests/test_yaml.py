@@ -116,6 +116,37 @@ def test_all_checkout_target_steps_use_app_token(workflow_jobs):
                 )
 
 
+def test_branch_aware_jobs_use_target_branch_ref(workflow_jobs):
+    """design, workshop, and delegate jobs must check out the configured branch.
+
+    Unlike resolve/build/reconcile (which override TARGET_BRANCH and do their own
+    git checkout in setup_branch()), and unlike review (which uses gh pr checkout),
+    these analysis-mode jobs rely entirely on actions/checkout to land on the
+    right branch. Without `ref:`, checkout falls back to the repo default branch
+    (typically main), so an inline arg like `branch=dev` is silently ignored and
+    the agent reads the wrong code.
+
+    Regression test for issue #491.
+    """
+    BRANCH_AWARE_JOBS = {"design", "workshop", "delegate"}
+    EXPECTED_REF = "needs.parse.outputs.target_branch"
+    for job_name in BRANCH_AWARE_JOBS:
+        job = workflow_jobs.get(job_name)
+        assert job, f"Expected job '{job_name}' in workflow"
+        found = False
+        for step in job.get("steps", []):
+            if step.get("name") == "Checkout target repository":
+                found = True
+                ref = step.get("with", {}).get("ref", "")
+                assert EXPECTED_REF in ref, (
+                    f"Job '{job_name}': Checkout target repository must set "
+                    f"ref to '{{{{ {EXPECTED_REF} }}}}' (got: {ref!r}). "
+                    f"Without this, the agent reads from the default branch "
+                    f"instead of the configured/inline branch."
+                )
+        assert found, f"Job '{job_name}' has no 'Checkout target repository' step"
+
+
 def test_dogfood_has_workflows_write_permission():
     """dogfood.yml must include workflows:write so the fallback github.token
     can push workflow file changes when no app token is configured.
