@@ -2753,6 +2753,16 @@ jobs:
         uses: actions/checkout@v5
         with:
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          ref: ${{ needs.parse.outputs.target_branch }}
+
+      - name: Capture checkout info
+        id: checkout_info
+        run: |
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          SHA=$(git rev-parse --short HEAD)
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Checked out branch=$BRANCH sha=$SHA"
 
       - name: Checkout remote-dev-bot config
         uses: actions/checkout@v5
@@ -3234,7 +3244,9 @@ jobs:
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           ALIAS="${{ needs.parse.outputs.alias }}"
           MODEL="${{ needs.parse.outputs.model }}"
-          MODEL_HEADER="🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+          BRANCH="${{ steps.checkout_info.outputs.branch }}"
+          SHA="${{ steps.checkout_info.outputs.sha }}"
+          MODEL_HEADER="🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`) · 📍 **Branch:** \`${BRANCH}\` (\`${SHA}\`)"
 
           # Generate cost table (writes /tmp/cost_table.txt)
           python3 << 'PYEOF'
@@ -3404,6 +3416,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          ref: ${{ needs.parse.outputs.target_branch }}
 
       - name: Checkout remote-dev-bot config
         uses: actions/checkout@v5
@@ -3751,6 +3764,9 @@ jobs:
 
       - name: Checkout target repository
         uses: actions/checkout@v5
+        with:
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          ref: ${{ needs.parse.outputs.target_branch }}
 
       - name: Checkout remote-dev-bot config
         uses: actions/checkout@v5
