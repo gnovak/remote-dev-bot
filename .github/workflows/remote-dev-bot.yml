@@ -610,6 +610,133 @@ jobs:
           ]
           _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
           _tbl += [f'| {k} | {v} |' for k, v in rows]
+          # --- Cumulative cost tracking ---
+          # Fetch prior cost tables from linked issue comments and sum up costs.
+          import subprocess as _sp2, re as _re2, json as _json2, os as _os2
+
+          def _extract_costs_from_text(text):
+              """Extract (cost, loc_ins, loc_del, input_tokens, output_tokens) from cost table text."""
+              total_cost = 0.0
+              total_ins = 0; total_del = 0
+              total_in_tok = 0; total_out_tok = 0
+              # Find all cost entries: **$X.XX**
+              for m in _re2.finditer(r'\*\*\$([0-9]+\.[0-9]+)\*\*', text):
+                  total_cost += float(m.group(1))
+              # Find LOC from Diff rows: "N insertions(+), M deletions(-)"
+              for m in _re2.finditer(r'\| Diff \|[^|]*\|', text):
+                  diff_cell = m.group(0)
+                  ins = _re2.search(r'(\d+) insertion', diff_cell)
+                  if ins: total_ins += int(ins.group(1))
+                  dl = _re2.search(r'(\d+) deletion', diff_cell)
+                  if dl: total_del += int(dl.group(1))
+              # Find token counts from Input/Output rows
+              for m in _re2.finditer(r'\| Input \| ([0-9.]+)([KM]?) tokens \|', text):
+                  v = float(m.group(1))
+                  sfx = m.group(2)
+                  if sfx == 'K': v *= 1000
+                  elif sfx == 'M': v *= 1_000_000
+                  total_in_tok += int(v)
+              for m in _re2.finditer(r'\| Output \| ([0-9.]+)([KM]?) tokens \|', text):
+                  v = float(m.group(1))
+                  sfx = m.group(2)
+                  if sfx == 'K': v *= 1000
+                  elif sfx == 'M': v *= 1_000_000
+                  total_out_tok += int(v)
+              return total_cost, total_ins, total_del, total_in_tok, total_out_tok
+
+          # Try to get the linked issue number from the PR body (Fixes/Closes/Resolves #N)
+          _repo = _os2.environ.get('GITHUB_REPOSITORY', '')
+          _pr_url_file = '/tmp/spr_output.log'
+          _pr_body = ''
+          _linked_issue_num = None
+
+          try:
+              _pr_url_raw = ''
+              if _os2.path.exists(_pr_url_file):
+                  _pr_url_raw = open(_pr_url_file).read()
+              _pr_url_m = _re2.search(r'https://github\.com/[^/]+/[^/]+/pull/([0-9]+)', _pr_url_raw)
+              if _pr_url_m:
+                  _pr_num = _pr_url_m.group(1)
+                  _pr_body_r = _sp2.run(
+                      ['gh', 'pr', 'view', _pr_num, '--repo', _repo, '--json', 'body', '--jq', '.body'],
+                      capture_output=True, text=True
+                  )
+                  if _pr_body_r.returncode == 0:
+                      _pr_body = _pr_body_r.stdout.strip()
+              # Extract linked issue from PR body
+              _fix_m = _re2.search(r'(?:Fixes|Closes|Resolves)\s+#([0-9]+)', _pr_body, _re2.IGNORECASE)
+              if _fix_m:
+                  _linked_issue_num = _fix_m.group(1)
+          except Exception as _e2:
+              pass
+
+          # Fetch prior cost tables from linked issue comments and PR body
+          _prior_costs = []
+          _prior_total_cost = 0.0
+          _prior_total_ins = 0; _prior_total_del = 0
+          _prior_total_in_tok = 0; _prior_total_out_tok = 0
+          _all_prior_text = _pr_body  # start with current PR body (prior runs appended there)
+
+          if _linked_issue_num and _repo:
+              try:
+                  _comments_r = _sp2.run(
+                      ['gh', 'api', f'repos/{_repo}/issues/{_linked_issue_num}/comments', '--jq', '.[].body'],
+                      capture_output=True, text=True
+                  )
+                  if _comments_r.returncode == 0:
+                      _all_prior_text += '\n' + _comments_r.stdout
+                      # Also include the issue body itself
+                      _issue_r = _sp2.run(
+                          ['gh', 'api', f'repos/{_repo}/issues/{_linked_issue_num}', '--jq', '.body'],
+                          capture_output=True, text=True
+                      )
+                      if _issue_r.returncode == 0:
+                          _all_prior_text += '\n' + _issue_r.stdout
+              except Exception:
+                  pass
+
+          # Count cost tables across all prior text (skip Feature total sections)
+          _num_prior = len(_re2.findall(r'### 💰 Cost', _all_prior_text))
+          if _num_prior > 0:
+              _pc, _pi, _pd, _pit, _pot = _extract_costs_from_text(_all_prior_text)
+              _prior_total_cost = _pc
+              _prior_total_ins = _pi
+              _prior_total_del = _pd
+              _prior_total_in_tok = _pit
+              _prior_total_out_tok = _pot
+              _prior_costs = list(range(_num_prior))  # just count
+
+          # Compute cumulative totals (prior + current step)
+          _cum_steps = len(_prior_costs) + 1
+          _cum_cost = _prior_total_cost + cost
+          _cum_ins = _prior_total_ins + loc_changed  # loc_changed is insertions+deletions this step
+          _cum_in_tok = _prior_total_in_tok + input_tokens
+          _cum_out_tok = _prior_total_out_tok + output_tokens
+
+          # Only append cumulative section if there are prior steps
+          if len(_prior_costs) > 0 and _cum_cost > 0:
+              def _fmt_loc_c(n):
+                  if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
+                  if n >= 1_000: return f"{n/1_000:.1f}k"
+                  return str(n)
+              _cum_loc_per_dollar = int(_cum_ins / _cum_cost) if _cum_cost > 0 and _cum_ins > 0 else 0
+              _ctbl = [
+                  '',
+                  f'### 📊 Feature total ({_cum_steps} steps)',
+                  '',
+                  '| Metric | Value |',
+                  '|--------|-------|',
+                  f'| Cost | ${_cum_cost:.2f} |',
+              ]
+              if _cum_ins > 0:
+                  _ctbl.append(f'| LOC | ~{_fmt_loc_c(_cum_ins)} (estimate) |')
+              if _cum_loc_per_dollar > 0:
+                  _ctbl.append(f'| LOC/$ | ~{_fmt_loc_c(_cum_loc_per_dollar)} loc/$ |')
+              if _cum_in_tok > 0:
+                  _ctbl.append(f'| Input | {_fmt_tok(_cum_in_tok)} tokens |')
+              if _cum_out_tok > 0:
+                  _ctbl.append(f'| Output | {_fmt_tok(_cum_out_tok)} tokens |')
+              _tbl += _ctbl
           open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
           PYEOF
 
@@ -1282,6 +1409,133 @@ jobs:
           ]
           _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
           _tbl += [f'| {k} | {v} |' for k, v in rows]
+          # --- Cumulative cost tracking ---
+          # Fetch prior cost tables from linked issue comments and sum up costs.
+          import subprocess as _sp2, re as _re2, json as _json2, os as _os2
+
+          def _extract_costs_from_text(text):
+              """Extract (cost, loc_ins, loc_del, input_tokens, output_tokens) from cost table text."""
+              total_cost = 0.0
+              total_ins = 0; total_del = 0
+              total_in_tok = 0; total_out_tok = 0
+              # Find all cost entries: **$X.XX**
+              for m in _re2.finditer(r'\*\*\$([0-9]+\.[0-9]+)\*\*', text):
+                  total_cost += float(m.group(1))
+              # Find LOC from Diff rows: "N insertions(+), M deletions(-)"
+              for m in _re2.finditer(r'\| Diff \|[^|]*\|', text):
+                  diff_cell = m.group(0)
+                  ins = _re2.search(r'(\d+) insertion', diff_cell)
+                  if ins: total_ins += int(ins.group(1))
+                  dl = _re2.search(r'(\d+) deletion', diff_cell)
+                  if dl: total_del += int(dl.group(1))
+              # Find token counts from Input/Output rows
+              for m in _re2.finditer(r'\| Input \| ([0-9.]+)([KM]?) tokens \|', text):
+                  v = float(m.group(1))
+                  sfx = m.group(2)
+                  if sfx == 'K': v *= 1000
+                  elif sfx == 'M': v *= 1_000_000
+                  total_in_tok += int(v)
+              for m in _re2.finditer(r'\| Output \| ([0-9.]+)([KM]?) tokens \|', text):
+                  v = float(m.group(1))
+                  sfx = m.group(2)
+                  if sfx == 'K': v *= 1000
+                  elif sfx == 'M': v *= 1_000_000
+                  total_out_tok += int(v)
+              return total_cost, total_ins, total_del, total_in_tok, total_out_tok
+
+          # Try to get the linked issue number from the PR body (Fixes/Closes/Resolves #N)
+          _repo = _os2.environ.get('GITHUB_REPOSITORY', '')
+          _pr_url_file = '/tmp/spr_output.log'
+          _pr_body = ''
+          _linked_issue_num = None
+
+          try:
+              _pr_url_raw = ''
+              if _os2.path.exists(_pr_url_file):
+                  _pr_url_raw = open(_pr_url_file).read()
+              _pr_url_m = _re2.search(r'https://github\.com/[^/]+/[^/]+/pull/([0-9]+)', _pr_url_raw)
+              if _pr_url_m:
+                  _pr_num = _pr_url_m.group(1)
+                  _pr_body_r = _sp2.run(
+                      ['gh', 'pr', 'view', _pr_num, '--repo', _repo, '--json', 'body', '--jq', '.body'],
+                      capture_output=True, text=True
+                  )
+                  if _pr_body_r.returncode == 0:
+                      _pr_body = _pr_body_r.stdout.strip()
+              # Extract linked issue from PR body
+              _fix_m = _re2.search(r'(?:Fixes|Closes|Resolves)\s+#([0-9]+)', _pr_body, _re2.IGNORECASE)
+              if _fix_m:
+                  _linked_issue_num = _fix_m.group(1)
+          except Exception as _e2:
+              pass
+
+          # Fetch prior cost tables from linked issue comments and PR body
+          _prior_costs = []
+          _prior_total_cost = 0.0
+          _prior_total_ins = 0; _prior_total_del = 0
+          _prior_total_in_tok = 0; _prior_total_out_tok = 0
+          _all_prior_text = _pr_body  # start with current PR body (prior runs appended there)
+
+          if _linked_issue_num and _repo:
+              try:
+                  _comments_r = _sp2.run(
+                      ['gh', 'api', f'repos/{_repo}/issues/{_linked_issue_num}/comments', '--jq', '.[].body'],
+                      capture_output=True, text=True
+                  )
+                  if _comments_r.returncode == 0:
+                      _all_prior_text += '\n' + _comments_r.stdout
+                      # Also include the issue body itself
+                      _issue_r = _sp2.run(
+                          ['gh', 'api', f'repos/{_repo}/issues/{_linked_issue_num}', '--jq', '.body'],
+                          capture_output=True, text=True
+                      )
+                      if _issue_r.returncode == 0:
+                          _all_prior_text += '\n' + _issue_r.stdout
+              except Exception:
+                  pass
+
+          # Count cost tables across all prior text (skip Feature total sections)
+          _num_prior = len(_re2.findall(r'### 💰 Cost', _all_prior_text))
+          if _num_prior > 0:
+              _pc, _pi, _pd, _pit, _pot = _extract_costs_from_text(_all_prior_text)
+              _prior_total_cost = _pc
+              _prior_total_ins = _pi
+              _prior_total_del = _pd
+              _prior_total_in_tok = _pit
+              _prior_total_out_tok = _pot
+              _prior_costs = list(range(_num_prior))  # just count
+
+          # Compute cumulative totals (prior + current step)
+          _cum_steps = len(_prior_costs) + 1
+          _cum_cost = _prior_total_cost + cost
+          _cum_ins = _prior_total_ins + loc_changed  # loc_changed is insertions+deletions this step
+          _cum_in_tok = _prior_total_in_tok + input_tokens
+          _cum_out_tok = _prior_total_out_tok + output_tokens
+
+          # Only append cumulative section if there are prior steps
+          if len(_prior_costs) > 0 and _cum_cost > 0:
+              def _fmt_loc_c(n):
+                  if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
+                  if n >= 1_000: return f"{n/1_000:.1f}k"
+                  return str(n)
+              _cum_loc_per_dollar = int(_cum_ins / _cum_cost) if _cum_cost > 0 and _cum_ins > 0 else 0
+              _ctbl = [
+                  '',
+                  f'### 📊 Feature total ({_cum_steps} steps)',
+                  '',
+                  '| Metric | Value |',
+                  '|--------|-------|',
+                  f'| Cost | ${_cum_cost:.2f} |',
+              ]
+              if _cum_ins > 0:
+                  _ctbl.append(f'| LOC | ~{_fmt_loc_c(_cum_ins)} (estimate) |')
+              if _cum_loc_per_dollar > 0:
+                  _ctbl.append(f'| LOC/$ | ~{_fmt_loc_c(_cum_loc_per_dollar)} loc/$ |')
+              if _cum_in_tok > 0:
+                  _ctbl.append(f'| Input | {_fmt_tok(_cum_in_tok)} tokens |')
+              if _cum_out_tok > 0:
+                  _ctbl.append(f'| Output | {_fmt_tok(_cum_out_tok)} tokens |')
+              _tbl += _ctbl
           open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
           PYEOF
 
