@@ -31,13 +31,12 @@ Remote Dev Bot — a GitHub Action that runs an AI coding agent to resolve issue
 - `lib/context.py` — shared context management: `trim_tool_results` (drop old tool call pairs), `compact_messages` (LLM-summarize oldest messages), `estimate_tokens`
 - `lib/config.py` — config parsing: `parse_invocation`, `parse_args`, `resolve_config`, `normalize_config`, `ALLOWED_ARGS`; called by the workflow and unit tests
 - `lib/feedback.py` — install feedback collection: `InstallReport`, `InstallProblem`, `report_problems`; used during runbook execution
-- `scripts/compile.py` — compiles `remote-dev-bot.yml` → `dist/agent-resolve.yml`, `dist/agent-design.yml`, `dist/agent-review.yml`; finds steps by **name** not index
 
 **Tests** (`tests/`):
 - `test_config.py` — unit tests for all `lib/config.py` functions
 - `test_compaction.py` — unit tests for `lib/context.py` compaction functions
-- `test_compile.py` — tests that compiled outputs contain expected steps
 - `test_yaml.py` — structural/validity tests for YAML files (workflow and config)
+- `test_syntax.py` — `py_compile` check for every .py file under `lib/` and `scripts/`; catches SyntaxErrors that wouldn't be caught by import-based tests
 - `test_cost.py` — tests for cost parsing helpers (`parse_cost_from_comment` bash function in `e2e.sh`)
 - `test_feedback.py` — unit tests for `lib/feedback.py`
 - `e2e.sh` — full E2E test runner; creates issues in `remote-dev-bot-test`, triggers runs, checks results
@@ -58,7 +57,6 @@ pytest tests/ -q
 
 # Specific test file
 pytest tests/test_config.py -v
-pytest tests/test_compile.py -v    # Run after any workflow or compile.py changes
 
 # With doctests
 pytest --doctest-modules lib/config.py
@@ -126,9 +124,7 @@ Each iteration: call `completion(model, messages, tools, max_tokens=16384)` → 
 ### Adding or modifying a workflow step
 
 1. Edit the step in `.github/workflows/remote-dev-bot.yml`
-2. Update `scripts/compile.py` if the step needs to appear in compiled output (compile.py finds steps by name)
-3. Update expected step lists in `tests/test_compile.py` — the step-count tripwire tests will fail if the compiled output doesn't match
-4. Run `pytest tests/test_compile.py -v` to verify
+2. If the step affects branch-aware jobs (design/workshop/delegate) or token plumbing, the assertions in `tests/test_yaml.py` may need updating
 
 ### Adding a new mode
 
@@ -172,12 +168,6 @@ target branch = design/gemini
 - `ALLOWED_ARGS` in `lib/config.py` defines accepted names and types; unknown names are rejected with an error
 - `resolve_config(..., args=...)` applies parsed args on top of YAML config
 - `extra_files` **appends** to the mode's existing list (does not replace)
-
-## compile.py: Three-File Output
-
-`scripts/compile.py` inlines config parsing and selected steps from `remote-dev-bot.yml` into three standalone files: `dist/agent-resolve.yml`, `dist/agent-design.yml`, and `dist/agent-review.yml`. It finds steps by **name** (not index), so reordering steps is safe as long as step names don't change.
-
-**Rule: if you add, remove, or rename a step in remote-dev-bot.yml, update compile.py to match**, then run `pytest tests/test_compile.py -v`. The step-count tripwire tests will catch mismatches.
 
 ## Branch Model
 
