@@ -792,9 +792,9 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # Fallback: primary paths (resolve.py success comment, Post result comment
-          # failure) already set cost_embedded. This only fires for true edge cases
-          # (e.g., resolve.py crashed before posting its success comment, or the
-          # Post result comment step itself failed).
+          # failure without draft PR, Append cost to PR) already set cost_embedded.
+          # This only fires for true edge cases (e.g., resolve.py crashed before
+          # posting its success comment, or the Post result comment step itself failed).
           if [ -f /tmp/cost_embedded ]; then
             echo "Cost already reported — skipping fallback"
             exit 0
@@ -1623,9 +1623,9 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # Fallback: primary paths (resolve.py success comment, Post result comment
-          # failure) already set cost_embedded. This only fires for true edge cases
-          # (e.g., resolve.py crashed before posting its success comment, or the
-          # Post result comment step itself failed).
+          # failure without draft PR, Append cost to PR) already set cost_embedded.
+          # This only fires for true edge cases (e.g., resolve.py crashed before
+          # posting its success comment, or the Post result comment step itself failed).
           if [ -f /tmp/cost_embedded ]; then
             echo "Cost already reported — skipping fallback"
             exit 0
