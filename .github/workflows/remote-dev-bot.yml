@@ -620,6 +620,11 @@ jobs:
               total_ins = 0; total_del = 0
               total_in_tok = 0; total_out_tok = 0
               # Find all cost entries: **$X.XX**
+              # IMPORTANT: This regex matches the bold-dollar pattern used ONLY in the per-step
+              # "### 💰 Cost" table (e.g. "| **Cost** | **$0.52** |"). The "### 📊 Feature total"
+              # cumulative table intentionally uses bare "$X.XX" (no ** bold markers) and the row
+              # label "Cumulative cost" (not "Cost") so that future runs do NOT double-count it here.
+              # Do NOT reformat the cumulative table to use **bold** values or rename the row to "Cost".
               for m in _re2.finditer(r'\*\*\$([0-9]+\.[0-9]+)\*\*', text):
                   total_cost += float(m.group(1))
               # Find LOC from Diff rows: "N insertions(+), M deletions(-)"
@@ -720,13 +725,19 @@ jobs:
                   if n >= 1_000: return f"{n/1_000:.1f}k"
                   return str(n)
               _cum_loc_per_dollar = int(_cum_ins / _cum_cost) if _cum_cost > 0 and _cum_ins > 0 else 0
+              # FORMATTING NOTE: The cumulative table uses bare "$X.XX" (no ** bold markers)
+              # and the row label "Cumulative cost" (not "Cost"). This is intentional:
+              #   - _extract_costs_from_text() only picks up **$X.XX** (bold) patterns, which
+              #     appear exclusively in the per-step "### 💰 Cost" table.
+              #   - If you change the cost value here to **bold** or rename the row to "Cost",
+              #     future runs will double-count this cumulative figure when summing prior steps.
               _ctbl = [
                   '',
                   f'### 📊 Feature total ({_cum_steps} steps)',
                   '',
                   '| Metric | Value |',
                   '|--------|-------|',
-                  f'| Cost | ${_cum_cost:.2f} |',
+                  f'| Cumulative cost | ${_cum_cost:.2f} |',
               ]
               if _cum_ins > 0:
                   _ctbl.append(f'| LOC | ~{_fmt_loc_c(_cum_ins)} (estimate) |')
@@ -1419,6 +1430,11 @@ jobs:
               total_ins = 0; total_del = 0
               total_in_tok = 0; total_out_tok = 0
               # Find all cost entries: **$X.XX**
+              # IMPORTANT: This regex matches the bold-dollar pattern used ONLY in the per-step
+              # "### 💰 Cost" table (e.g. "| **Cost** | **$0.52** |"). The "### 📊 Feature total"
+              # cumulative table intentionally uses bare "$X.XX" (no ** bold markers) and the row
+              # label "Cumulative cost" (not "Cost") so that future runs do NOT double-count it here.
+              # Do NOT reformat the cumulative table to use **bold** values or rename the row to "Cost".
               for m in _re2.finditer(r'\*\*\$([0-9]+\.[0-9]+)\*\*', text):
                   total_cost += float(m.group(1))
               # Find LOC from Diff rows: "N insertions(+), M deletions(-)"
@@ -1519,13 +1535,19 @@ jobs:
                   if n >= 1_000: return f"{n/1_000:.1f}k"
                   return str(n)
               _cum_loc_per_dollar = int(_cum_ins / _cum_cost) if _cum_cost > 0 and _cum_ins > 0 else 0
+              # FORMATTING NOTE: The cumulative table uses bare "$X.XX" (no ** bold markers)
+              # and the row label "Cumulative cost" (not "Cost"). This is intentional:
+              #   - _extract_costs_from_text() only picks up **$X.XX** (bold) patterns, which
+              #     appear exclusively in the per-step "### 💰 Cost" table.
+              #   - If you change the cost value here to **bold** or rename the row to "Cost",
+              #     future runs will double-count this cumulative figure when summing prior steps.
               _ctbl = [
                   '',
                   f'### 📊 Feature total ({_cum_steps} steps)',
                   '',
                   '| Metric | Value |',
                   '|--------|-------|',
-                  f'| Cost | ${_cum_cost:.2f} |',
+                  f'| Cumulative cost | ${_cum_cost:.2f} |',
               ]
               if _cum_ins > 0:
                   _ctbl.append(f'| LOC | ~{_fmt_loc_c(_cum_ins)} (estimate) |')
