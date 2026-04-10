@@ -69,6 +69,7 @@ jobs:
       design_context_keep_tool_results: ${{ steps.parse.outputs.design_context_keep_tool_results }}
       review_context_keep_tool_results: ${{ steps.parse.outputs.review_context_keep_tool_results }}
       workshop_max_iterations: ${{ steps.parse.outputs.workshop_max_iterations }}
+      delegate_max_iterations: ${{ steps.parse.outputs.delegate_max_iterations }}
       council_models: ${{ steps.parse.outputs.council_models }}
       extra_instructions: ${{ steps.parse.outputs.extra_instructions }}
       model_extra_instructions: ${{ steps.parse.outputs.model_extra_instructions }}
@@ -3389,6 +3390,931 @@ jobs:
             echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
             echo ""
             echo "---"
+            echo ""
+            echo "### 💰 Cost"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Time | ${ELAPSED_FMT} |"
+            echo "| Iterations | ${ITERATIONS_FMT} |"
+            echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+            echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+            printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+          } > /tmp/cost_comment_fallback.md
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --body-file /tmp/cost_comment_fallback.md
+
+  # --- Mode: delegate — full design-to-implementation cycle with no human pauses ---
+  delegate:
+    needs: parse
+    if: needs.parse.outputs.mode == 'delegate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Generate app token
+        if: vars.RDB_APP_ID != ''
+        uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ vars.RDB_APP_ID }}
+          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+
+      - name: Checkout target repository
+        uses: actions/checkout@v5
+
+      - name: Checkout remote-dev-bot config
+        uses: actions/checkout@v5
+        with:
+          repository: gnovak/remote-dev-bot
+          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          ref: ${{ inputs.rdb_ref }}
+          path: .remote-dev-bot
+          sparse-checkout: |
+            /remote-dev-bot.yaml
+            /lib/
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install PyYAML litellm
+
+      - name: Generate repo index
+        run: |
+          python3 .remote-dev-bot/lib/generate_index.py > /tmp/rdb-index.md
+          EXTRA_FILES_RAW='${{ needs.parse.outputs.extra_files }}'
+          RDB_EXTRA_FILES=$(python3 -c "import json,sys; raw=sys.argv[1]; files=json.loads(raw) if raw and raw not in ('null','') else []; files.append('/tmp/rdb-index.md'); print(json.dumps(files))" "$EXTRA_FILES_RAW")
+          echo "RDB_EXTRA_FILES=$RDB_EXTRA_FILES" >> "$GITHUB_ENV"
+
+      - name: Determine API key
+        id: apikey
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          MODEL="${{ needs.parse.outputs.model }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+
+          MODEL_HEADER="🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+          NO_API_KEY_WARNING="⚠️ **No API key configured for this model.**"
+          post_no_api_key_comment() {
+            local secret_name="$1"
+            {
+              printf '%s\n\n' "${MODEL_HEADER}"
+              printf '%s\n\n' "${NO_API_KEY_WARNING}"
+              printf 'The selected model \`%s\` (\`%s\`) requires an \`%s\` secret, but none was found.\n\n' "${ALIAS}" "${MODEL}" "${secret_name}"
+              printf '**To fix:** Add your API key as a repository secret:\n'
+              printf '\`\`\`bash\n'
+              printf 'gh secret set %s --repo ${{ github.repository }}\n' "${secret_name}"
+              printf '\`\`\`\n'
+              printf 'Then re-trigger the bot by commenting the same command again.\n'
+            } > /tmp/no_api_key_comment.md
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/no_api_key_comment.md
+          }
+
+          if [[ "$MODEL" == anthropic/* ]]; then
+            API_KEY="${{ secrets.ANTHROPIC_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "ANTHROPIC_API_KEY"
+              echo "::error::No ANTHROPIC_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+          elif [[ "$MODEL" == openai/* ]]; then
+            API_KEY="${{ secrets.OPENAI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "OPENAI_API_KEY"
+              echo "::error::No OPENAI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+          elif [[ "$MODEL" == gemini/* ]]; then
+            API_KEY="${{ secrets.GEMINI_API_KEY }}"
+            if [[ -z "$API_KEY" ]]; then
+              post_no_api_key_comment "GEMINI_API_KEY"
+              echo "::error::No GEMINI_API_KEY secret configured for model: $MODEL"
+              exit 1
+            fi
+            echo "key=$API_KEY" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Unknown model provider for: $MODEL"
+            exit 1
+          fi
+
+      - name: Gather issue context
+        id: context
+        run: |
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+
+          ISSUE_JSON=$(gh api repos/${{ github.repository }}/issues/${ISSUE_NUMBER})
+          ISSUE_TITLE=$(echo "$ISSUE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['title'])")
+          ISSUE_BODY=$(echo "$ISSUE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body','') or '')")
+
+          COMMENTS_JSON=$(gh api "repos/${{ github.repository }}/issues/${ISSUE_NUMBER}/comments?per_page=100")
+          COMMENTS=$(echo "$COMMENTS_JSON" | python3 -c "
+          import sys, json
+          comments = json.load(sys.stdin)
+          for c in reversed(comments):
+              user = c['user']['login']
+              body = c.get('body','')
+              print(f'--- @{user} ---')
+              print(body)
+              print()
+          ")
+
+          echo "$ISSUE_TITLE" > /tmp/issue_title.txt
+          echo "$ISSUE_BODY" > /tmp/issue_body.txt
+          echo "$COMMENTS" > /tmp/issue_comments.txt
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+
+      # ===================================================================
+      # Stages 1-3: Design + Council Design Review + Design Revision
+      # ===================================================================
+      - name: Run delegate Stages 1-3 (design + council + revision)
+        id: delegate_design
+        env:
+          LLM_API_KEY: ${{ steps.apikey.outputs.key }}
+          LLM_MODEL: ${{ needs.parse.outputs.model }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          ISSUE_TYPE: ${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          MAX_ITERATIONS: ${{ needs.parse.outputs.delegate_max_iterations }}
+          COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
+          EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
+          WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
+          WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
+        run: |
+          date +%s > /tmp/start_time
+          python3 << 'PYEOF'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          sys.path.insert(0, ".remote-dev-bot/lib")
+
+          from workshop import run_delegate
+
+          model = os.environ["LLM_MODEL"]
+          alias = "${{ needs.parse.outputs.alias }}"
+          issue_number = os.environ["ISSUE_NUMBER"]
+          github_repo = os.environ["GITHUB_REPO"]
+          github_token = os.environ["GITHUB_TOKEN"]
+
+          max_iterations = int(os.environ.get("MAX_ITERATIONS", "15") or "15")
+          wrapup_enabled = os.environ.get("WRAPUP_ENABLED", "true").lower() == "true"
+          wrapup_iteration = int(os.environ.get("WRAPUP_ITERATION", "0") or "0")
+
+          council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
+
+          council_extra_instructions = "${{ needs.parse.outputs.extra_instructions }}"
+          model_extra_instructions = "${{ needs.parse.outputs.model_extra_instructions }}"
+          extra_instructions = "\n\n".join(p for p in [council_extra_instructions, model_extra_instructions] if p)
+
+          # Generate repository file listing
+          proc = subprocess.run(
+              ["git", "ls-files"],
+              capture_output=True, text=True
+          )
+          file_listing = proc.stdout.strip()
+          extra_context = f"## Repository File Listing\n\n```\n{file_listing}\n```"
+
+          # Read repo context files
+          context_files = json.loads(os.environ.get("EXTRA_FILES", "[]") or "[]")
+          for filepath in context_files:
+              if os.path.exists(filepath):
+                  with open(filepath) as f:
+                      content = f.read().strip()
+                  if content:
+                      extra_context += f"\n\n## File: {filepath}\n\n{content}"
+
+          with open("/tmp/issue_title.txt") as f:
+              issue_title = f.read().strip()
+          with open("/tmp/issue_body.txt") as f:
+              issue_body = f.read().strip()
+          with open("/tmp/issue_comments.txt") as f:
+              issue_comments = f.read().strip()
+
+          def post_comment(body):
+              proc = subprocess.run(
+                  ["gh", "issue", "comment", issue_number,
+                   "--repo", github_repo,
+                   "--body", body],
+                  env={**os.environ, "GH_TOKEN": github_token},
+                  capture_output=True, text=True,
+              )
+              if proc.returncode != 0:
+                  print(f"Warning: failed to post comment: {proc.stderr}", file=sys.stderr)
+
+          delegate_result = run_delegate(
+              model=model,
+              model_alias=alias,
+              council_models=council_models,
+              issue_title=issue_title,
+              issue_body=issue_body,
+              issue_comments=issue_comments,
+              extra_instructions=extra_instructions,
+              council_extra_instructions=council_extra_instructions,
+              extra_context=extra_context,
+              max_iterations=max_iterations,
+              wrapup_enabled=wrapup_enabled,
+              wrapup_iteration=wrapup_iteration,
+              post_comment_fn=post_comment,
+          )
+
+          # Save usage data
+          usage_data = {
+              "input_tokens": delegate_result.get("total_input_tokens", 0),
+              "output_tokens": delegate_result.get("total_output_tokens", 0),
+              "cost": delegate_result.get("total_cost", 0.0),
+              "iterations": delegate_result.get("design_result", {}).get("iterations", 0),
+          }
+          with open("/tmp/llm_usage.json", "w") as f:
+              json.dump(usage_data, f)
+          # Also save a copy so we can merge with Stage 4 costs later
+          # (resolve.py will overwrite /tmp/llm_usage.json)
+          with open("/tmp/delegate_stages_1_3_usage.json", "w") as f:
+              json.dump(usage_data, f)
+
+          # Save revised design for Stage 4
+          revised_design = delegate_result.get("revised_design", "")
+          if revised_design:
+              with open("/tmp/delegate_revised_design.txt", "w") as f:
+                  f.write(revised_design)
+              print("Revised design saved for Stage 4")
+          else:
+              print("WARNING: No revised design produced — Stage 4 will run without design context")
+
+          # Signal whether Stages 1-3 produced a usable design
+          if not delegate_result.get("design_analysis"):
+              with open("/tmp/delegate_abort.txt", "w") as f:
+                  f.write("Design stage produced no output")
+              print("ABORT: Design stage produced no output")
+          PYEOF
+
+          echo "cost embedded" > /tmp/cost_embedded
+
+      # ===================================================================
+      # Stage 4: Implementation (resolve with revised design as context)
+      # ===================================================================
+      - name: Check if delegate should continue to Stage 4
+        id: check_abort
+        run: |
+          if [[ -f /tmp/delegate_abort.txt ]]; then
+            echo "abort=true" >> "$GITHUB_OUTPUT"
+            echo "Delegate pipeline aborted: $(cat /tmp/delegate_abort.txt)"
+          else
+            echo "abort=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve issue (Stage 4)
+        if: steps.check_abort.outputs.abort != 'true'
+        env:
+          LLM_API_KEY: ${{ steps.apikey.outputs.key }}
+          LLM_MODEL: ${{ needs.parse.outputs.model }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GITHUB_USERNAME: ${{ github.repository_owner }}
+          GIT_USERNAME: ${{ github.repository_owner }}
+          E2E_TEST_TOKEN: ${{ secrets.E2E_TEST_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          ISSUE_TYPE: ${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}
+          TARGET_BRANCH: ${{ needs.parse.outputs.target_branch }}
+          TARGET_BRANCH_EXPLICIT: ${{ needs.parse.outputs.target_branch_explicit }}
+          PR_TYPE: ${{ needs.parse.outputs.pr_type }}
+          ON_FAILURE: ${{ needs.parse.outputs.on_failure }}
+          MAX_ITERATIONS: ${{ needs.parse.outputs.max_iterations }}
+          WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
+          WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
+          STATUS_LOG_INTERVAL: ${{ needs.parse.outputs.status_log_interval }}
+          ALIAS: ${{ needs.parse.outputs.alias }}
+          EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
+          MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
+          DEBUG_LOGGING: ${{ needs.parse.outputs.debug_logging }}
+          DISTILL_ENABLED: ${{ needs.parse.outputs.distill_enabled }}
+        run: |
+          ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+          ISSUE_TYPE="${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}"
+          TARGET_BRANCH_EXPLICIT="${{ needs.parse.outputs.target_branch_explicit }}"
+
+          if [[ "$ISSUE_TYPE" == "pr" && "$TARGET_BRANCH_EXPLICIT" != "true" ]]; then
+            TARGET_BRANCH=$(gh pr view "$ISSUE_NUMBER" --json baseRefName --jq '.baseRefName')
+            export TARGET_BRANCH
+          fi
+
+          # Pass revised design from Stages 1-3 as extra context for the resolve agent
+          if [[ -f /tmp/delegate_revised_design.txt ]]; then
+            export EXTRA_CONTEXT=$(cat /tmp/delegate_revised_design.txt)
+            echo "Passing revised design as extra context to resolve agent"
+          fi
+
+          # Post Stage 4 start comment
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --body "## 🔨 Delegate Stage 4/6 — Implementation
+
+          Running resolve agent with \`${{ needs.parse.outputs.alias }}\` (\`${{ needs.parse.outputs.model }}\`) to implement the revised design..."
+
+          TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
+          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
+
+          timeout --kill-after=60 "$TIMEOUT_SECONDS" \
+            python3 -u .remote-dev-bot/lib/resolve.py
+          RESOLVE_EXIT_CODE=$?
+
+          if [[ $RESOLVE_EXIT_CODE -eq 124 ]]; then
+            echo "::warning::Resolver timed out after ${TIMEOUT_MINUTES} minutes. Cleanup steps will still run."
+          fi
+
+          exit $RESOLVE_EXIT_CODE
+
+      - name: Merge Stage 4 costs
+        if: steps.check_abort.outputs.abort != 'true'
+        run: |
+          # resolve.py overwrites /tmp/llm_usage.json with Stage 4 data.
+          # We saved Stages 1-3 data before Stage 4 ran, so merge them.
+          python3 << 'PYEOF'
+          import json, os
+
+          # After Stage 4, /tmp/llm_usage.json has been overwritten by resolve.py
+          stage4 = {}
+          if os.path.exists("/tmp/llm_usage.json"):
+              with open("/tmp/llm_usage.json") as f:
+                  stage4 = json.load(f)
+
+          # Stages 1-3 data was saved before resolve ran
+          stages_1_3 = {}
+          if os.path.exists("/tmp/delegate_stages_1_3_usage.json"):
+              with open("/tmp/delegate_stages_1_3_usage.json") as f:
+                  stages_1_3 = json.load(f)
+
+          combined = {
+              "input_tokens": stages_1_3.get("input_tokens", 0) + stage4.get("input_tokens", 0),
+              "output_tokens": stages_1_3.get("output_tokens", 0) + stage4.get("output_tokens", 0),
+              "cost": (stages_1_3.get("cost") or 0.0) + (stage4.get("cost") or 0.0),
+              "iterations": stage4.get("iterations", 0),
+          }
+          with open("/tmp/llm_usage.json", "w") as f:
+              json.dump(combined, f)
+          print(f"Merged costs: Stages 1-3 ${stages_1_3.get('cost', 0):.2f} + Stage 4 ${stage4.get('cost', 0):.2f} = ${combined['cost']:.2f}")
+          PYEOF
+
+      - name: Safety-net push
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          NO_OP=$(python3 -c "import json,os; d=json.load(open('/tmp/resolve_status.json')) if os.path.exists('/tmp/resolve_status.json') else {}; print('true' if d.get('no_op') else 'false')" 2>/dev/null || echo "false")
+          if [[ "$NO_OP" == "true" ]]; then
+            echo "no_op run — skipping safety-net push"
+            exit 0
+          fi
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "WIP: auto-saved by workflow (agent did not commit before exiting)"
+            echo "Committed uncommitted changes"
+          fi
+          git push origin HEAD 2>/dev/null || echo "Push failed or nothing to push"
+
+      # ===================================================================
+      # Stage 5: Council Code Review (same as build Stage 2)
+      # ===================================================================
+      - name: Run council code review (Stage 5)
+        if: steps.check_abort.outputs.abort != 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
+          GITHUB_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
+
+          if [[ -z "$PR_URL" ]]; then
+            NO_OP=$(python3 -c "import json; d=json.load(open('/tmp/resolve_status.json')) if __import__('os').path.exists('/tmp/resolve_status.json') else {}; print('true' if d.get('no_op') else 'false')")
+            if [[ "$NO_OP" == "true" ]]; then
+              echo "Agent signaled no_op — no PR to review. Skipping council code review."
+              exit 0
+            fi
+            echo "No PR URL found — resolve may have failed. Posting notice and skipping council code review."
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "$GITHUB_REPO" \
+              --body "## 🏛️ Delegate Stage 5/6 — Council Code Review
+
+          ⚠️ **Skipped** — the implementation stage did not produce a pull request. Council code review requires a PR to review. See the [workflow run logs]($RUN_URL) for details."
+            exit 0
+          fi
+
+          export PR_URL
+
+          # Post Stage 5 start comment
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPO" \
+            --body "## 🏛️ Delegate Stage 5/6 — Council Code Review
+
+          Running council code review on the implementation PR..."
+
+          python3 << 'PYEOF'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          sys.path.insert(0, ".remote-dev-bot/lib")
+          from workshop import run_build_council
+
+          github_repo = os.environ["GITHUB_REPO"]
+          github_token = os.environ["GH_TOKEN"]
+          pr_url = os.environ.get("PR_URL", "")
+          issue_number = os.environ["ISSUE_NUMBER"]
+
+          pr_number_match = re.search(r'/pull/(\d+)$', pr_url)
+          if not pr_number_match:
+              print("No PR number found in URL, exiting")
+              sys.exit(0)
+          pr_number = pr_number_match.group(1)
+
+          env = {**os.environ, "GH_TOKEN": github_token}
+
+          pr_json = subprocess.run(
+              ["gh", "api", f"repos/{github_repo}/pulls/{pr_number}"],
+              capture_output=True, text=True, env=env,
+          ).stdout
+          pr_data = json.loads(pr_json)
+          pr_title = pr_data.get("title", "")
+          pr_body = pr_data.get("body", "") or ""
+
+          diff_result = subprocess.run(
+              ["gh", "api", f"repos/{github_repo}/pulls/{pr_number}",
+               "--header", "Accept: application/vnd.github.diff"],
+              capture_output=True, text=True, env=env,
+          )
+          pr_diff = diff_result.stdout[:40000]
+
+          issue_json = subprocess.run(
+              ["gh", "api", f"repos/{github_repo}/issues/{issue_number}"],
+              capture_output=True, text=True, env=env,
+          ).stdout
+          issue_data = json.loads(issue_json)
+          issue_title = issue_data.get("title", "")
+          issue_body_text = issue_data.get("body", "") or ""
+
+          council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
+          council_extra_instructions = "${{ needs.parse.outputs.extra_instructions }}"
+
+          def post_pr_comment(body):
+              proc = subprocess.run(
+                  ["gh", "pr", "comment", pr_number,
+                   "--repo", github_repo,
+                   "--body", body],
+                  env=env,
+                  capture_output=True, text=True,
+              )
+              if proc.returncode != 0:
+                  print(f"Warning: failed to post PR comment: {proc.stderr}", file=sys.stderr)
+
+          build_result = run_build_council(
+              council_models=council_models,
+              issue_title=issue_title,
+              issue_body=issue_body_text,
+              pr_title=pr_title,
+              pr_body=pr_body,
+              pr_diff=pr_diff,
+              extra_instructions=council_extra_instructions,
+              post_comment_fn=post_pr_comment,
+          )
+
+          # Merge council usage into aggregate
+          existing = {}
+          if os.path.exists("/tmp/llm_usage.json"):
+              with open("/tmp/llm_usage.json") as f:
+                  existing = json.load(f)
+
+          combined = {
+              "input_tokens": existing.get("input_tokens", 0) + build_result["total_input_tokens"],
+              "output_tokens": existing.get("output_tokens", 0) + build_result["total_output_tokens"],
+              "cost": (existing.get("cost") or 0.0) + build_result["total_cost"],
+              "iterations": existing.get("iterations", 0),
+          }
+          with open("/tmp/llm_usage.json", "w") as f:
+              json.dump(combined, f)
+
+          # Save council results for Stage 6
+          reviews = []
+          for cr in build_result.get("council_results", []):
+              reviews.append({
+                  "model_alias": cr.get("model_alias", ""),
+                  "review": cr.get("review", ""),
+              })
+          with open("/tmp/delegate_code_reviews.json", "w") as f:
+              json.dump(reviews, f)
+          PYEOF
+
+      # ===================================================================
+      # Stage 6: Code Revision Plan
+      # ===================================================================
+      - name: Run code revision plan (Stage 6)
+        if: steps.check_abort.outputs.abort != 'true'
+        env:
+          LLM_API_KEY: ${{ steps.apikey.outputs.key }}
+          LLM_MODEL: ${{ needs.parse.outputs.model }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GITHUB_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+        run: |
+          PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
+
+          if [[ -z "$PR_URL" || ! -f /tmp/delegate_code_reviews.json ]]; then
+            echo "No PR or no code reviews — skipping Stage 6"
+            exit 0
+          fi
+
+          python3 << 'PYEOF'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          sys.path.insert(0, ".remote-dev-bot/lib")
+          from workshop import _run_revision_call, CODE_REVISION_SYSTEM_PROMPT
+
+          model = os.environ["LLM_MODEL"]
+          alias = "${{ needs.parse.outputs.alias }}"
+          github_repo = os.environ["GITHUB_REPO"]
+          github_token = os.environ["GH_TOKEN"]
+          issue_number = os.environ["ISSUE_NUMBER"]
+          pr_url = os.environ.get("PR_URL", "")
+
+          pr_number_match = re.search(r'/pull/(\d+)$', pr_url)
+          if not pr_number_match:
+              print("No PR number found, exiting")
+              sys.exit(0)
+          pr_number = pr_number_match.group(1)
+
+          env = {**os.environ, "GH_TOKEN": github_token}
+
+          # Fetch PR diff
+          diff_result = subprocess.run(
+              ["gh", "api", f"repos/{github_repo}/pulls/{pr_number}",
+               "--header", "Accept: application/vnd.github.diff"],
+              capture_output=True, text=True, env=env,
+          )
+          pr_diff = diff_result.stdout[:40000]
+
+          # Load code reviews from Stage 5
+          with open("/tmp/delegate_code_reviews.json") as f:
+              reviews = json.load(f)
+
+          critiques_text = "\n\n---\n\n".join(
+              f"### Code Review by {r['model_alias']}\n\n{r['review']}"
+              for r in reviews
+          )
+
+          user_content = (
+              f"## PR Diff\n\n```diff\n{pr_diff}\n```\n\n"
+              f"## Code Reviews\n\n{critiques_text}\n\n"
+              f"---\n\n"
+              f"Please produce a concrete revision plan addressing the code review feedback."
+          )
+
+          extra_instructions = "${{ needs.parse.outputs.extra_instructions }}"
+          model_extra_instructions = "${{ needs.parse.outputs.model_extra_instructions }}"
+          combined_instructions = "\n\n".join(p for p in [extra_instructions, model_extra_instructions] if p)
+
+          revision_result = _run_revision_call(
+              model_id=model,
+              system_prompt=CODE_REVISION_SYSTEM_PROMPT,
+              user_content=user_content,
+              extra_instructions=combined_instructions,
+              max_tokens=8192,
+          )
+
+          revision_text = revision_result["text"]
+
+          # Post revision plan as a PR comment
+          def post_pr_comment(body):
+              proc = subprocess.run(
+                  ["gh", "pr", "comment", pr_number,
+                   "--repo", github_repo,
+                   "--body", body],
+                  env=env,
+                  capture_output=True, text=True,
+              )
+              if proc.returncode != 0:
+                  print(f"Warning: failed to post PR comment: {proc.stderr}", file=sys.stderr)
+
+          post_pr_comment(
+              f"## 🔄 Delegate Stage 6/6 — Code Revision Plan\n\n"
+              f"🤖 **Model:** `{alias}` (`{model}`)\n\n"
+              f"{revision_text}\n\n"
+              f"---\n"
+              f"_Code revision plan by `/agent-delegate` Stage 6 (`{alias}`)_"
+          )
+
+          # Also post on the issue for visibility
+          proc = subprocess.run(
+              ["gh", "issue", "comment", issue_number,
+               "--repo", github_repo,
+               "--body", f"## 🔄 Delegate Stage 6/6 — Code Revision Plan\n\nPosted as a comment on {pr_url}"],
+              env=env,
+              capture_output=True, text=True,
+          )
+
+          # Merge Stage 6 usage into aggregate
+          existing = {}
+          if os.path.exists("/tmp/llm_usage.json"):
+              with open("/tmp/llm_usage.json") as f:
+                  existing = json.load(f)
+
+          combined = {
+              "input_tokens": existing.get("input_tokens", 0) + revision_result["input_tokens"],
+              "output_tokens": existing.get("output_tokens", 0) + revision_result["output_tokens"],
+              "cost": (existing.get("cost") or 0.0) + revision_result["cost"],
+              "iterations": existing.get("iterations", 0),
+          }
+          with open("/tmp/llm_usage.json", "w") as f:
+              json.dump(combined, f)
+          PYEOF
+
+      # ===================================================================
+      # Post-pipeline: result comment + cost reporting
+      # ===================================================================
+      - name: Post result comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          MODEL="${{ needs.parse.outputs.model }}"
+
+          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
+          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
+          if [ -f /tmp/llm_usage.json ]; then
+            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
+          import json
+          d = json.load(open('/tmp/llm_usage.json'))
+          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
+          ")
+          else
+            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
+          fi
+          DELEGATE_MAX_ITER="${{ needs.parse.outputs.delegate_max_iterations }}"
+          ITERATIONS_FMT=$(python3 -c "
+          max_i = '${DELEGATE_MAX_ITER}'
+          iters = '${ITERATIONS}'
+          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
+          ")
+          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
+          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          def fmt(n):
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
+              return str(n)
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
+          ")
+
+          # Check pipeline result
+          PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
+
+          if [[ -f /tmp/delegate_abort.txt ]]; then
+            ABORT_REASON=$(cat /tmp/delegate_abort.txt)
+            {
+              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo ""
+              echo "### ⚠️ Delegate pipeline aborted"
+              echo ""
+              echo "**Reason:** ${ABORT_REASON}"
+              echo ""
+              echo "See the [workflow run logs]($RUN_URL) for full details."
+              echo ""
+              echo "### 💰 Cost"
+              echo ""
+              echo "| Metric | Value |"
+              echo "|--------|-------|"
+              echo "| Time | ${ELAPSED_FMT} |"
+              echo "| Iterations | ${ITERATIONS_FMT} |"
+              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+            } > /tmp/delegate_result_comment.md
+          elif [[ -n "$PR_URL" ]]; then
+            {
+              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo ""
+              echo "### ✅ Delegate pipeline complete"
+              echo ""
+              echo "**PR:** ${PR_URL}"
+              echo ""
+              echo "The full design-to-implementation cycle is complete:"
+              echo "1. ✅ Design exploration"
+              echo "2. ✅ Council design review"
+              echo "3. ✅ Design revision"
+              echo "4. ✅ Implementation (resolve)"
+              echo "5. ✅ Council code review"
+              echo "6. ✅ Code revision plan"
+              echo ""
+              echo "See the [workflow run logs]($RUN_URL) for full details."
+              echo ""
+              echo "### 💰 Cost"
+              echo ""
+              echo "| Metric | Value |"
+              echo "|--------|-------|"
+              echo "| Time | ${ELAPSED_FMT} |"
+              echo "| Iterations | ${ITERATIONS_FMT} |"
+              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+            } > /tmp/delegate_result_comment.md
+          else
+            {
+              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo ""
+              echo "### ⚠️ Delegate pipeline did not produce a PR"
+              echo ""
+              echo "The implementation stage did not create a pull request."
+              echo ""
+              echo "See the [workflow run logs]($RUN_URL) for full details."
+              echo ""
+              echo "### 💰 Cost"
+              echo ""
+              echo "| Metric | Value |"
+              echo "|--------|-------|"
+              echo "| Time | ${ELAPSED_FMT} |"
+              echo "| Iterations | ${ITERATIONS_FMT} |"
+              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+            } > /tmp/delegate_result_comment.md
+          fi
+
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --body-file /tmp/delegate_result_comment.md
+          echo "cost embedded" > /tmp/cost_embedded
+
+      - name: Assign triggerer to PR
+        if: needs.parse.outputs.assign_pr == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log | head -1)
+          if [ -z "$PR_URL" ]; then
+            echo "Could not find PR URL in send_pull_request output, skipping assignment"
+            exit 0
+          fi
+          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+          gh pr edit "$PR_NUMBER" --repo "${{ github.repository }}" \
+            --add-assignee "${{ github.event.comment.user.login }}"
+
+      - name: Append cost to PR
+        if: >-
+          always() &&
+          !(github.event.issue.pull_request || github.event.pull_request)
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
+          if [ -z "$PR_URL" ]; then
+            echo "No PR URL found — skipping cost append"
+            exit 0
+          fi
+
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          MODEL="${{ needs.parse.outputs.model }}"
+          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
+
+          python3 << PYEOF
+          import json, math, os
+
+          elapsed = ${ELAPSED}
+          alias = "${ALIAS}"
+          model = "${MODEL}"
+
+          usage = {}
+          if os.path.exists("/tmp/llm_usage.json"):
+              with open("/tmp/llm_usage.json") as f:
+                  usage = json.load(f)
+
+          inp = usage.get("input_tokens", 0)
+          out = usage.get("output_tokens", 0)
+          cost = usage.get("cost") or 0.0
+          iters = usage.get("iterations", 0)
+
+          def _fmt(n):
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
+              return str(n)
+
+          elapsed_fmt = f'{elapsed // 60}m {elapsed % 60}s' if elapsed >= 60 else f'{elapsed}s'
+          rounded = math.ceil(cost * 100) / 100
+
+          rows = [
+              ('Time', elapsed_fmt),
+              ('Iterations', str(iters)),
+              ('Input', f'{_fmt(inp)} tokens'),
+              ('Output', f'{_fmt(out)} tokens'),
+              ('**Cost**', f'**\${rounded:.2f}**'),
+          ]
+          _tbl = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
+          _tbl += [f'| {k} | {v} |' for k, v in rows]
+          open('/tmp/cost_table.txt', 'w').write('\n'.join(_tbl))
+          PYEOF
+
+          if [ ! -f /tmp/cost_table.txt ]; then
+            echo "Cost table generation failed — fallback step will handle it"
+            exit 0
+          fi
+
+          CURRENT_BODY=$(gh pr view "$PR_URL" --json body --jq '.body' 2>/dev/null || echo "")
+          COST_TABLE=$(cat /tmp/cost_table.txt)
+          printf '%s\n\n%s\n' "$CURRENT_BODY" "$COST_TABLE" > /tmp/pr_new_body.txt
+
+          gh pr edit "$PR_URL" --body-file /tmp/pr_new_body.txt
+          echo "cost embedded" > /tmp/cost_embedded
+          echo "Cost table appended to PR $PR_URL"
+
+      - name: Post cost comment (fallback)
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          if [ -f /tmp/cost_embedded ]; then
+            echo "Cost already reported — skipping fallback"
+            exit 0
+          fi
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          MODEL="${{ needs.parse.outputs.model }}"
+          ALIAS="${{ needs.parse.outputs.alias }}"
+          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
+          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
+          if [ -f /tmp/llm_usage.json ]; then
+            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
+          import json
+          d = json.load(open('/tmp/llm_usage.json'))
+          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
+          ")
+          else
+            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
+          fi
+          DELEGATE_MAX_ITER="${{ needs.parse.outputs.delegate_max_iterations }}"
+          ITERATIONS_FMT=$(python3 -c "
+          max_i = '${DELEGATE_MAX_ITER}'
+          iters = '${ITERATIONS}'
+          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
+          ")
+          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
+          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
+          def fmt(n):
+              if n >= 1_000_000:
+                  v = n / 1_000_000
+                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
+              elif n >= 1_000:
+                  v = n / 1_000
+                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
+              return str(n)
+          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
+          ")
+          {
+            echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+            echo ""
+            echo "⚠️ Delegate pipeline did not complete — partial cost:"
             echo ""
             echo "### 💰 Cost"
             echo ""
