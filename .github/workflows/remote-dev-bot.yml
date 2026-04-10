@@ -3953,6 +3953,7 @@ jobs:
             exit 0
           fi
 
+          export PR_URL
           python3 << 'PYEOF'
           import json
           import os
