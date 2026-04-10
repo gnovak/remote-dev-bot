@@ -967,7 +967,7 @@ def build_cost_table():
     Returns a markdown string (starting with a blank line + heading), or ''
     if usage data is unavailable.
     """
-    import math
+    import math, gzip, subprocess as _sp, re as _re
 
     try:
         with open("/tmp/llm_usage.json") as f:
@@ -979,8 +979,6 @@ def build_cost_table():
     output_toks = int(d.get("output_tokens", 0))
     cost_val = float(d.get("cost") or 0)
     iterations = int(d.get("iterations", 0))
-    cache_read_toks = int(d.get("cache_read_tokens", 0))
-    cache_creation_toks = int(d.get("cache_creation_tokens", 0))
 
     try:
         elapsed = int(time.time()) - int(open("/tmp/start_time").read().strip())
@@ -994,8 +992,51 @@ def build_cost_table():
             return f"{round(n / 1_000, 1)}K"
         return str(n)
 
+    def _fmt_loc(n):
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f}M"
+        if n >= 1_000:
+            return f"{n / 1_000:.1f}k"
+        return str(n)
+
+    def _fmt_bpd(text, cost):
+        if cost <= 0:
+            return "N/A"
+        data = text.encode("utf-8") if isinstance(text, str) else text
+        bpd = (len(gzip.compress(data)) * 8) / cost
+        if bpd >= 1_000_000:
+            return f"{bpd / 1_000_000:.1f} Mbit/$"
+        return f"{bpd / 1_000:.1f} Kbit/$"
+
     elapsed_fmt = f"{elapsed // 60}m {elapsed % 60}s" if elapsed >= 60 else f"{elapsed}s"
     rounded = math.ceil(cost_val * 100) / 100
+
+    # Compute git diff metrics (LOC and compressed diff size)
+    shortstat = ""
+    diff_text = ""
+    try:
+        _base = open("/tmp/agent_start_sha").read().strip() if os.path.exists("/tmp/agent_start_sha") else None
+        _base_ref = _base or "$(git merge-base HEAD origin/main)"
+        _dp = _sp.run(
+            f"git diff {_base_ref} HEAD 2>/dev/null || echo \"\",
+            shell=True, capture_output=True, text=True, timeout=30,
+        )
+        diff_text = _dp.stdout or ""
+        _ss = _sp.run(
+            f"git diff --shortstat {_base_ref} HEAD 2>/dev/null || echo \"\",
+            shell=True, capture_output=True, text=True, timeout=30,
+        )
+        shortstat = _ss.stdout.strip()
+    except Exception:
+        pass
+
+    loc_changed = 0
+    _m = _re.search(r"(\d+) insertion", shortstat)
+    if _m:
+        loc_changed += int(_m.group(1))
+    _m = _re.search(r"(\d+) deletion", shortstat)
+    if _m:
+        loc_changed += int(_m.group(1))
 
     rows = [
         ("Time", elapsed_fmt),
@@ -1003,26 +1044,62 @@ def build_cost_table():
         ("Input", f"{_fmt_tok(input_toks)} tokens"),
         ("Output", f"{_fmt_tok(output_toks)} tokens"),
     ]
-    if cache_read_toks > 0:
-        rows.append(("Cache read", f"{_fmt_tok(cache_read_toks)} tokens"))
-    if cache_creation_toks > 0:
-        rows.append(("Cache write", f"{_fmt_tok(cache_creation_toks)} tokens"))
-    if cache_read_toks > 0 or cache_creation_toks > 0:
-        # Estimate cache savings: cache reads are billed at ~10% of normal input price;
-        # without caching those tokens would have been billed at 100%.
-        # Savings ≈ cache_read_tokens * normal_input_price * 0.9
-        # We approximate using the observed average input token price.
-        uncached_input = input_toks - cache_read_toks
-        if uncached_input > 0 and input_toks > 0:
-            avg_input_price = cost_val / (input_toks + output_toks) if (input_toks + output_toks) > 0 else 0
-            # Rough savings: cache_read_toks would have cost full price but cost ~10%
-            cache_savings = cache_read_toks * avg_input_price * 0.9
-            rounded_savings = math.ceil(cache_savings * 100) / 100
-            rows.append(("Cache savings (est.)", f"~${rounded_savings:.2f}"))
+    if shortstat:
+        rows.append(("Diff", shortstat))
+    if cost_val > 0 and loc_changed > 0:
+        rows.append(("LOC/$", f"{_fmt_loc(int(loc_changed / cost_val))} loc/$"))
+    if cost_val > 0 and diff_text:
+        rows.append(("Info/$", _fmt_bpd(diff_text, cost_val)))
     rows.append(("**Cost**", f"**${rounded:.2f}**"))
     lines = ["", "### 💰 Cost", "", "| Metric | Value |", "|--------|-------|"]
     lines += [f"| {k} | {v} |" for k, v in rows]
     return "\n".join(lines)
+
+
+def build_cache_savings_summary():
+    """Build a cache savings summary string for the agent status log.
+
+    Returns a non-empty string if cache was used, or '' otherwise.
+    """
+    import math
+
+    try:
+        with open("/tmp/llm_usage.json") as f:
+            d = json.load(f)
+    except Exception:
+        return ""
+
+    input_toks = int(d.get("input_tokens", 0))
+    output_toks = int(d.get("output_tokens", 0))
+    cost_val = float(d.get("cost") or 0)
+    cache_read_toks = int(d.get("cache_read_tokens", 0))
+    cache_creation_toks = int(d.get("cache_creation_tokens", 0))
+
+    if cache_read_toks == 0 and cache_creation_toks == 0:
+        return ""
+
+    def _fmt_tok(n):
+        if n >= 1_000_000:
+            return f"{round(n / 1_000_000, 1)}M"
+        if n >= 1_000:
+            return f"{round(n / 1_000, 1)}K"
+        return str(n)
+
+    parts = []
+    if cache_read_toks > 0:
+        parts.append(f"{_fmt_tok(cache_read_toks)} tokens read from cache")
+    if cache_creation_toks > 0:
+        parts.append(f"{_fmt_tok(cache_creation_toks)} tokens written to cache")
+
+    # Estimate savings
+    uncached_input = input_toks - cache_read_toks
+    if cache_read_toks > 0 and uncached_input > 0 and (input_toks + output_toks) > 0:
+        avg_input_price = cost_val / (input_toks + output_toks)
+        cache_savings = cache_read_toks * avg_input_price * 0.9
+        rounded_savings = math.ceil(cache_savings * 100) / 100
+        parts.append(f"~${rounded_savings:.2f} saved")
+
+    return f"**Cache:** {', '.join(parts)}"
 
 
 def write_status(success, explanation, no_op=False):
@@ -1686,8 +1763,15 @@ def main():
         try:
             log_text = "\n\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
             model_header = f"\U0001f916 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n" if ALIAS else ""
+            cache_summary = build_cache_savings_summary()
+            header_parts = []
             if distillation_summary:
-                comment_body = f"## Agent Status Log\n\n{model_header}{distillation_summary}\n\n{log_text}"
+                header_parts.append(distillation_summary)
+            if cache_summary:
+                header_parts.append(cache_summary)
+            header_block = "\n\n".join(header_parts)
+            if header_block:
+                comment_body = f"## Agent Status Log\n\n{model_header}{header_block}\n\n{log_text}"
             else:
                 comment_body = f"## Agent Status Log\n\n{model_header}{log_text}"
             comment_file = "/tmp/rdb_status_log_comment.txt"

@@ -439,38 +439,59 @@ jobs:
 
           if [[ "$SUCCESS" == "false" ]]; then
             DRAFT_PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
-            {
-              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
-              echo ""
-              echo "### ⚠️ Agent could not fully resolve this issue"
-              echo ""
-              if [[ -n "$EXPLANATION" ]]; then
-                echo "**Agent's evaluation:**"
+            if [[ -n "$DRAFT_PR_URL" ]]; then
+              # A draft PR was created — cost (with LOC/$ and Info/$) will be embedded
+              # in the PR body by the "Append cost to PR" step below. Post a lightweight
+              # failure notice on the issue without duplicating the cost table.
+              {
+                echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
                 echo ""
-                echo "$EXPLANATION"
+                echo "### ⚠️ Agent could not fully resolve this issue"
                 echo ""
-              fi
-              if [[ -n "$DRAFT_PR_URL" ]]; then
+                if [[ -n "$EXPLANATION" ]]; then
+                  echo "**Agent's evaluation:**"
+                  echo ""
+                  echo "$EXPLANATION"
+                  echo ""
+                fi
                 echo "A draft PR with partial work was created: $DRAFT_PR_URL"
                 echo ""
-              fi
-              echo "See the [workflow run logs]($RUN_URL) for full details."
-              echo ""
-              echo "### 💰 Cost"
-              echo ""
-              echo "| Metric | Value |"
-              echo "|--------|-------|"
-              echo "| Time | ${ELAPSED_FMT} |"
-              echo "| Iterations | ${ITERATIONS_FMT} |"
-              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
-              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
-              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
-            } > /tmp/failure_comment.md
+                echo "The full cost breakdown (including code metrics) is in the PR body."
+                echo ""
+                echo "See the [workflow run logs]($RUN_URL) for full details."
+              } > /tmp/failure_comment.md
+              # Do NOT set cost_embedded here — let "Append cost to PR" add the full
+              # cost table (with LOC/$ and Info/$) to the draft PR body instead.
+            else
+              {
+                echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+                echo ""
+                echo "### ⚠️ Agent could not fully resolve this issue"
+                echo ""
+                if [[ -n "$EXPLANATION" ]]; then
+                  echo "**Agent's evaluation:**"
+                  echo ""
+                  echo "$EXPLANATION"
+                  echo ""
+                fi
+                echo "See the [workflow run logs]($RUN_URL) for full details."
+                echo ""
+                echo "### 💰 Cost"
+                echo ""
+                echo "| Metric | Value |"
+                echo "|--------|-------|"
+                echo "| Time | ${ELAPSED_FMT} |"
+                echo "| Iterations | ${ITERATIONS_FMT} |"
+                echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+                echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+                printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+              } > /tmp/failure_comment.md
+              echo "cost embedded" > /tmp/cost_embedded
+            fi
 
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body-file /tmp/failure_comment.md
-            echo "cost embedded" > /tmp/cost_embedded
           fi
           # Success case: success comment (with model + cost) already posted by resolve.py
 
@@ -989,38 +1010,59 @@ jobs:
 
           if [[ "$SUCCESS" == "false" ]]; then
             DRAFT_PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
-            {
-              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
-              echo ""
-              echo "### ⚠️ Agent could not fully resolve this issue"
-              echo ""
-              if [[ -n "$EXPLANATION" ]]; then
-                echo "**Agent's evaluation:**"
+            if [[ -n "$DRAFT_PR_URL" ]]; then
+              # A draft PR was created — cost (with LOC/$ and Info/$) will be embedded
+              # in the PR body by the "Append cost to PR" step below. Post a lightweight
+              # failure notice on the issue without duplicating the cost table.
+              {
+                echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
                 echo ""
-                echo "$EXPLANATION"
+                echo "### ⚠️ Agent could not fully resolve this issue"
                 echo ""
-              fi
-              if [[ -n "$DRAFT_PR_URL" ]]; then
+                if [[ -n "$EXPLANATION" ]]; then
+                  echo "**Agent's evaluation:**"
+                  echo ""
+                  echo "$EXPLANATION"
+                  echo ""
+                fi
                 echo "A draft PR with partial work was created: $DRAFT_PR_URL"
                 echo ""
-              fi
-              echo "See the [workflow run logs]($RUN_URL) for full details."
-              echo ""
-              echo "### 💰 Cost"
-              echo ""
-              echo "| Metric | Value |"
-              echo "|--------|-------|"
-              echo "| Time | ${ELAPSED_FMT} |"
-              echo "| Iterations | ${ITERATIONS_FMT} |"
-              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
-              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
-              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
-            } > /tmp/failure_comment.md
+                echo "The full cost breakdown (including code metrics) is in the PR body."
+                echo ""
+                echo "See the [workflow run logs]($RUN_URL) for full details."
+              } > /tmp/failure_comment.md
+              # Do NOT set cost_embedded here — let "Append cost to PR" add the full
+              # cost table (with LOC/$ and Info/$) to the draft PR body instead.
+            else
+              {
+                echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+                echo ""
+                echo "### ⚠️ Agent could not fully resolve this issue"
+                echo ""
+                if [[ -n "$EXPLANATION" ]]; then
+                  echo "**Agent's evaluation:**"
+                  echo ""
+                  echo "$EXPLANATION"
+                  echo ""
+                fi
+                echo "See the [workflow run logs]($RUN_URL) for full details."
+                echo ""
+                echo "### 💰 Cost"
+                echo ""
+                echo "| Metric | Value |"
+                echo "|--------|-------|"
+                echo "| Time | ${ELAPSED_FMT} |"
+                echo "| Iterations | ${ITERATIONS_FMT} |"
+                echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
+                echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
+                printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
+              } > /tmp/failure_comment.md
+              echo "cost embedded" > /tmp/cost_embedded
+            fi
 
             gh issue comment "$ISSUE_NUMBER" \
               --repo "${{ github.repository }}" \
               --body-file /tmp/failure_comment.md
-            echo "cost embedded" > /tmp/cost_embedded
           fi
           # Success case: success comment (with model + cost) already posted by resolve.py
 
