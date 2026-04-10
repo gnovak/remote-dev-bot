@@ -1320,18 +1320,36 @@ def main():
 
             # Track token usage
             usage = getattr(response, "usage", None)
+            iter_prompt_toks = 0
+            iter_completion_toks = 0
+            iter_cache_read_toks = 0
             if usage:
-                total_input_tokens += getattr(usage, "prompt_tokens", 0)
-                total_output_tokens += getattr(usage, "completion_tokens", 0)
+                iter_prompt_toks = getattr(usage, "prompt_tokens", 0) or 0
+                iter_completion_toks = getattr(usage, "completion_tokens", 0) or 0
+                total_input_tokens += iter_prompt_toks
+                total_output_tokens += iter_completion_toks
                 # Prompt caching token details (normalized by LiteLLM across providers)
                 prompt_details = getattr(usage, "prompt_tokens_details", None)
                 if prompt_details:
-                    total_cache_read_tokens += getattr(prompt_details, "cached_tokens", 0) or 0
+                    iter_cache_read_toks = getattr(prompt_details, "cached_tokens", 0) or 0
+                    total_cache_read_tokens += iter_cache_read_toks
                     total_cache_creation_tokens += getattr(prompt_details, "cache_creation_input_tokens", 0) or 0
             cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
             if cost:
                 total_cost += cost
             rate_limit_retries = 0
+
+            # Always-on per-iter token log: input/output and cache hit ratio.
+            # The cache hit ratio is the single most useful diagnostic for spotting
+            # when prefix caching breaks (see #478, #496).
+            if iter_prompt_toks:
+                cache_pct = (
+                    f" cache={iter_cache_read_toks:,}/{iter_prompt_toks:,} "
+                    f"({100 * iter_cache_read_toks / iter_prompt_toks:.0f}%)"
+                    if iter_cache_read_toks
+                    else ""
+                )
+                print(f"  [tokens] in={iter_prompt_toks:,} out={iter_completion_toks:,}{cache_pct}")
 
             # Gemini (and possibly other providers) can return an empty choices
             # list when a safety filter or streaming anomaly occurs.  Treat it
@@ -1402,11 +1420,11 @@ def main():
                     arguments = {}
 
                 if tool_name == "bash":
-                    print(f"  Tool: bash({arguments.get('command', '')[:80]!r})")
+                    call_summary = f"bash({arguments.get('command', '')[:80]!r})"
                 elif tool_name in ("read_file", "grep", "finish"):
-                    print(f"  Tool: {tool_name}({arguments})")
+                    call_summary = f"{tool_name}({arguments})"
                 else:
-                    print(f"  Tool: {tool_name}({list(arguments.keys())})")
+                    call_summary = f"{tool_name}({list(arguments.keys())})"
 
                 if tool_name == "finish":
                     finish_args = arguments
@@ -1419,8 +1437,10 @@ def main():
                 else:
                     tool_result = execute_tool(tool_name, arguments)
 
-                if DEBUG_LOGGING:
-                    print(f"  [DEBUG] Tool result size: {len(tool_result)} chars")
+                # Always-on per-tool log: name, args summary, and result size.
+                # Result size is the single most useful number for tracking down
+                # token spend (see #478) — large grep/read results dominate context.
+                print(f"  Tool: {call_summary} → {len(tool_result):,} chars")
                 messages.append(
                     {
                         "role": "tool",
@@ -1431,7 +1451,15 @@ def main():
 
             # Trim old tool result pairs to manage context size
             if CONTEXT_KEEP_TOOL_RESULTS > 0:
+                pre_trim_count = len(messages)
+                pre_trim_tokens = estimate_tokens(messages)
                 messages = trim_tool_results(messages, CONTEXT_KEEP_TOOL_RESULTS)
+                if len(messages) != pre_trim_count:
+                    post_trim_tokens = estimate_tokens(messages)
+                    print(
+                        f"  [trim] dropped {pre_trim_count - len(messages)} message(s), "
+                        f"~{pre_trim_tokens:,} → ~{post_trim_tokens:,} tokens"
+                    )
 
             # Context window compaction — summarize oldest messages when context grows large
             if MAX_CONTEXT_TOKENS > 0 and not done:
