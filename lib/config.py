@@ -562,8 +562,10 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         result["workshop_max_iterations"] = max_iter
     if mode == "reconcile":
         result["reconcile_max_iterations"] = max_iter
+    if mode == "delegate":
+        result["delegate_max_iterations"] = max_iter
 
-    if mode in ("workshop", "build") or (mode == "review" and args.get("council", False)):
+    if mode in ("workshop", "build", "delegate") or (mode == "review" and args.get("council", False)):
         # Council models: explicit list from mode config, or all configured models.
         # Used by workshop (design critique) and build (code review) modes.
         council_config = mode_config.get("council", [])
@@ -698,6 +700,8 @@ def main():
                 f.write(f"workshop_max_iterations={result['workshop_max_iterations']}\n")
             if "reconcile_max_iterations" in result:
                 f.write(f"reconcile_max_iterations={result['reconcile_max_iterations']}\n")
+            if "delegate_max_iterations" in result:
+                f.write(f"delegate_max_iterations={result['delegate_max_iterations']}\n")
             if "council_models" in result:
                 f.write(f"council_models={json.dumps(result['council_models'])}\n")
 
