@@ -1860,3 +1860,75 @@ class TestDelegateConfig:
         tmp_path, base_path = delegate_config_dir
         result = resolve_config(base_path, "nonexistent.yaml", "delegate")
         assert "workshop_max_iterations" not in result
+
+    # --- delegate max_design_iterations (design/exploration budget) ---
+    #
+    # Delegate mode has two independent iteration budgets:
+    #   - delegate_max_iterations        — code-writing stages (Stage 4, 6)
+    #   - delegate_max_design_iterations — design/exploration stages (1, 3a)
+    # The design budget falls back to agent.max_iterations when not set
+    # at the mode level. Inline arg `max_design_iterations` overrides both.
+
+    def test_delegate_max_design_iterations_falls_back_to_agent(self, delegate_config_dir):
+        """Without a mode-level default, design budget falls back to agent.max_iterations."""
+        tmp_path, base_path = delegate_config_dir
+        # Fixture has agent.max_iterations = 50 and no
+        # modes.delegate.max_design_iterations — so the design budget
+        # should inherit 50 from the agent section.
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert result["delegate_max_design_iterations"] == 50
+
+    def test_delegate_max_design_iterations_from_mode_config(self, delegate_config_dir):
+        """Mode-level max_design_iterations wins over agent.max_iterations."""
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["delegate"]["max_design_iterations"] = 12
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert result["delegate_max_design_iterations"] == 12
+
+    def test_delegate_max_design_iterations_inline_arg_override(self, delegate_config_dir):
+        """Inline arg max_design_iterations overrides both mode and agent config."""
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["delegate"]["max_design_iterations"] = 12
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "delegate",
+            args={"max_design_iterations": 30},
+        )
+        assert result["delegate_max_design_iterations"] == 30
+
+    def test_delegate_max_iterations_and_design_iterations_are_independent(self, delegate_config_dir):
+        """Bumping max_iterations via inline arg does NOT change max_design_iterations."""
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["delegate"]["max_design_iterations"] = 12
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        # User says "give it more iterations" — the common expectation is
+        # that this bumps the coding loops, not the design loops.
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "delegate",
+            args={"max_iterations": 100},
+        )
+        assert result["delegate_max_iterations"] == 100
+        assert result["delegate_max_design_iterations"] == 12
+
+    def test_delegate_max_design_iterations_not_emitted_for_non_delegate(self, delegate_config_dir):
+        """delegate_max_design_iterations is only emitted in delegate mode."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+        assert "delegate_max_design_iterations" not in result
+
+
+def test_parse_args_max_design_iterations():
+    """max_design_iterations should be parsed as int and normalize dashes/spaces."""
+    assert parse_args(["max_design_iterations = 20"]) == {"max_design_iterations": 20}
+    assert parse_args(["max design iterations = 15"]) == {"max_design_iterations": 15}
+    assert parse_args(["max-design-iterations=8"]) == {"max_design_iterations": 8}

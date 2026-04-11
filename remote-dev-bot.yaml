@@ -99,7 +99,18 @@ modes:
 
   delegate:
     default_model: claude-small
-    max_iterations: 15       # Iteration limit for the design loop (Stage 1)
+    # Delegate has two independent iteration budgets:
+    #   max_iterations        — code-writing stages (Stage 4 resolve, Stage 6
+    #                           agentic code revision). Same name as elsewhere
+    #                           since it's the knob users typically adjust.
+    #   max_design_iterations — design/exploration stages (Stage 1 design loop,
+    #                           Stage 3a implementation spec loop). Design loops
+    #                           are usually satisfied with fewer iterations than
+    #                           coding loops, so they get a separate default.
+    # Each falls back independently to agent.max_iterations if unset.
+    # Both are settable as inline args in the /agent-delegate comment.
+    max_iterations: 50
+    max_design_iterations: 15
     extra_files:
       - README.md
       - CONTRIBUTING.md
