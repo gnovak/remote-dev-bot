@@ -180,7 +180,6 @@ from unittest.mock import patch, MagicMock
 
 from workshop import (
     DESIGN_REVISION_SYSTEM_PROMPT,
-    CODE_REVISION_SYSTEM_PROMPT,
     _run_revision_call,
     run_delegate,
 )
@@ -199,17 +198,6 @@ class TestRevisionSystemPrompts:
     def test_design_revision_prompt_mentions_council(self):
         lower = DESIGN_REVISION_SYSTEM_PROMPT.lower()
         assert "council" in lower or "critiq" in lower or "feedback" in lower
-
-    def test_code_revision_prompt_nonempty(self):
-        assert len(CODE_REVISION_SYSTEM_PROMPT) > 100
-
-    def test_code_revision_prompt_mentions_code_review(self):
-        lower = CODE_REVISION_SYSTEM_PROMPT.lower()
-        assert "code review" in lower or "code-review" in lower
-
-    def test_code_revision_prompt_mentions_revision(self):
-        lower = CODE_REVISION_SYSTEM_PROMPT.lower()
-        assert "revision" in lower or "changes" in lower
 
 
 class TestRunRevisionCall:
@@ -589,6 +577,75 @@ class TestRunDelegate:
         # Should use the spec system prompt override
         assert "system_prompt" in stage3a_kwargs
         assert stage3a_kwargs["system_prompt"] is not None
+
+    @patch("workshop._run_revision_call")
+    @patch("workshop.run_council_review")
+    @patch("design_loop.run_design_loop")
+    def test_max_design_iterations_threads_into_design_loops(
+        self, mock_design, mock_council, mock_revision
+    ):
+        """run_delegate passes max_design_iterations to design loops, not max_iterations.
+
+        The design budget (Stage 1 design, Stage 3a implementation spec) is
+        independent from the code-writing budget (Stages 4, 6). When a
+        caller differentiates the two, both agentic exploration loops must
+        use the design budget.
+        """
+        mock_design.side_effect = [
+            self._mock_design_result(analysis="## Design\n\nDo X."),
+            self._mock_design_result(analysis="## Spec\n\nFile details."),
+        ]
+        mock_council.return_value = self._mock_council_review()
+        mock_revision.side_effect = [
+            self._mock_revision_result(text="## Revised Design\n\nApproved."),
+            self._mock_revision_result(text="## Revised Spec"),
+        ]
+
+        run_delegate(
+            model="anthropic/test-model",
+            model_alias="test-model",
+            council_models=[{"alias": "claude-small", "id": "anthropic/test"}],
+            issue_title="Test Issue",
+            issue_body="Test body.",
+            max_iterations=80,
+            max_design_iterations=12,
+            design_rounds=2,
+        )
+
+        # Stage 1 design loop
+        _, stage1_kwargs = mock_design.call_args_list[0]
+        assert stage1_kwargs["max_iterations"] == 12
+        # Stage 3a implementation spec loop
+        _, stage3a_kwargs = mock_design.call_args_list[1]
+        assert stage3a_kwargs["max_iterations"] == 12
+
+    @patch("workshop._run_revision_call")
+    @patch("workshop.run_council_review")
+    @patch("design_loop.run_design_loop")
+    def test_max_design_iterations_falls_back_to_max_iterations(
+        self, mock_design, mock_council, mock_revision
+    ):
+        """When max_design_iterations is omitted, design loops inherit max_iterations.
+
+        Callers that don't differentiate (older/simpler entry points) should
+        get uniform behavior — the design loop still gets a sensible budget.
+        """
+        mock_design.return_value = self._mock_design_result()
+        mock_council.return_value = self._mock_council_review()
+        mock_revision.return_value = self._mock_revision_result()
+
+        run_delegate(
+            model="anthropic/test-model",
+            model_alias="test-model",
+            council_models=[{"alias": "claude-small", "id": "anthropic/test"}],
+            issue_title="Test Issue",
+            issue_body="Test body.",
+            max_iterations=25,
+            # max_design_iterations intentionally omitted
+        )
+
+        _, stage1_kwargs = mock_design.call_args_list[0]
+        assert stage1_kwargs["max_iterations"] == 25
 
     @patch("workshop._run_revision_call")
     @patch("workshop.run_council_review")

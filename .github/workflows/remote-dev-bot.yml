@@ -70,6 +70,8 @@ jobs:
       review_context_keep_tool_results: ${{ steps.parse.outputs.review_context_keep_tool_results }}
       workshop_max_iterations: ${{ steps.parse.outputs.workshop_max_iterations }}
       delegate_max_iterations: ${{ steps.parse.outputs.delegate_max_iterations }}
+      delegate_max_design_iterations: ${{ steps.parse.outputs.delegate_max_design_iterations }}
+      design_rounds: ${{ steps.parse.outputs.design_rounds }}
       council_models: ${{ steps.parse.outputs.council_models }}
       extra_instructions: ${{ steps.parse.outputs.extra_instructions }}
       model_extra_instructions: ${{ steps.parse.outputs.model_extra_instructions }}
@@ -3938,6 +3940,7 @@ jobs:
           GITHUB_REPO: ${{ github.repository }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           MAX_ITERATIONS: ${{ needs.parse.outputs.delegate_max_iterations }}
+          MAX_DESIGN_ITERATIONS: ${{ needs.parse.outputs.delegate_max_design_iterations }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
           EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
@@ -3962,6 +3965,9 @@ jobs:
           github_token = os.environ["GITHUB_TOKEN"]
 
           max_iterations = int(os.environ.get("MAX_ITERATIONS", "15") or "15")
+          max_design_iterations = int(
+              os.environ.get("MAX_DESIGN_ITERATIONS", "") or max_iterations
+          )
           wrapup_enabled = os.environ.get("WRAPUP_ENABLED", "true").lower() == "true"
           wrapup_iteration = int(os.environ.get("WRAPUP_ITERATION", "0") or "0")
           design_rounds = int(os.environ.get("DESIGN_ROUNDS", "1") or "1")
@@ -4018,6 +4024,7 @@ jobs:
               council_extra_instructions=council_extra_instructions,
               extra_context=extra_context,
               max_iterations=max_iterations,
+              max_design_iterations=max_design_iterations,
               wrapup_enabled=wrapup_enabled,
               wrapup_iteration=wrapup_iteration,
               post_comment_fn=post_comment,
@@ -4095,7 +4102,7 @@ jobs:
           TARGET_BRANCH_EXPLICIT: ${{ needs.parse.outputs.target_branch_explicit }}
           PR_TYPE: ${{ needs.parse.outputs.pr_type }}
           ON_FAILURE: ${{ needs.parse.outputs.on_failure }}
-          MAX_ITERATIONS: ${{ needs.parse.outputs.max_iterations }}
+          MAX_ITERATIONS: ${{ needs.parse.outputs.delegate_max_iterations }}
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
           STATUS_LOG_INTERVAL: ${{ needs.parse.outputs.status_log_interval }}
@@ -4341,9 +4348,16 @@ jobs:
           PYEOF
 
       # ===================================================================
-      # Stage 6: Code Revision Plan
+      # Stage 6: Agentic Code Revision
+      #
+      # Re-invokes resolve.py against the existing PR branch from Stage 4,
+      # with the Stage 5 council code reviews injected via EXTRA_FILES. The
+      # agent reads the reviews, decides what's worth applying, edits the
+      # code, and commits to the same branch. This replaces the earlier
+      # one-shot "revision plan" LLM call — now the agent actually applies
+      # the revisions instead of just describing them.
       # ===================================================================
-      - name: Run code revision plan (Stage 6)
+      - name: Run agentic code revision (Stage 6)
         if: steps.check_abort.outputs.abort != 'true'
         env:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
@@ -4351,9 +4365,26 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GITHUB_USERNAME: ${{ github.repository_owner }}
+          GIT_USERNAME: ${{ github.repository_owner }}
+          E2E_TEST_TOKEN: ${{ secrets.E2E_TEST_TOKEN }}
+          TARGET_BRANCH: ${{ needs.parse.outputs.target_branch }}
+          TARGET_BRANCH_EXPLICIT: ${{ needs.parse.outputs.target_branch_explicit }}
+          PR_TYPE: ${{ needs.parse.outputs.pr_type }}
+          ON_FAILURE: ${{ needs.parse.outputs.on_failure }}
+          MAX_ITERATIONS: ${{ needs.parse.outputs.delegate_max_iterations }}
+          WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
+          WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
+          STATUS_LOG_INTERVAL: ${{ needs.parse.outputs.status_log_interval }}
+          ALIAS: ${{ needs.parse.outputs.alias }}
+          EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
+          MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
+          DEBUG_LOGGING: ${{ needs.parse.outputs.debug_logging }}
+          DISTILL_ENABLED: ${{ needs.parse.outputs.distill_enabled }}
           GITHUB_REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
         run: |
           PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
 
@@ -4362,113 +4393,123 @@ jobs:
             exit 0
           fi
 
-          export PR_URL
+          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+          if [[ -z "$PR_NUMBER" ]]; then
+            echo "Could not extract PR number from $PR_URL — skipping Stage 6"
+            exit 0
+          fi
+
+          # Format the Stage 5 council reviews as a markdown file so the
+          # revision agent can read them via EXTRA_FILES (resolve.py concatenates
+          # every file in EXTRA_FILES into repo_context).
           python3 << 'PYEOF'
           import json
-          import os
-          import re
-          import subprocess
-          import sys
-
-          sys.path.insert(0, ".remote-dev-bot/lib")
-          from workshop import _run_revision_call, CODE_REVISION_SYSTEM_PROMPT
-
-          model = os.environ["LLM_MODEL"]
-          alias = "${{ needs.parse.outputs.alias }}"
-          github_repo = os.environ["GITHUB_REPO"]
-          github_token = os.environ["GH_TOKEN"]
-          issue_number = os.environ["ISSUE_NUMBER"]
-          pr_url = os.environ.get("PR_URL", "")
-
-          pr_number_match = re.search(r'/pull/(\d+)$', pr_url)
-          if not pr_number_match:
-              print("No PR number found, exiting")
-              sys.exit(0)
-          pr_number = pr_number_match.group(1)
-
-          env = {**os.environ, "GH_TOKEN": github_token}
-
-          # Fetch PR diff
-          diff_result = subprocess.run(
-              ["gh", "api", f"repos/{github_repo}/pulls/{pr_number}",
-               "--header", "Accept: application/vnd.github.diff"],
-              capture_output=True, text=True, env=env,
-          )
-          pr_diff = diff_result.stdout[:40000]
-
-          # Load code reviews from Stage 5
           with open("/tmp/delegate_code_reviews.json") as f:
               reviews = json.load(f)
+          lines = [
+              "# Council Code Reviews",
+              "",
+              "The pull request you just checked out was reviewed by multiple models.",
+              "Read each review, use judgement to decide what's worth acting on, and",
+              "apply the fixes. You may disagree with a reviewer — don't mechanically",
+              "apply every suggestion; weigh them against the original design and spec.",
+              "When done, commit and call finish().",
+              "",
+          ]
+          for r in reviews:
+              alias = r.get("model_alias", "(unknown)")
+              lines.append(f"## Review by {alias}")
+              lines.append("")
+              lines.append(r.get("review", ""))
+              lines.append("")
+              lines.append("---")
+              lines.append("")
+          with open("/tmp/delegate_code_reviews.md", "w") as f:
+              f.write("\n".join(lines))
+          PYEOF
 
-          critiques_text = "\n\n---\n\n".join(
-              f"### Code Review by {r['model_alias']}\n\n{r['review']}"
-              for r in reviews
-          )
+          # Save Stages 1-5 cost totals before resolve.py overwrites
+          # /tmp/llm_usage.json with the Stage 6 numbers.
+          if [[ -f /tmp/llm_usage.json ]]; then
+            cp /tmp/llm_usage.json /tmp/delegate_stages_1_5_usage.json
+          fi
 
-          user_content = (
-              f"## PR Diff\n\n```diff\n{pr_diff}\n```\n\n"
-              f"## Code Reviews\n\n{critiques_text}\n\n"
-              f"---\n\n"
-              f"Please produce a concrete revision plan addressing the code review feedback."
-          )
+          # Append the code reviews (and earlier design/spec artifacts) to
+          # EXTRA_FILES so resolve.py surfaces them as extra context for the
+          # revision agent.
+          EXTRA_FILES=$(python3 -c "
+          import json, os, sys
+          raw = os.environ.get('EXTRA_FILES', '[]') or '[]'
+          files = json.loads(raw)
+          for path in ('/tmp/delegate_revised_design.txt',
+                       '/tmp/delegate_revised_spec.txt',
+                       '/tmp/delegate_code_reviews.md'):
+              if os.path.exists(path):
+                  files.append(path)
+                  print(f'Appended {path}', file=sys.stderr)
+          print(json.dumps(files))
+          ")
+          export EXTRA_FILES
+          echo "Stage 6 EXTRA_FILES: $EXTRA_FILES"
 
-          extra_instructions = "${{ needs.parse.outputs.extra_instructions }}"
-          model_extra_instructions = "${{ needs.parse.outputs.model_extra_instructions }}"
-          combined_instructions = "\n\n".join(p for p in [extra_instructions, model_extra_instructions] if p)
+          # Redirect resolve.py at the existing PR branch: when ISSUE_TYPE=pr,
+          # resolve.py does `gh pr checkout $ISSUE_NUMBER`, commits on that
+          # branch, and (on finish) posts a success comment on the PR.
+          export ISSUE_NUMBER="$PR_NUMBER"
+          export ISSUE_TYPE=pr
 
-          revision_result = _run_revision_call(
-              model_id=model,
-              system_prompt=CODE_REVISION_SYSTEM_PROMPT,
-              user_content=user_content,
-              extra_instructions=combined_instructions,
-              max_tokens=8192,
-          )
+          gh pr comment "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --body "## 🔄 Delegate Stage 6/6 — Agentic Code Revision
 
-          revision_text = revision_result["text"]
+          Running resolve agent with \`${{ needs.parse.outputs.alias }}\` (\`${{ needs.parse.outputs.model }}\`) to apply council code review feedback to this PR..."
 
-          # Post revision plan as a PR comment
-          def post_pr_comment(body):
-              proc = subprocess.run(
-                  ["gh", "pr", "comment", pr_number,
-                   "--repo", github_repo,
-                   "--body", body],
-                  env=env,
-                  capture_output=True, text=True,
-              )
-              if proc.returncode != 0:
-                  print(f"Warning: failed to post PR comment: {proc.stderr}", file=sys.stderr)
+          TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
+          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          echo "Stage 6 resolver timeout: ${TIMEOUT_MINUTES} minutes"
 
-          post_pr_comment(
-              f"## 🔄 Delegate Stage 6/6 — Code Revision Plan\n\n"
-              f"🤖 **Model:** `{alias}` (`{model}`)\n\n"
-              f"{revision_text}\n\n"
-              f"---\n"
-              f"_Code revision plan by `/agent-delegate` Stage 6 (`{alias}`)_"
-          )
+          timeout --kill-after=60 "$TIMEOUT_SECONDS" \
+            python3 -u .remote-dev-bot/lib/resolve.py
+          STAGE6_EXIT_CODE=$?
 
-          # Also post on the issue for visibility
-          proc = subprocess.run(
-              ["gh", "issue", "comment", issue_number,
-               "--repo", github_repo,
-               "--body", f"## 🔄 Delegate Stage 6/6 — Code Revision Plan\n\nPosted as a comment on {pr_url}"],
-              env=env,
-              capture_output=True, text=True,
-          )
+          if [[ $STAGE6_EXIT_CODE -eq 124 ]]; then
+            echo "::warning::Stage 6 resolver timed out after ${TIMEOUT_MINUTES} minutes. Cleanup steps will still run."
+          fi
 
-          # Merge Stage 6 usage into aggregate
-          existing = {}
+          exit $STAGE6_EXIT_CODE
+
+      - name: Merge Stage 6 costs
+        if: steps.check_abort.outputs.abort != 'true'
+        run: |
+          # resolve.py overwrites /tmp/llm_usage.json with Stage 6 numbers.
+          # Stages 1-5 totals were saved to delegate_stages_1_5_usage.json
+          # just before Stage 6 ran. Combine them into the final cost.
+          python3 << 'PYEOF'
+          import json, os
+
+          stage6 = {}
           if os.path.exists("/tmp/llm_usage.json"):
               with open("/tmp/llm_usage.json") as f:
-                  existing = json.load(f)
+                  stage6 = json.load(f)
+
+          prior = {}
+          if os.path.exists("/tmp/delegate_stages_1_5_usage.json"):
+              with open("/tmp/delegate_stages_1_5_usage.json") as f:
+                  prior = json.load(f)
 
           combined = {
-              "input_tokens": existing.get("input_tokens", 0) + revision_result["input_tokens"],
-              "output_tokens": existing.get("output_tokens", 0) + revision_result["output_tokens"],
-              "cost": (existing.get("cost") or 0.0) + revision_result["cost"],
-              "iterations": existing.get("iterations", 0),
+              "input_tokens": prior.get("input_tokens", 0) + stage6.get("input_tokens", 0),
+              "output_tokens": prior.get("output_tokens", 0) + stage6.get("output_tokens", 0),
+              "cost": (prior.get("cost") or 0.0) + (stage6.get("cost") or 0.0),
+              # Sum Stage 4 + Stage 6 code-writing iterations for the final
+              # display. Both loops share the same delegate_max_iterations cap,
+              # so the raw sum isn't meant to be compared against that cap —
+              # it's a "total code-writing iterations across the pipeline".
+              "iterations": prior.get("iterations", 0) + stage6.get("iterations", 0),
           }
           with open("/tmp/llm_usage.json", "w") as f:
               json.dump(combined, f)
+          print(f"Merged costs: prior ${prior.get('cost', 0):.2f} + Stage 6 ${stage6.get('cost', 0):.2f} = ${combined['cost']:.2f}")
           PYEOF
 
       # ===================================================================

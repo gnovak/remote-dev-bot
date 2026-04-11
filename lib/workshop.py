@@ -947,21 +947,6 @@ SPEC_REVISION_SYSTEM_PROMPT = (
     "Output a complete, revised implementation spec (not just a diff from the original)."
 )
 
-CODE_REVISION_SYSTEM_PROMPT = (
-    "You are a senior software engineer. You previously implemented a solution "
-    "for a GitHub issue, and your peers on a code review council have reviewed "
-    "the resulting pull request. Your task is to describe what changes should be "
-    "made to address the code review feedback.\n\n"
-    "Read the original PR diff and each code review carefully. Then produce "
-    "a revision plan that:\n"
-    "- Addresses valid concerns raised by reviewers\n"
-    "- Explains why you rejected any concerns you disagree with\n"
-    "- Incorporates useful suggestions\n"
-    "- Lists specific files and changes to make\n\n"
-    "Be concrete and actionable — the implementation agent will use your plan."
-)
-
-
 def _run_revision_call(
     *,
     model_id,
@@ -1019,6 +1004,7 @@ def run_delegate(
     council_extra_instructions="",
     extra_context="",
     max_iterations=15,
+    max_design_iterations=None,
     wrapup_enabled=True,
     wrapup_iteration=0,
     context_keep_tool_results=0,
@@ -1055,7 +1041,14 @@ def run_delegate(
     extra_context : str
         Additional context for agentic loops.
     max_iterations : int
-        Max iterations for agentic loops (design + resolve).
+        Max iterations for code-writing agentic loops. In delegate mode
+        run_delegate itself never runs a code-writing loop — the
+        Stage 4 resolve step is invoked by the workflow — but callers
+        pass this through for completeness / cost-model symmetry.
+    max_design_iterations : int or None
+        Max iterations for design/exploration agentic loops (Stage 1
+        design loop and Stage 3a implementation spec loop). Falls back
+        to max_iterations when None.
     wrapup_enabled : bool
         Whether graceful wrapup is enabled.
     wrapup_iteration : int
@@ -1090,6 +1083,13 @@ def run_delegate(
         else:
             print(body)
 
+    # Design/exploration budget falls back to the code-writing budget
+    # when the caller doesn't differentiate. Stages 1 and 3a (both
+    # agentic exploration loops) use this; Stages 4 and 6 (code-writing)
+    # are driven by the workflow with max_iterations.
+    if max_design_iterations is None:
+        max_design_iterations = max_iterations
+
     all_input_tokens = 0
     all_output_tokens = 0
     all_cost = 0.0
@@ -1110,7 +1110,7 @@ def run_delegate(
         issue_comments=issue_comments,
         extra_instructions=extra_instructions,
         extra_context=extra_context,
-        max_iterations=max_iterations,
+        max_iterations=max_design_iterations,
         wrapup_enabled=wrapup_enabled,
         wrapup_iteration=wrapup_iteration,
         context_keep_tool_results=context_keep_tool_results,
@@ -1359,7 +1359,7 @@ def run_delegate(
             issue_comments=issue_comments,
             extra_instructions=extra_instructions,
             extra_context=spec_extra_context,
-            max_iterations=max_iterations,
+            max_iterations=max_design_iterations,
             wrapup_enabled=wrapup_enabled,
             wrapup_iteration=wrapup_iteration,
             context_keep_tool_results=context_keep_tool_results,

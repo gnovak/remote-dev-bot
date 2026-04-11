@@ -89,7 +89,8 @@ DEFAULT_TIMEOUT_MINUTES = 120
 
 # Arguments that can be overridden via inline args (lines after the command)
 ALLOWED_ARGS = {
-    "max_iterations": int,       # agent.max_iterations
+    "max_iterations": int,       # agent.max_iterations (code-writing stages)
+    "max_design_iterations": int,  # delegate: budget for design/exploration stages
     "timeout_minutes": int,      # agent.timeout_minutes
     "extra_files": list,         # mode's extra_files
     "branch": str,               # agent.branch (target branch for PRs)
@@ -564,7 +565,25 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     if mode == "reconcile":
         result["reconcile_max_iterations"] = max_iter
     if mode == "delegate":
+        # Delegate has two independent iteration budgets:
+        #   delegate_max_iterations        — code-writing stages (Stage 4 resolve,
+        #                                    Stage 6 agentic code revision)
+        #   delegate_max_design_iterations — design/exploration stages (Stage 1
+        #                                    design, Stage 3a implementation spec)
+        # `delegate_max_iterations` is identical to the already-resolved `max_iter`
+        # (mode.max_iterations with inline arg override). The design budget is a
+        # second independent knob whose fallback chain is:
+        #   inline arg (max_design_iterations) → mode.max_design_iterations
+        #   → agent.max_iterations
+        # Naming rationale: `max_iterations` stays the common/easy name because
+        # users who say "give it more iterations" almost always mean the coding
+        # parts; the design budget gets the explicit name.
         result["delegate_max_iterations"] = max_iter
+        agent_max_iter = oh.get("max_iterations", 50)
+        result["delegate_max_design_iterations"] = args.get(
+            "max_design_iterations",
+            mode_config.get("max_design_iterations", agent_max_iter),
+        )
         # Design rounds for delegate: 1 = design only, 2 = design + implementation spec.
         # Inline arg takes precedence; otherwise fall back to mode config; otherwise 1.
         default_rounds = int(mode_config.get("design_rounds", 1))
@@ -707,6 +726,8 @@ def main():
                 f.write(f"reconcile_max_iterations={result['reconcile_max_iterations']}\n")
             if "delegate_max_iterations" in result:
                 f.write(f"delegate_max_iterations={result['delegate_max_iterations']}\n")
+            if "delegate_max_design_iterations" in result:
+                f.write(f"delegate_max_design_iterations={result['delegate_max_design_iterations']}\n")
             if "design_rounds" in result:
                 f.write(f"design_rounds={result['design_rounds']}\n")
             if "council_models" in result:
