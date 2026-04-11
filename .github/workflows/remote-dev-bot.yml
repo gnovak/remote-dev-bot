@@ -2531,6 +2531,7 @@ jobs:
           MAX_ITERATIONS: ${{ needs.parse.outputs.max_iterations }}
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
+          STATUS_LOG_INTERVAL: ${{ needs.parse.outputs.status_log_interval }}
           ALIAS: ${{ needs.parse.outputs.alias }}
           EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
           EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
