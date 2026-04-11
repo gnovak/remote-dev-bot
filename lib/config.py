@@ -586,8 +586,19 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         )
         # Design rounds for delegate: 1 = design only, 2 = design + implementation spec.
         # Inline arg takes precedence; otherwise fall back to mode config; otherwise 1.
+        # Only 1 and 2 are currently defined; reject anything else loudly rather
+        # than silently clamping to 2 (values >= 3 previously fell through the
+        # `if design_rounds >= 2` branch in run_delegate and behaved identically
+        # to 2, giving users no signal that their request was ignored).
         default_rounds = int(mode_config.get("design_rounds", 1))
-        result["design_rounds"] = int(args.get("design_rounds", default_rounds))
+        design_rounds = int(args.get("design_rounds", default_rounds))
+        if design_rounds not in (1, 2):
+            raise ValueError(
+                f"design_rounds must be 1 or 2, got: {design_rounds}. "
+                f"1 = design only; 2 = design + implementation spec round. "
+                f"Higher values (test plan, risk review, etc.) are not yet defined."
+            )
+        result["design_rounds"] = design_rounds
 
     if mode in ("workshop", "build", "delegate") or (mode == "review" and args.get("council", False)):
         # Council models: explicit list from mode config, or all configured models.
