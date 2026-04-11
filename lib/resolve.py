@@ -52,6 +52,40 @@ COMPACTION_COVERAGE = float(os.environ.get("COMPACTION_COVERAGE", "0.5") or "0.5
 COMPACTION_FACTOR = float(os.environ.get("COMPACTION_FACTOR", "0.5") or "0.5")
 # Hardcoded: fire at 85% of max to leave headroom for the summary to land
 _COMPACTION_THRESHOLD = 0.85
+# Safety net threshold: at this fraction of the model's actual context window,
+# force-trim even when MAX_CONTEXT_TOKENS == 0 (compaction disabled).
+_PREEMPTIVE_TRIM_THRESHOLD = 0.90
+
+# Error substrings (case-insensitive) that indicate the *input* prompt was too long.
+# "max_output_tokens" is the OUTPUT limit — a different, non-context-overflow error.
+_CONTEXT_OVERFLOW_SUBSTRINGS = (
+    "prompt is too long",
+    "context_length_exceeded",
+    "maximum context length",
+    "too many tokens",
+    "request payload size exceeds",
+    "input is too long",
+    "context window",
+    "reduce your prompt",
+    "tokens in the input",
+)
+
+
+def _is_context_overflow_error(exc) -> bool:
+    """Return True if the exception indicates the input context was too long."""
+    err_msg = str(exc).lower()
+    return any(sub in err_msg for sub in _CONTEXT_OVERFLOW_SUBSTRINGS)
+
+
+def _get_model_max_input_tokens(model: str) -> int:
+    """Return the model's max_input_tokens from LiteLLM, or 0 if unknown."""
+    try:
+        info = litellm.get_model_info(model)
+        return int(info.get("max_input_tokens") or 0)
+    except Exception:
+        return 0
+
+
 DEBUG_LOGGING = os.environ.get("DEBUG_LOGGING", "false").lower() == "true"
 DISTILL_ENABLED = os.environ.get("DISTILL_ENABLED", "true").lower() == "true"
 
@@ -1342,6 +1376,39 @@ def main():
                       f"messages={len(messages)}, "
                       f"cumulative input={total_input_tokens}, output={total_output_tokens}")
 
+            # Pre-emptive safety net: check context size against the model's actual
+            # context window limit (independent of MAX_CONTEXT_TOKENS / compaction config).
+            # At 90% of the model limit, force-trim so we don't crash mid-iteration.
+            _model_max_ctx = _get_model_max_input_tokens(LLM_MODEL)
+            if _model_max_ctx > 0:
+                _cur_tokens = estimate_tokens(messages)
+                _ctx_limit = int(_model_max_ctx * _PREEMPTIVE_TRIM_THRESHOLD)
+                if _cur_tokens > _ctx_limit:
+                    print(
+                        f"  [Context safety] ~{_cur_tokens:,} tokens exceeds "
+                        f"{_PREEMPTIVE_TRIM_THRESHOLD:.0%} of model limit "
+                        f"({_model_max_ctx:,}) — force-trimming to 3 tool results"
+                    )
+                    write_status(
+                        False,
+                        f"Context approaching model limit at iteration {iteration + 1} "
+                        f"(~{_cur_tokens:,} / {_model_max_ctx:,} tokens) — "
+                        "emergency trim applied, wrapping up",
+                    )
+                    messages = trim_tool_results(messages, 3)
+                    # Inject wrapup to encourage the agent to finish cleanly
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "⚠️ CONTEXT LIMIT WARNING: The conversation has grown very large "
+                            "and is approaching the model's context window. "
+                            "You MUST wrap up immediately: "
+                            "1. Commit and push any pending changes: "
+                            "`git add -A && git commit -m 'WIP' && git push origin HEAD`  "
+                            "2. Call finish() now — do not start any new work."
+                        ),
+                    })
+
             try:
                 response = completion_with_retries(
                     completion,
@@ -1364,14 +1431,47 @@ def main():
                     write_status(False, f"Rate limit error after {MAX_RATE_LIMIT_RETRIES} retries "
                                  f"at iteration {iteration + 1}: {exc}")
                     break
+            except litellm.exceptions.ContextWindowExceededError as exc:
+                # Input prompt is too long for the model's context window.
+                # Attempt emergency recovery: force-trim and inject a wrap-up message,
+                # then continue so the agent can commit/push before we exit.
+                print(f"LiteLLM ContextWindowExceededError at iteration {iteration + 1}: {exc}")
+                write_status(
+                    False,
+                    f"Context window exceeded at iteration {iteration + 1} — "
+                    "emergency trim applied, attempting graceful wrap-up",
+                )
+                # Force-trim to minimum tool results to recover headroom
+                messages = trim_tool_results(messages, 2)
+                # Inject a wrapup message so the agent commits and exits cleanly
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "🚨 CONTEXT WINDOW EXCEEDED: The conversation is too long for the model. "
+                        "You MUST wrap up immediately — do not make any further changes to files. "
+                        "1. Commit and push everything pending: "
+                        "`git add -A && git commit -m 'WIP: context limit reached' && git push origin HEAD`  "
+                        "2. Call finish() now."
+                    ),
+                })
+                continue
             except litellm.exceptions.APIConnectionError as exc:
                 err_msg = str(exc)
-                if "max_output_tokens" in err_msg:
-                    print(f"LiteLLM APIConnectionError (max_output_tokens): {exc}")
+                if _is_context_overflow_error(exc):
+                    print(f"LiteLLM APIConnectionError (context overflow): {exc}")
                     write_status(
                         False,
-                        f"Model hit output token limit at iteration {iteration + 1} — context too large",
+                        f"Context overflow at iteration {iteration + 1}: {exc}",
                     )
+                    messages = trim_tool_results(messages, 2)
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "🚨 CONTEXT WINDOW EXCEEDED: The conversation is too long. "
+                            "Commit and push pending work, then call finish() immediately."
+                        ),
+                    })
+                    continue
                 else:
                     print(f"LiteLLM APIConnectionError: {exc}")
                     write_status(
@@ -1381,12 +1481,21 @@ def main():
                 break
             except litellm.exceptions.APIError as exc:
                 err_msg = str(exc)
-                if "max_output_tokens" in err_msg:
-                    print(f"LiteLLM APIError (max_output_tokens): {exc}")
+                if _is_context_overflow_error(exc):
+                    print(f"LiteLLM APIError (context overflow): {exc}")
                     write_status(
                         False,
-                        f"Model hit output token limit at iteration {iteration + 1} — context too large",
+                        f"Context overflow at iteration {iteration + 1}: {exc}",
                     )
+                    messages = trim_tool_results(messages, 2)
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "🚨 CONTEXT WINDOW EXCEEDED: The conversation is too long. "
+                            "Commit and push pending work, then call finish() immediately."
+                        ),
+                    })
+                    continue
                 else:
                     print(f"LiteLLM APIError: {exc}")
                     write_status(
