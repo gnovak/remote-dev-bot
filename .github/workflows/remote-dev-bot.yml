@@ -1120,7 +1120,6 @@ jobs:
       - name: Checkout target repository
         uses: actions/checkout@v5
         with:
-          ref: ${{ needs.parse.outputs.target_branch }}
           fetch-depth: 0
 
       - name: Checkout remote-dev-bot config
@@ -1835,8 +1834,6 @@ jobs:
 
       - name: Checkout target repository
         uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.parse.outputs.target_branch }}
 
       - name: Checkout remote-dev-bot config
         uses: actions/checkout@v5
@@ -2481,8 +2478,6 @@ jobs:
 
       - name: Checkout target repository
         uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.parse.outputs.target_branch }}
 
       - name: Checkout remote-dev-bot config
         uses: actions/checkout@v5
