@@ -50,7 +50,7 @@ def _fmt_bpd(text, cost):
     if cost <= 0:
         return 'N/A'
     data = text.encode('utf-8') if isinstance(text, str) else text
-    bpd = len(gzip.compress(data)) / cost  # compressed bytes / dollar
+    bpd = (len(gzip.compress(data)) * 8) / cost  # compressed bits / dollar
     if bpd >= 1_000_000:
         return f"{bpd / 1_000_000:.1f} Mbit/$"
     return f"{bpd / 1_000:.1f} Kbit/$"
@@ -62,7 +62,7 @@ def _build_cost_table(input_tokens, output_tokens, cost, elapsed, output_text):
         ('Time', _fmt_ela(elapsed)),
         ('Input', _fmt_tok(input_tokens) + ' tokens'),
         ('Output', _fmt_tok(output_tokens) + ' tokens'),
-        ('Bits/$', _fmt_bpd(output_text, cost)),
+        ('Info/$', _fmt_bpd(output_text, cost)),
         ('**Cost**', f'**${rounded:.2f}**'),
     ]
     lines = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
