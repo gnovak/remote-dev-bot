@@ -1818,6 +1818,57 @@ class TestDelegateConfig:
         result = resolve_config(base_path, "nonexistent.yaml", "resolve")
         assert "design_rounds" not in result
 
+    # --- design_rounds validation ---
+    #
+    # Only 1 and 2 are defined. Values outside that range must raise
+    # ValueError rather than silently getting clamped or ignored:
+    # run_delegate's branch is `if design_rounds >= 2`, so a user who
+    # types `design_rounds = 3` used to get the same behavior as 2 with
+    # no signal that the extra round they asked for doesn't exist.
+
+    def test_delegate_design_rounds_3_rejected(self, delegate_config_dir):
+        """design_rounds=3 raises ValueError — no third round is defined."""
+        tmp_path, base_path = delegate_config_dir
+        with pytest.raises(ValueError, match="design_rounds must be 1 or 2"):
+            resolve_config(
+                base_path, "nonexistent.yaml", "delegate",
+                args={"design_rounds": 3},
+            )
+
+    def test_delegate_design_rounds_0_rejected(self, delegate_config_dir):
+        """design_rounds=0 raises ValueError — not a valid round count."""
+        tmp_path, base_path = delegate_config_dir
+        with pytest.raises(ValueError, match="design_rounds must be 1 or 2"):
+            resolve_config(
+                base_path, "nonexistent.yaml", "delegate",
+                args={"design_rounds": 0},
+            )
+
+    def test_delegate_design_rounds_negative_rejected(self, delegate_config_dir):
+        """Negative design_rounds raises ValueError."""
+        tmp_path, base_path = delegate_config_dir
+        with pytest.raises(ValueError, match="design_rounds must be 1 or 2"):
+            resolve_config(
+                base_path, "nonexistent.yaml", "delegate",
+                args={"design_rounds": -1},
+            )
+
+    def test_delegate_design_rounds_invalid_mode_config_rejected(self, delegate_config_dir):
+        """An invalid mode-level design_rounds in YAML also raises ValueError.
+
+        Validation applies to the resolved value regardless of whether it
+        came from an inline arg or the merged config — otherwise users
+        could silently ship a bad default.
+        """
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["delegate"]["design_rounds"] = 5
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        with pytest.raises(ValueError, match="design_rounds must be 1 or 2"):
+            resolve_config(base_path, "nonexistent.yaml", "delegate")
+
     def test_delegate_council_models(self, delegate_config_dir):
         """Delegate mode resolves council models from explicit list."""
         tmp_path, base_path = delegate_config_dir
