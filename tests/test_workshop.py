@@ -482,3 +482,143 @@ class TestRunDelegate:
         assert result["total_output_tokens"] == 800
         # Stage 1: 0.05 + Stage 2: 0.01 + Stage 3: 0.02 = 0.08
         assert abs(result["total_cost"] - 0.08) < 0.001
+
+    @patch("workshop._run_revision_call")
+    @patch("workshop.run_council_review")
+    @patch("design_loop.run_design_loop")
+    def test_design_rounds_1_skips_spec_stages(self, mock_design, mock_council, mock_revision):
+        """design_rounds=1 (default) does not run spec stages."""
+        mock_design.return_value = self._mock_design_result()
+        mock_council.return_value = self._mock_council_review()
+        mock_revision.return_value = self._mock_revision_result()
+
+        result = run_delegate(
+            model="anthropic/test-model",
+            model_alias="test-model",
+            council_models=[
+                {"alias": "claude-small", "id": "anthropic/test"},
+            ],
+            issue_title="Test Issue",
+            issue_body="Test body.",
+            design_rounds=1,
+        )
+
+        assert result["spec_result"] is None
+        assert result["spec_council_results"] == []
+        assert result["revised_spec"] is None
+        # Exactly one design loop call (Stage 1); no Stage 3a
+        assert mock_design.call_count == 1
+        # Exactly one revision call (Stage 3); no Stage 3c
+        assert mock_revision.call_count == 1
+
+    @patch("workshop._run_revision_call")
+    @patch("workshop.run_council_review")
+    @patch("design_loop.run_design_loop")
+    def test_design_rounds_2_runs_spec_stages(self, mock_design, mock_council, mock_revision):
+        """design_rounds=2 runs Stages 3a/3b/3c in addition to 1/2/3."""
+        # Stage 1 design, then Stage 3a spec
+        mock_design.side_effect = [
+            self._mock_design_result(analysis="## Design\n\nDo X."),
+            self._mock_design_result(analysis="## Spec\n\nEdit files A, B, C."),
+        ]
+        mock_council.return_value = self._mock_council_review()
+        # Stage 3 revision, then Stage 3c spec revision
+        mock_revision.side_effect = [
+            self._mock_revision_result(text="## Revised Design\n\nRevised X."),
+            self._mock_revision_result(text="## Revised Spec\n\nRevised spec."),
+        ]
+
+        result = run_delegate(
+            model="anthropic/test-model",
+            model_alias="test-model",
+            council_models=[
+                {"alias": "claude-small", "id": "anthropic/test"},
+            ],
+            issue_title="Test Issue",
+            issue_body="Test body.",
+            design_rounds=2,
+        )
+
+        assert result["revised_design"] == "## Revised Design\n\nRevised X."
+        assert result["revised_spec"] == "## Revised Spec\n\nRevised spec."
+        assert result["spec_result"] is not None
+        assert len(result["spec_council_results"]) == 1
+        # Two design loop calls: Stage 1 + Stage 3a
+        assert mock_design.call_count == 2
+        # Two council review calls: Stage 2 + Stage 3b
+        assert mock_council.call_count == 2
+        # Two revision calls: Stage 3 + Stage 3c
+        assert mock_revision.call_count == 2
+
+    @patch("workshop._run_revision_call")
+    @patch("workshop.run_council_review")
+    @patch("design_loop.run_design_loop")
+    def test_design_rounds_2_passes_revised_design_as_spec_context(
+        self, mock_design, mock_council, mock_revision
+    ):
+        """Spec loop receives the revised design via extra_context."""
+        mock_design.side_effect = [
+            self._mock_design_result(analysis="## Design\n\nDo X."),
+            self._mock_design_result(analysis="## Spec\n\nFile details."),
+        ]
+        mock_council.return_value = self._mock_council_review()
+        mock_revision.side_effect = [
+            self._mock_revision_result(text="## Revised Design\n\nAPPROVED DESIGN CONTENT."),
+            self._mock_revision_result(text="## Revised Spec"),
+        ]
+
+        run_delegate(
+            model="anthropic/test-model",
+            model_alias="test-model",
+            council_models=[
+                {"alias": "claude-small", "id": "anthropic/test"},
+            ],
+            issue_title="Test Issue",
+            issue_body="Test body.",
+            extra_context="## Repo Listing\n\nfile1\nfile2",
+            design_rounds=2,
+        )
+
+        # Second design_loop call is Stage 3a (spec) — check extra_context
+        _, stage3a_kwargs = mock_design.call_args_list[1]
+        spec_extra_context = stage3a_kwargs["extra_context"]
+        # Should include the original extra_context and the approved design
+        assert "Repo Listing" in spec_extra_context
+        assert "APPROVED DESIGN CONTENT" in spec_extra_context
+        assert "Approved Design" in spec_extra_context
+        # Should use the spec system prompt override
+        assert "system_prompt" in stage3a_kwargs
+        assert stage3a_kwargs["system_prompt"] is not None
+
+    @patch("workshop._run_revision_call")
+    @patch("workshop.run_council_review")
+    @patch("design_loop.run_design_loop")
+    def test_design_rounds_2_empty_spec_aborts(
+        self, mock_design, mock_council, mock_revision
+    ):
+        """Pipeline aborts cleanly if Stage 3a spec loop produces nothing."""
+        mock_design.side_effect = [
+            self._mock_design_result(analysis="## Design\n\nDo X."),
+            {"analysis": "", "input_tokens": 50, "output_tokens": 25, "cost": 0.005},
+        ]
+        mock_council.return_value = self._mock_council_review()
+        mock_revision.return_value = self._mock_revision_result(
+            text="## Revised Design\n\nRevised."
+        )
+
+        result = run_delegate(
+            model="anthropic/test-model",
+            model_alias="test-model",
+            council_models=[
+                {"alias": "claude-small", "id": "anthropic/test"},
+            ],
+            issue_title="Test Issue",
+            issue_body="Test body.",
+            design_rounds=2,
+        )
+
+        # Stage 3 still ran (revised_design present), but spec stages aborted
+        assert result["revised_design"] == "## Revised Design\n\nRevised."
+        assert result["revised_spec"] is None
+        # Only Stage 3 revision ran; Stage 3c did not
+        assert mock_revision.call_count == 1

@@ -207,6 +207,13 @@ def test_parse_args_max_iterations():
     assert parse_args(["max_iterations=50"]) == {"max_iterations": 50}
 
 
+def test_parse_args_design_rounds():
+    """design_rounds should be parsed as int."""
+    assert parse_args(["design_rounds = 2"]) == {"design_rounds": 2}
+    assert parse_args(["design rounds = 1"]) == {"design_rounds": 1}
+    assert parse_args(["design-rounds=2"]) == {"design_rounds": 2}
+
+
 def test_parse_args_branch():
     """branch should be parsed as str."""
     assert parse_args(["branch = design/gemini"]) == {"branch": "design/gemini"}
@@ -1764,6 +1771,52 @@ class TestDelegateConfig:
             args={"max_iterations": 25},
         )
         assert result["delegate_max_iterations"] == 25
+
+    def test_delegate_design_rounds_default(self, delegate_config_dir):
+        """Delegate mode defaults design_rounds to 1."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert result["design_rounds"] == 1
+
+    def test_delegate_design_rounds_from_mode_config(self, delegate_config_dir):
+        """Delegate mode respects design_rounds set in mode config."""
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["delegate"]["design_rounds"] = 2
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert result["design_rounds"] == 2
+
+    def test_delegate_design_rounds_override_via_args(self, delegate_config_dir):
+        """Inline args override delegate design_rounds."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "delegate",
+            args={"design_rounds": 2},
+        )
+        assert result["design_rounds"] == 2
+
+    def test_delegate_design_rounds_arg_beats_mode_config(self, delegate_config_dir):
+        """Inline args take precedence over mode config for design_rounds."""
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["delegate"]["design_rounds"] = 2
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "delegate",
+            args={"design_rounds": 1},
+        )
+        assert result["design_rounds"] == 1
+
+    def test_design_rounds_not_emitted_for_non_delegate(self, delegate_config_dir):
+        """design_rounds is only emitted in delegate mode."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+        assert "design_rounds" not in result
 
     def test_delegate_council_models(self, delegate_config_dir):
         """Delegate mode resolves council models from explicit list."""

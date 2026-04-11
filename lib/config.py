@@ -106,6 +106,7 @@ ALLOWED_ARGS = {
     "debug_logging": bool,           # enable verbose per-iteration debug tracing to stdout
     "distill_enabled": bool,         # run distillation pre-pass before agent loop
     "council": bool,               # run council code review (review mode)
+    "design_rounds": int,          # delegate: 1 = design only, 2 = design + implementation spec
 }
 
 
@@ -564,6 +565,10 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         result["reconcile_max_iterations"] = max_iter
     if mode == "delegate":
         result["delegate_max_iterations"] = max_iter
+        # Design rounds for delegate: 1 = design only, 2 = design + implementation spec.
+        # Inline arg takes precedence; otherwise fall back to mode config; otherwise 1.
+        default_rounds = int(mode_config.get("design_rounds", 1))
+        result["design_rounds"] = int(args.get("design_rounds", default_rounds))
 
     if mode in ("workshop", "build", "delegate") or (mode == "review" and args.get("council", False)):
         # Council models: explicit list from mode config, or all configured models.
@@ -702,6 +707,8 @@ def main():
                 f.write(f"reconcile_max_iterations={result['reconcile_max_iterations']}\n")
             if "delegate_max_iterations" in result:
                 f.write(f"delegate_max_iterations={result['delegate_max_iterations']}\n")
+            if "design_rounds" in result:
+                f.write(f"design_rounds={result['design_rounds']}\n")
             if "council_models" in result:
                 f.write(f"council_models={json.dumps(result['council_models'])}\n")
 

@@ -156,6 +156,8 @@ def run_council_review(
     design_analysis,
     extra_instructions="",
     api_keys=None,
+    system_prompt_override=None,
+    user_content_override=None,
 ):
     """Run a single council review (non-agentic single LLM call).
 
@@ -168,12 +170,19 @@ def run_council_review(
     issue_title, issue_body, issue_comments : str
         Issue context.
     design_analysis : str
-        The Stage 1 design analysis to review.
+        The Stage 1 design analysis to review. Ignored if user_content_override
+        is provided.
     extra_instructions : str
         Additional instructions appended to the council reviewer system prompt.
         Should be the combination of mode-level and model-level extra_instructions.
     api_keys : dict or None
         Optional mapping of env var names to values to set before the call.
+    system_prompt_override : str or None
+        If provided, used as the base system prompt instead of COUNCIL_REVIEW_SYSTEM_PROMPT.
+        Useful for reusing this function for spec reviews.
+    user_content_override : str or None
+        If provided, used as the user message instead of building from the
+        design review template. Useful for reusing this function for spec reviews.
 
     Returns
     -------
@@ -194,15 +203,18 @@ def run_council_review(
             if value:
                 os.environ[key] = value
 
-    user_content = build_council_review_prompt(
-        issue_title=issue_title,
-        issue_body=issue_body,
-        issue_comments=issue_comments,
-        design_analysis=design_analysis,
-        model_alias=model_alias,
-    )
+    if user_content_override is not None:
+        user_content = user_content_override
+    else:
+        user_content = build_council_review_prompt(
+            issue_title=issue_title,
+            issue_body=issue_body,
+            issue_comments=issue_comments,
+            design_analysis=design_analysis,
+            model_alias=model_alias,
+        )
 
-    system_prompt = COUNCIL_REVIEW_SYSTEM_PROMPT
+    system_prompt = system_prompt_override if system_prompt_override is not None else COUNCIL_REVIEW_SYSTEM_PROMPT
     if extra_instructions:
         system_prompt += "\n\n" + extra_instructions
 
@@ -842,6 +854,99 @@ DESIGN_REVISION_SYSTEM_PROMPT = (
     "Output a complete, revised design proposal (not just a diff from the original)."
 )
 
+
+SPEC_DESIGN_SYSTEM_PROMPT = (
+    "You are translating an approved design into a concrete, file-by-file "
+    "implementation spec for a GitHub issue. You have access to tools to read "
+    "files and search the codebase.\n\n"
+    "You will be given the original issue and a revised design proposal that has "
+    "already been vetted by a council of reviewers. Your job is NOT to redesign — "
+    "the direction is set. Your job is to turn that design into a precise "
+    "implementation plan that a coding agent can execute with minimal guesswork.\n\n"
+    "Use read_file and grep to examine the specific files and functions the design "
+    "touches. Then call submit_analysis with a complete implementation spec in "
+    "Markdown format.\n\n"
+    "Your spec should include:\n"
+    "1. **Files to change** — exact paths and what changes to each file\n"
+    "2. **Function signatures** — new functions with their signatures, modified "
+    "functions with before/after\n"
+    "3. **Data structures / schemas** — any new fields, types, or config entries\n"
+    "4. **Test strategy** — which existing tests need updates, which new tests to add\n"
+    "5. **Edge cases and error handling** — specific scenarios to handle\n"
+    "6. **Risks** — anything that could go wrong during implementation\n\n"
+    "Be concrete: reference specific line numbers and existing patterns when "
+    "possible. Precision matters more than prose. Do NOT re-litigate the design — "
+    "implement it as given. If you find something in the codebase that makes the "
+    "design impossible, flag it explicitly rather than silently changing direction."
+)
+
+
+COUNCIL_SPEC_REVIEW_SYSTEM_PROMPT = (
+    "You are a senior software engineer participating in an implementation spec "
+    "review council. You have been given an implementation spec produced from an "
+    "already-approved design, and you must provide a structured critique.\n\n"
+    "Focus on:\n"
+    "- Concreteness — is the spec specific enough to implement without guesswork?\n"
+    "- Correctness — are the proposed changes compatible with the existing codebase?\n"
+    "- Missing pieces — files, functions, tests, or edge cases the spec overlooks\n"
+    "- Risks during implementation — anything that will likely break\n\n"
+    "Do NOT re-litigate the high-level design. That has already been reviewed and "
+    "approved. Focus on implementation-level feedback only."
+)
+
+
+COUNCIL_SPEC_REVIEW_FORMAT = """\
+Format your response EXACTLY as follows (use these exact headers):
+
+## Spec Review by {model_alias}
+
+**What looks good:** …
+
+**Concreteness gaps:** …
+
+**Missing pieces:** …
+
+**Risks during implementation:** …
+"""
+
+
+def build_council_spec_review_prompt(
+    *,
+    issue_title,
+    issue_body,
+    issue_comments,
+    revised_design,
+    implementation_spec,
+    model_alias,
+):
+    """Build the user prompt for a council spec review."""
+    return (
+        f"## Issue: {issue_title}\n\n"
+        f"{issue_body}\n\n"
+        f"## Discussion:\n{issue_comments}\n\n"
+        f"## Approved Design (for context — do not re-review):\n\n{revised_design}\n\n"
+        f"## Implementation Spec (to review):\n\n{implementation_spec}\n\n"
+        f"---\n\n"
+        f"Please review the implementation spec above and provide your critique. "
+        f"Remember: the design is already approved, so focus on implementation-level "
+        f"concerns only.\n\n"
+        f"{COUNCIL_SPEC_REVIEW_FORMAT.format(model_alias=model_alias)}"
+    )
+
+
+SPEC_REVISION_SYSTEM_PROMPT = (
+    "You are a senior software engineer. You previously produced an implementation "
+    "spec from an approved design, and your peers on a spec review council have "
+    "critiqued it. Your task is to revise the spec based on the council's feedback.\n\n"
+    "Read the original spec and each critique carefully. Then produce a revised "
+    "spec that:\n"
+    "- Addresses concreteness gaps and missing pieces\n"
+    "- Incorporates useful suggestions\n"
+    "- Explains why you rejected any concerns you disagree with\n"
+    "- Remains grounded in the approved design — do NOT re-open design questions\n\n"
+    "Output a complete, revised implementation spec (not just a diff from the original)."
+)
+
 CODE_REVISION_SYSTEM_PROMPT = (
     "You are a senior software engineer. You previously implemented a solution "
     "for a GitHub issue, and your peers on a code review council have reviewed "
@@ -918,6 +1023,7 @@ def run_delegate(
     wrapup_iteration=0,
     context_keep_tool_results=0,
     post_comment_fn=None,
+    design_rounds=1,
 ):
     """Run the full delegate pipeline (6 stages, no human checkpoints).
 
@@ -925,6 +1031,9 @@ def run_delegate(
         1. Design loop (agentic, same as /agent-design)
         2. Council design review (parallel, same as /agent-workshop Stage 2)
         3. Design revision — main agent reads critiques, updates design
+        3a. Implementation spec loop (agentic) — conditional on design_rounds >= 2
+        3b. Council spec review (parallel) — conditional on design_rounds >= 2
+        3c. Spec revision (one-shot) — conditional on design_rounds >= 2
         4. Implementation / resolve (agentic, same as /agent-resolve)
         5. Council code review (parallel, same as /agent-build Stage 2)
         6. Code revision plan — main agent reads code reviews, describes fixes
@@ -955,15 +1064,19 @@ def run_delegate(
         Number of recent tool results to keep.
     post_comment_fn : callable or None
         Function to post a comment.
+    design_rounds : int
+        1 = design only (default). 2 = design + implementation spec round
+        (adds Stages 3a/3b/3c between Stage 3 and Stage 4).
 
     Returns
     -------
     dict with keys:
         - design_result: dict from Stage 1
         - council_results: list of dicts from Stage 2
-        - revised_design: dict from Stage 3
-        - resolve_result: dict from Stage 4 (placeholder — resolve runs externally)
-        - code_review_results: list of dicts from Stage 5 (placeholder)
+        - revised_design: str from Stage 3
+        - spec_result: dict from Stage 3a (None if design_rounds < 2)
+        - spec_council_results: list from Stage 3b (empty if design_rounds < 2)
+        - revised_spec: str from Stage 3c (None if design_rounds < 2)
         - total_input_tokens: int
         - total_output_tokens: int
         - total_cost: float
@@ -1019,6 +1132,9 @@ def run_delegate(
             "design_result": design_result,
             "council_results": [],
             "revised_design": None,
+            "spec_result": None,
+            "spec_council_results": [],
+            "revised_spec": None,
             "total_input_tokens": all_input_tokens,
             "total_output_tokens": all_output_tokens,
             "total_cost": all_cost,
@@ -1033,6 +1149,9 @@ def run_delegate(
             "design_result": design_result,
             "council_results": [],
             "revised_design": None,
+            "spec_result": None,
+            "spec_council_results": [],
+            "revised_spec": None,
             "total_input_tokens": all_input_tokens,
             "total_output_tokens": all_output_tokens,
             "total_cost": all_cost,
@@ -1206,36 +1325,306 @@ def run_delegate(
         )
 
     # =======================================================================
+    # Stages 3a-3c: Implementation Spec Round (conditional)
+    # =======================================================================
+    spec_result = None
+    spec_council_results = []
+    revised_spec = None
+    spec_revision_result = None
+
+    if design_rounds >= 2:
+        # ---- Stage 3a: Implementation spec (agentic) ----
+        post(
+            f"## 📐 Delegate Stage 3a — Implementation Spec\n\n"
+            f"Main agent (`{model_alias}`) is translating the revised design into "
+            f"a concrete implementation spec...\n"
+        )
+
+        # Pass the revised design as extra context to the spec loop.  It's
+        # cleaner to inject it directly as extra_context than to pull it out
+        # of the issue comment thread during the loop.
+        spec_extra_context = extra_context
+        if spec_extra_context:
+            spec_extra_context += "\n\n"
+        spec_extra_context += (
+            f"## Approved Design (from Stage 3 — implement this, do not redesign)\n\n"
+            f"{revised_design}"
+        )
+
+        spec_start = time.time()
+        spec_result = run_design_loop(
+            model=model,
+            issue_title=issue_title,
+            issue_body=issue_body,
+            issue_comments=issue_comments,
+            extra_instructions=extra_instructions,
+            extra_context=spec_extra_context,
+            max_iterations=max_iterations,
+            wrapup_enabled=wrapup_enabled,
+            wrapup_iteration=wrapup_iteration,
+            context_keep_tool_results=context_keep_tool_results,
+            system_prompt=SPEC_DESIGN_SYSTEM_PROMPT,
+        )
+        spec_elapsed = time.time() - spec_start
+
+        implementation_spec = spec_result.get("analysis", "")
+        all_input_tokens += spec_result.get("input_tokens", 0)
+        all_output_tokens += spec_result.get("output_tokens", 0)
+        all_cost += spec_result.get("cost", 0.0)
+
+        if not implementation_spec:
+            post(
+                "⚠️ **Delegate Stage 3a did not produce an implementation spec.** "
+                "The spec agent may have exhausted all iterations without "
+                "calling `submit_analysis`. Aborting delegate pipeline."
+            )
+            return {
+                "design_result": design_result,
+                "design_analysis": design_analysis,
+                "council_results": council_results,
+                "revised_design": revised_design,
+                "revision_result": revision_result,
+                "spec_result": spec_result,
+                "spec_council_results": [],
+                "revised_spec": None,
+                "spec_revision_result": None,
+                "total_input_tokens": all_input_tokens,
+                "total_output_tokens": all_output_tokens,
+                "total_cost": all_cost,
+            }
+
+        if has_agent_command(implementation_spec):
+            post(
+                "⚠️ **Agent loop blocked!** The implementation spec contained "
+                "`/agent` command(s). Aborting delegate pipeline for safety."
+            )
+            return {
+                "design_result": design_result,
+                "design_analysis": design_analysis,
+                "council_results": council_results,
+                "revised_design": revised_design,
+                "revision_result": revision_result,
+                "spec_result": spec_result,
+                "spec_council_results": [],
+                "revised_spec": None,
+                "spec_revision_result": None,
+                "total_input_tokens": all_input_tokens,
+                "total_output_tokens": all_output_tokens,
+                "total_cost": all_cost,
+            }
+
+        spec_cost_table = _build_cost_table(
+            input_tokens=spec_result.get("input_tokens", 0),
+            output_tokens=spec_result.get("output_tokens", 0),
+            cost=spec_result.get("cost", 0.0),
+            elapsed=spec_elapsed,
+            output_text=implementation_spec,
+        )
+        post(
+            f"🤖 **Model:** `{model_alias}` (`{model}`)\n\n"
+            f"{implementation_spec}\n\n"
+            f"---\n"
+            f"_Implementation spec by `/agent-delegate` Stage 3a (`{model_alias}`)_\n\n"
+            f"{spec_cost_table}"
+        )
+
+        # ---- Stage 3b: Council spec review ----
+        if council_models:
+            post(
+                f"## 🏛️ Delegate Stage 3b — Council Spec Review\n\n"
+                f"Requesting implementation-level critiques from "
+                f"{len(council_models)} council member(s): "
+                f"{', '.join('`' + m['alias'] + '`' for m in council_models)}...\n"
+            )
+
+            def _run_single_spec_review(council_model):
+                model_id = council_model["id"]
+                key_name = _get_required_api_key_name(model_id)
+                if key_name is not None:
+                    key_value = os.environ.get(key_name, "")
+                    if not key_value:
+                        print(
+                            f"Skipping {council_model['alias']} — API key not configured "
+                            f"({key_name} is empty or missing)",
+                            flush=True,
+                        )
+                        return None
+
+                model_extra = council_model.get("extra_instructions", "")
+                reviewer_extra = "\n\n".join(
+                    p for p in [council_extra_instructions, model_extra] if p
+                )
+
+                user_content = build_council_spec_review_prompt(
+                    issue_title=issue_title,
+                    issue_body=issue_body,
+                    issue_comments=issue_comments,
+                    revised_design=revised_design,
+                    implementation_spec=implementation_spec,
+                    model_alias=council_model["alias"],
+                )
+
+                review_start = time.time()
+                result = run_council_review(
+                    model_id=model_id,
+                    model_alias=council_model["alias"],
+                    issue_title=issue_title,
+                    issue_body=issue_body,
+                    issue_comments=issue_comments,
+                    design_analysis=implementation_spec,  # unused when override is set
+                    extra_instructions=reviewer_extra,
+                    system_prompt_override=COUNCIL_SPEC_REVIEW_SYSTEM_PROMPT,
+                    user_content_override=user_content,
+                )
+                result["elapsed"] = time.time() - review_start
+                return result
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(council_models)) as executor:
+                futures = {
+                    executor.submit(_run_single_spec_review, cm): cm
+                    for cm in council_models
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    cm = futures[future]
+                    try:
+                        result = future.result()
+                        if result is None:
+                            continue
+                        spec_council_results.append(result)
+                    except Exception as e:
+                        spec_council_results.append({
+                            "review": f"⚠️ Error during review: {e}",
+                            "model_alias": cm["alias"],
+                            "model_id": cm["id"],
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "cost": 0.0,
+                            "elapsed": 0.0,
+                        })
+
+            for cr in spec_council_results:
+                if has_agent_command(cr["review"]):
+                    post(
+                        f"⚠️ **Agent loop blocked!** Spec review from "
+                        f"`{cr['model_alias']}` contained `/agent` command(s). "
+                        f"Blocked for safety."
+                    )
+                else:
+                    cost_table = _build_cost_table(
+                        input_tokens=cr.get("input_tokens", 0),
+                        output_tokens=cr.get("output_tokens", 0),
+                        cost=cr.get("cost", 0.0),
+                        elapsed=cr.get("elapsed", 0.0),
+                        output_text=cr.get("review", ""),
+                    )
+                    post(
+                        f"🤖 **Council spec reviewer:** `{cr['model_alias']}` (`{cr['model_id']}`)\n\n"
+                        f"{cr['review']}\n\n"
+                        f"---\n"
+                        f"_Council spec review by `/agent-delegate` Stage 3b (`{cr['model_alias']}`)_\n\n"
+                        f"{cost_table}"
+                    )
+
+                all_input_tokens += cr.get("input_tokens", 0)
+                all_output_tokens += cr.get("output_tokens", 0)
+                all_cost += cr.get("cost", 0.0)
+        else:
+            post(
+                "## 🏛️ Delegate Stage 3b — Council Spec Review\n\n"
+                "⚠️ No council models configured. Skipping council spec review.\n"
+            )
+
+        # ---- Stage 3c: Spec revision (one-shot) ----
+        post(
+            f"## 🔄 Delegate Stage 3c — Spec Revision\n\n"
+            f"Main agent (`{model_alias}`) is revising the implementation spec "
+            f"based on council feedback...\n"
+        )
+
+        spec_critiques_text = "\n\n---\n\n".join(
+            f"### Critique by {cr['model_alias']}\n\n{cr['review']}"
+            for cr in spec_council_results
+            if not has_agent_command(cr.get("review", ""))
+        )
+
+        spec_revision_user_content = (
+            f"## Approved Design (for context — do not re-open)\n\n{revised_design}\n\n"
+            f"## Original Implementation Spec\n\n{implementation_spec}\n\n"
+            f"## Council Critiques\n\n{spec_critiques_text}\n\n"
+            f"---\n\n"
+            f"Please produce a revised, complete implementation spec that addresses "
+            f"the council's feedback."
+        )
+
+        spec_revision_start = time.time()
+        spec_revision_result = _run_revision_call(
+            model_id=model,
+            system_prompt=SPEC_REVISION_SYSTEM_PROMPT,
+            user_content=spec_revision_user_content,
+            extra_instructions=extra_instructions,
+            max_tokens=8192,
+        )
+        spec_revision_elapsed = time.time() - spec_revision_start
+
+        revised_spec = spec_revision_result["text"]
+        all_input_tokens += spec_revision_result["input_tokens"]
+        all_output_tokens += spec_revision_result["output_tokens"]
+        all_cost += spec_revision_result["cost"]
+
+        if has_agent_command(revised_spec):
+            post(
+                "⚠️ **Agent loop blocked!** The revised spec contained "
+                "`/agent` command(s). Blocked for safety."
+            )
+            revised_spec = None
+        else:
+            spec_revision_cost_table = _build_cost_table(
+                input_tokens=spec_revision_result["input_tokens"],
+                output_tokens=spec_revision_result["output_tokens"],
+                cost=spec_revision_result["cost"],
+                elapsed=spec_revision_elapsed,
+                output_text=revised_spec,
+            )
+            post(
+                f"🤖 **Model:** `{model_alias}` (`{model}`)\n\n"
+                f"{revised_spec}\n\n"
+                f"---\n"
+                f"_Revised implementation spec by `/agent-delegate` Stage 3c (`{model_alias}`)_\n\n"
+                f"{spec_revision_cost_table}"
+            )
+
+    # =======================================================================
     # Stages 4-6: Implementation + Code Review + Revision
     # =======================================================================
     # Stages 4-6 (resolve, code review council, code revision) require the
     # resolve agent infrastructure (branch setup, tool execution, PR creation)
     # which runs as a separate workflow job.  The revised design from Stage 3
-    # is passed to the resolve job via the stage3_revised_design output.
+    # (and revised spec from Stage 3c if design_rounds >= 2) is passed to the
+    # resolve job via EXTRA_FILES.
     #
     # The workflow job for delegate mode will:
-    #   - Run Stages 1-3 here (design + council + revision)
-    #   - Pass the revised design to the resolve step as extra context
+    #   - Run Stages 1-3 (and optionally 3a-3c) here
+    #   - Pass the revised design (and revised spec) to the resolve step
     #   - After resolve creates a PR, run Stage 5 (council code review)
     #   - Post Stage 6 (code revision plan) as a comment
 
+    stages_done_label = "Stages 1-3c" if design_rounds >= 2 else "Stages 1-3"
     post(
-        f"## Delegate Stages 1-3 complete\n\n"
-        f"Design exploration, council review, and design revision are done.\n"
+        f"## Delegate {stages_done_label} complete\n\n"
         f"Proceeding to implementation (Stage 4)...\n"
     )
 
-    # Build aggregate cost table for Stages 1-3
-    stages_1_3_cost_table = _build_cost_table(
+    # Build aggregate cost table for the pre-resolve stages
+    stages_pre_resolve_cost_table = _build_cost_table(
         input_tokens=all_input_tokens,
         output_tokens=all_output_tokens,
         cost=all_cost,
         elapsed=time.time() - design_start,
-        output_text=revised_design,
+        output_text=revised_spec or revised_design,
     )
     post(
-        f"### 📊 Delegate Stages 1-3 Aggregate Cost\n\n"
-        f"{stages_1_3_cost_table}"
+        f"### 📊 Delegate {stages_done_label} Aggregate Cost\n\n"
+        f"{stages_pre_resolve_cost_table}"
     )
 
     return {
@@ -1244,6 +1633,10 @@ def run_delegate(
         "council_results": council_results,
         "revised_design": revised_design,
         "revision_result": revision_result,
+        "spec_result": spec_result,
+        "spec_council_results": spec_council_results,
+        "revised_spec": revised_spec,
+        "spec_revision_result": spec_revision_result,
         "total_input_tokens": all_input_tokens,
         "total_output_tokens": all_output_tokens,
         "total_cost": all_cost,
