@@ -2750,11 +2750,30 @@ jobs:
           app-id: ${{ vars.RDB_APP_ID }}
           private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 
+      - name: Resolve checkout ref
+        id: resolve_ref
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          TARGET_BRANCH_EXPLICIT: ${{ needs.parse.outputs.target_branch_explicit }}
+          TARGET_BRANCH: ${{ needs.parse.outputs.target_branch }}
+        run: |
+          ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+          ISSUE_TYPE="${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}"
+          # For PR triggers with no explicit branch: check out the PR head (the proposed changes).
+          # For issue triggers: check out the configured target_branch.
+          if [[ "$ISSUE_TYPE" == "pr" && "$TARGET_BRANCH_EXPLICIT" != "true" ]]; then
+            REF=$(gh pr view "$ISSUE_NUMBER" --json headRefName --jq '.headRefName')
+          else
+            REF="$TARGET_BRANCH"
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "Resolved checkout ref: $REF (issue_type=$ISSUE_TYPE)"
+
       - name: Checkout target repository
         uses: actions/checkout@v5
         with:
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ needs.parse.outputs.target_branch }}
+          ref: ${{ steps.resolve_ref.outputs.ref }}
 
       - name: Capture checkout info
         id: checkout_info
@@ -3413,11 +3432,30 @@ jobs:
           app-id: ${{ vars.RDB_APP_ID }}
           private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 
+      - name: Resolve checkout ref
+        id: resolve_ref
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          TARGET_BRANCH_EXPLICIT: ${{ needs.parse.outputs.target_branch_explicit }}
+          TARGET_BRANCH: ${{ needs.parse.outputs.target_branch }}
+        run: |
+          ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+          ISSUE_TYPE="${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}"
+          # For PR triggers with no explicit branch: check out the PR head (the proposed changes).
+          # For issue triggers: check out the configured target_branch.
+          if [[ "$ISSUE_TYPE" == "pr" && "$TARGET_BRANCH_EXPLICIT" != "true" ]]; then
+            REF=$(gh pr view "$ISSUE_NUMBER" --json headRefName --jq '.headRefName')
+          else
+            REF="$TARGET_BRANCH"
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "Resolved checkout ref: $REF (issue_type=$ISSUE_TYPE)"
+
       - name: Checkout target repository
         uses: actions/checkout@v5
         with:
           token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ needs.parse.outputs.target_branch }}
+          ref: ${{ steps.resolve_ref.outputs.ref }}
 
       - name: Checkout remote-dev-bot config
         uses: actions/checkout@v5
