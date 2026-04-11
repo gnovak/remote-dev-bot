@@ -764,6 +764,8 @@ jobs:
                   _ctbl.append(f'| LOC | ~{_fmt_loc_c(_cum_ins)} (estimate) |')
               if _cum_loc_per_dollar > 0:
                   _ctbl.append(f'| LOC/$ | ~{_fmt_loc_c(_cum_loc_per_dollar)} loc/$ |')
+              if _cum_cost > 0 and diff_text:
+                  _ctbl.append(f'| Info/$ | {_fmt_bpd(diff_text, _cum_cost)} |')
               if _cum_in_tok > 0:
                   _ctbl.append(f'| Input | {_fmt_tok(_cum_in_tok)} tokens |')
               if _cum_out_tok > 0:
@@ -1595,6 +1597,8 @@ jobs:
                   _ctbl.append(f'| LOC | ~{_fmt_loc_c(_cum_ins)} (estimate) |')
               if _cum_loc_per_dollar > 0:
                   _ctbl.append(f'| LOC/$ | ~{_fmt_loc_c(_cum_loc_per_dollar)} loc/$ |')
+              if _cum_cost > 0 and diff_text:
+                  _ctbl.append(f'| Info/$ | {_fmt_bpd(diff_text, _cum_cost)} |')
               if _cum_in_tok > 0:
                   _ctbl.append(f'| Input | {_fmt_tok(_cum_in_tok)} tokens |')
               if _cum_out_tok > 0:
