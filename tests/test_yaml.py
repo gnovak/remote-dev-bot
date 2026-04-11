@@ -117,7 +117,7 @@ def test_all_checkout_target_steps_use_app_token(workflow_jobs):
 
 
 def test_branch_aware_jobs_use_target_branch_ref(workflow_jobs):
-    """design, workshop, and delegate jobs must check out the configured branch.
+    """design, workshop, and delegate jobs must check out the correct branch.
 
     Unlike resolve/build/reconcile (which override TARGET_BRANCH and do their own
     git checkout in setup_branch()), and unlike review (which uses gh pr checkout),
@@ -126,11 +126,50 @@ def test_branch_aware_jobs_use_target_branch_ref(workflow_jobs):
     (typically main), so an inline arg like `branch=dev` is silently ignored and
     the agent reads the wrong code.
 
-    Regression test for issue #491.
+    design and workshop use steps.resolve_ref.outputs.ref, which resolves to the
+    PR head for PR triggers (so the agent reads the proposed changes, not the base)
+    or to needs.parse.outputs.target_branch for issue triggers.
+
+    delegate uses needs.parse.outputs.target_branch directly (no PR head override).
+
+    Regression test for issues #491 and #505.
     """
-    BRANCH_AWARE_JOBS = {"design", "workshop", "delegate"}
-    EXPECTED_REF = "needs.parse.outputs.target_branch"
-    for job_name in BRANCH_AWARE_JOBS:
+    # Jobs that resolve the checkout ref via the "Resolve checkout ref" step
+    # (which uses PR head for PR triggers, target_branch for issue triggers)
+    PR_HEAD_AWARE_JOBS = {"design", "workshop"}
+    # Jobs that use the configured target_branch directly (no PR head override)
+    TARGET_BRANCH_JOBS = {"delegate"}
+
+    for job_name in PR_HEAD_AWARE_JOBS:
+        job = workflow_jobs.get(job_name)
+        assert job, f"Expected job '{job_name}' in workflow"
+        # Check that the "Resolve checkout ref" step exists
+        resolve_step = next(
+            (s for s in job.get("steps", []) if s.get("name") == "Resolve checkout ref"),
+            None,
+        )
+        assert resolve_step is not None, (
+            f"Job '{job_name}' must have a 'Resolve checkout ref' step that picks "
+            f"the PR head branch for PR triggers and target_branch for issue triggers."
+        )
+        assert resolve_step.get("id") == "resolve_ref", (
+            f"Job '{job_name}': 'Resolve checkout ref' step must have id='resolve_ref'"
+        )
+        # Check that the checkout step uses the resolved ref
+        found = False
+        for step in job.get("steps", []):
+            if step.get("name") == "Checkout target repository":
+                found = True
+                ref = step.get("with", {}).get("ref", "")
+                assert "steps.resolve_ref.outputs.ref" in ref, (
+                    f"Job '{job_name}': Checkout target repository must set "
+                    f"ref to '{{{{ steps.resolve_ref.outputs.ref }}}}' (got: {ref!r}). "
+                    f"Without this, PR triggers check out the configured base branch "
+                    f"instead of the PR head (the proposed changes)."
+                )
+        assert found, f"Job '{job_name}' has no 'Checkout target repository' step"
+
+    for job_name in TARGET_BRANCH_JOBS:
         job = workflow_jobs.get(job_name)
         assert job, f"Expected job '{job_name}' in workflow"
         found = False
@@ -138,9 +177,9 @@ def test_branch_aware_jobs_use_target_branch_ref(workflow_jobs):
             if step.get("name") == "Checkout target repository":
                 found = True
                 ref = step.get("with", {}).get("ref", "")
-                assert EXPECTED_REF in ref, (
+                assert "needs.parse.outputs.target_branch" in ref, (
                     f"Job '{job_name}': Checkout target repository must set "
-                    f"ref to '{{{{ {EXPECTED_REF} }}}}' (got: {ref!r}). "
+                    f"ref to '{{{{ needs.parse.outputs.target_branch }}}}' (got: {ref!r}). "
                     f"Without this, the agent reads from the default branch "
                     f"instead of the configured/inline branch."
                 )
