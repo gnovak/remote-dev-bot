@@ -1018,12 +1018,12 @@ def build_cost_table():
         _base = open("/tmp/agent_start_sha").read().strip() if os.path.exists("/tmp/agent_start_sha") else None
         _base_ref = _base or "$(git merge-base HEAD origin/main)"
         _dp = _sp.run(
-            f"git diff {_base_ref} HEAD 2>/dev/null || echo \"\",
+            f"git diff {_base_ref} HEAD 2>/dev/null || echo \"\"",
             shell=True, capture_output=True, text=True, timeout=30,
         )
         diff_text = _dp.stdout or ""
         _ss = _sp.run(
-            f"git diff --shortstat {_base_ref} HEAD 2>/dev/null || echo \"\",
+            f"git diff --shortstat {_base_ref} HEAD 2>/dev/null || echo \"\"",
             shell=True, capture_output=True, text=True, timeout=30,
         )
         shortstat = _ss.stdout.strip()
