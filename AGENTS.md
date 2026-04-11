@@ -177,22 +177,22 @@ target branch = design/gemini
 | `dev`      | Long-lived integration branch, accumulates work ahead of `main` | Owner's own repo shims     |
 | `e2e-test` | Ephemeral pointer, reset by e2e scripts before each test run    | `remote-dev-bot-test` shim |
 
-**PRs go to `dev`, not `main`**, unless the change is a bug fix or doc/config-only.
+**All development goes on `dev`. Every PR branches from `origin/dev` and targets `dev`. No exceptions — bug fixes, doc changes, config-only tweaks, one-line typos, all of it.**
 
-**Feature workflow:** `git checkout -b my-feature origin/dev` → PR → merge to `dev`
+**Why no "bug-fix → main" shortcut:** in the past, landing a fix on `main` and then independently "re-fixing" the same bug on `dev` produced two divergent fixes in the same files, creating a landmine for the eventual `dev → main` merge. That actually happened (see PRs #488 / #503 / #512 / #513 on this repo) and cost real cleanup work. The cost of keeping everything on `dev` is much lower than the cost of one bad merge.
 
-**Bug-fix workflow:** `git checkout -b my-fix origin/main` → PR → merge to `main` → rebase `dev` onto new `main`
+**Standard workflow:** `git checkout -b my-change origin/dev` → PR → merge to `dev`
 
 **CRITICAL — always branch from the remote ref, not the local ref:**
 
 ```bash
-git checkout -b my-feature origin/dev   # CORRECT
-git checkout -b my-feature dev          # WRONG — local ref may be stale
-git checkout -b my-fix origin/main      # CORRECT
-git checkout -b my-fix main             # WRONG — local ref may be stale
+git checkout -b my-change origin/dev   # CORRECT
+git checkout -b my-change dev          # WRONG — local ref may be stale
 ```
 
-`git fetch` updates `origin/dev` and `origin/main` but does NOT move local `dev` or `main`. Using the local ref silently branches from a stale commit.
+`git fetch` updates `origin/dev` but does NOT move local `dev`. Using the local ref silently branches from a stale commit.
+
+**Base-branch confirmation rule (for AI agents):** if for any reason you are about to open a PR whose base branch is **not** `dev` (e.g., you believe a revert on `main` is required), STOP before running `gh pr create` and explicitly ask the user to confirm the base branch. Do not assume the exception is warranted — make the user say "yes, base=main" in words. The common failure mode is opening a main-targeting PR on autopilot when dev was the right target.
 
 ### Dev Cycle (detailed)
 
