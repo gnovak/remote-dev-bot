@@ -324,6 +324,38 @@ def test_agent_yml_has_author_association_gate():
         assert 'github.event.comment.author_association' in content
 
 
+def test_agent_yml_has_dogfood_gate():
+    """agent.yml must hard-block /agent-* inside gnovak/remote-dev-bot.
+
+    Regression test for issue #499. Inside the rdb repo itself, `/agent-*`
+    runs against released `@main` code — almost always a mistake during
+    active development (you meant `/dogfood-*` which runs `@dev`). The gate
+    prevents wasting tokens investigating dev-only bugs on stale code.
+
+    For all other repos the gate short-circuits to proceed=true and is a no-op.
+    """
+    agent_yml_path = REPO_ROOT / ".github/workflows/agent.yml"
+    agent_yml = load_yaml(agent_yml_path)
+    jobs = agent_yml["jobs"]
+
+    assert "gate" in jobs, "agent.yml must have a 'gate' job (issue #499)"
+
+    content = agent_yml_path.read_text()
+    # Gate must key off the rdb repo specifically
+    assert "gnovak/remote-dev-bot" in content
+    assert "proceed=false" in content
+    assert "proceed=true" in content
+
+    # resolve job must depend on the gate and block on its output
+    needs = jobs["resolve"].get("needs")
+    assert needs == "gate" or (isinstance(needs, list) and "gate" in needs), (
+        "resolve job must have `needs: [gate]`"
+    )
+    assert "needs.gate.outputs.proceed" in str(jobs["resolve"].get("if", "")), (
+        "resolve job's `if` must check needs.gate.outputs.proceed"
+    )
+
+
 # --- Loop prevention checks ---
 
 
