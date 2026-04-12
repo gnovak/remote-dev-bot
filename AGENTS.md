@@ -243,6 +243,7 @@ gh run view RUN_ID --repo gnovak/remote-dev-bot-test --log | tail -40
 
 - **All changes go through a PR. Never commit or push directly to `main` or `dev`.** Open a PR and let the user merge it.
 - For small changes, a single-commit PR self-merged immediately is fine — the point is the artifact, not the review ceremony.
+- **Issue references in PR bodies: `Fixes #NNN` only.** Do not casually mention issue numbers (e.g., "related to #NNN", "follow-up to #NNN", "see #NNN for context"). Every `#NNN` reference in a PR body creates a "mentioned this issue" entry in the issue timeline. Since PRs target `dev` (not `main`), GitHub won't auto-close issues on merge — we close them manually. Stray mentions make it hard to scan the timeline and tell which PRs actually resolve which issues. If a PR doesn't close an issue, don't reference the issue number in the PR body at all.
 
 ## Commit Attribution
 
