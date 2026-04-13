@@ -112,24 +112,113 @@ Keep some limit as a safety net, but make it generous enough that agents rarely
 hit it in normal use. 50K chars (~12.5K tokens) is probably right — large
 enough for any reasonable file read, small enough to bound pathological cases.
 
-### D. Line numbers in distillation and structural extract
+### D. Structural extract as agent context (with line numbers)
 
-- Add line numbers to file content in `format_codebase()` and
-  `format_structural_extract()`.
-- Distillation output can then say "relevant function at resolve.py:656-710".
-- Agent can do `sed -n '656,710p'` on first iteration instead of exploratory
-  grep-then-read dance.
+After distillation, also include the structural extract (AST-extracted function
+and class signatures with docstrings) in the agent's system prompt. Currently
+structural extract is only used as *input* to the Tier 2 distillation path
+(medium repos). Sending it to the agent as well gives it a complete index of
+every function/class in the codebase — even ones the distillation LLM didn't
+think were relevant.
 
-**Status:** Orthogonal to caching. Reduces iteration count, which is the
-biggest cost lever. Should implement regardless of caching approach.
+Add line numbers to signature entries so the agent can jump directly:
+```
+def resolve_config(base_path, override_path, command_string, ...):  # line 456
+    """Config parsing for resolve mode."""
+    ...
+```
 
-### E. Line numbers in the file listing
+The agent can then do `sed -n '456,520p' lib/config.py` on its first iteration
+instead of the exploratory grep → read → grep → read dance.
 
-- Currently `git ls-files` dumps bare paths.
-- Adding line counts (e.g., `lib/resolve.py (1750 lines)`) could help agents
-  decide whether to `cat` vs `sed -n`.
+**Status:** Decided — implement. Orthogonal to caching. Reduces iteration
+count, which is the biggest cost lever.
 
-**Status:** Low effort, modest benefit. Nice to have.
+### E. Remove git ls-files from system prompt
+
+Currently `main()` builds `repo_context` starting with the bare `git ls-files`
+output. When distillation is on (the usual case), the agent never sees this —
+it gets replaced by the distilled output. When distillation is off, it's a
+list of filenames with no structure info.
+
+With structural extract in the agent context (idea D), the file listing is
+fully redundant — the structural extract already lists every file with its
+signatures. Remove it.
+
+**Status:** Decided — implement. Separate PR or bundled with D.
+
+### F. Raise bash_output_limit
+
+- Current: 8000 chars (first 4K + last 4K).
+- Proposal: raise to 30-50K, or disable entirely (0).
+- Removes the perverse incentive to do multiple `sed -n` reads.
+- With caching, the extra tokens per read are affordable.
+
+**Risk:** An accidental `cat` of a huge file could produce unbounded output.
+Keep some limit as a safety net, but make it generous enough that agents rarely
+hit it in normal use. 50K chars (~12.5K tokens) is probably right — large
+enough for any reasonable file read, small enough to bound pathological cases.
+
+**Status:** Temporarily disabled (0) for baseline data. Will decide on a
+permanent value after reviewing baseline runs.
+
+## User-side improvements ("Getting the most out of RDB")
+
+Changes users can make to *their* code to get better results from RDB (and
+possibly other AI agents). These will eventually go into a README section.
+
+### Add type hints to Python functions
+
+Type hints in function signatures let agents understand the contract without
+reading the function body. This matters most for the structural extract path
+where agents see only signatures:
+
+```python
+# Without hints — agent must read the body to know what to pass
+def resolve_config(base_path, override_path, command_string, local_path=None):
+
+# With hints — signature alone tells the full contract
+def resolve_config(base_path: str, override_path: str, command_string: str,
+                   local_path: str | None = None, args: dict[str, Any] | None = None) -> dict:
+```
+
+Return types are especially valuable — knowing a function returns `dict` vs
+`list[str]` vs `Optional[Config]` saves the agent a read.
+
+Prioritize type hints on:
+- Public API functions (called from multiple files)
+- Functions with non-obvious return types
+- Functions that take complex arguments (dicts, callbacks, optional params)
+
+### Add AGENTS.md with project conventions
+
+RDB agents read AGENTS.md (and CLAUDE.md, GEMINI.md) at the start of every
+run. Include:
+- How to run tests
+- Key file locations
+- Architectural patterns and conventions
+- Common pitfalls
+
+### Keep modules focused and reasonably sized
+
+A 1750-line `resolve.py` means agents spend iterations navigating to the
+relevant section. Smaller, focused modules let agents `cat` a whole file and
+have full context immediately. This interacts with bash_output_limit — smaller
+files are less likely to be truncated.
+
+### Mirror test structure to source structure
+
+When `tests/test_config.py` tests `lib/config.py`, agents can find the test
+file by convention. When test organization doesn't mirror source, agents
+waste iterations searching.
+
+## Writeup plan
+
+Once the performance work stabilizes, write up findings as:
+1. **design-workspace.md** — keep as the living analysis document
+2. **ADR(s)** — for each significant decision (e.g., "ADR: remove tool result
+   dropping in favor of prompt caching", "ADR: raise bash_output_limit")
+3. **README section** — "Getting the most out of RDB" with user-facing tips
 
 ## Open questions
 
