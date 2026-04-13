@@ -1172,19 +1172,17 @@ def main():
     _branch_created = branch
     print(f"Working on branch: {branch}")
 
-    # Gather repository context
-    file_listing_result = subprocess.run(
-        ["git", "ls-files"], capture_output=True, text=True
-    )
-    file_listing = file_listing_result.stdout.strip()
-    repo_context = f"## Repository File Listing\n\n```\n{file_listing}\n```"
-
+    # Gather repository context (EXTRA_FILES only — the structural extract
+    # from distillation replaces the old git ls-files listing).
+    repo_context = ""
     for filepath in EXTRA_FILES:
         if os.path.exists(filepath):
             with open(filepath) as f:
                 content = f.read().strip()
             if content:
-                repo_context += f"\n\n## File: {filepath}\n\n{content}"
+                if repo_context:
+                    repo_context += "\n\n"
+                repo_context += f"## File: {filepath}\n\n{content}"
 
     # Gather issue/PR context
     if ISSUE_TYPE == "pr":
@@ -1258,11 +1256,16 @@ def main():
             print("Running context distillation pre-step...")
             # Estimate tokens before distillation so we can measure savings
             undistilled_tokens = estimate_tokens([{"content": repo_context}])
-            distilled, distill_input_tokens, distill_output_tokens, distill_cost = maybe_distill(
+            distilled, distill_input_tokens, distill_output_tokens, distill_cost, structural_extract = maybe_distill(
                 repo_context, issue_context, LLM_MODEL
             )
             if distilled != repo_context:
                 agent_context = f"## Distilled Context\n\n{distilled}"
+                # Append the structural extract (with line numbers) so the
+                # agent has a complete index of every function/class and can
+                # jump directly to definitions without exploratory reads.
+                if structural_extract:
+                    agent_context += f"\n\n## Codebase Index\n\n{structural_extract}"
                 distillation_ran = True
                 post_distill_tokens = len(distilled) // 4
                 print(f"Distillation complete: {distill_input_tokens} input tokens, {distill_output_tokens} output tokens, ${distill_cost:.4f}")
@@ -1408,6 +1411,29 @@ def main():
                             "2. Call finish() now — do not start any new work."
                         ),
                     })
+
+            # Place a cache marker at the conversation tail so the entire
+            # prefix (all prior turns) is cached on the next iteration.
+            # With append-only messages (no tool result dropping), this gives
+            # near-perfect cache hit rates — only the newest turn is uncached.
+            # Uses 2 of 4 Anthropic markers (one on initial user msg, one here).
+            if _should_cache(LLM_MODEL) and len(messages) > 2:
+                _tail_msg = messages[-1]
+                _tail_content = _tail_msg.get("content")
+                _cc: dict = {"type": "ephemeral"}
+                if LLM_MODEL.startswith(("gemini/", "vertex_ai/")):
+                    _cc["ttl"] = "3600s"
+                if isinstance(_tail_content, str):
+                    _tail_msg["content"] = [
+                        {"type": "text", "text": _tail_content, "cache_control": _cc}
+                    ]
+                elif isinstance(_tail_content, list) and _tail_content:
+                    # Remove any prior cache_control markers in this message
+                    for block in _tail_content:
+                        if isinstance(block, dict):
+                            block.pop("cache_control", None)
+                    if isinstance(_tail_content[-1], dict):
+                        _tail_content[-1]["cache_control"] = _cc
 
             try:
                 response = completion_with_retries(

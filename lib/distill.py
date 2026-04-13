@@ -194,7 +194,7 @@ def format_codebase(files):
     return "\n".join(parts)
 
 
-def _extract_python_signatures(content):
+def _extract_python_signatures(content, include_line_numbers=False):
     """Extract function/class signatures and docstrings from Python source."""
     try:
         tree = ast.parse(content)
@@ -209,13 +209,19 @@ def _extract_python_signatures(content):
             # Get the function signature from source lines
             sig = _format_function_sig(node, content)
             docstring = ast.get_docstring(node)
-            parts.append(sig)
+            if include_line_numbers:
+                parts.append(f"{sig}  # line {node.lineno}")
+            else:
+                parts.append(sig)
             if docstring:
                 parts.append(f'    """{docstring}"""')
             parts.append("    ...")
             parts.append("")
         elif isinstance(node, ast.ClassDef):
-            parts.append(f"class {node.name}:")
+            if include_line_numbers:
+                parts.append(f"class {node.name}:  # line {node.lineno}")
+            else:
+                parts.append(f"class {node.name}:")
             docstring = ast.get_docstring(node)
             if docstring:
                 parts.append(f'    """{docstring}"""')
@@ -223,7 +229,10 @@ def _extract_python_signatures(content):
             for item in ast.iter_child_nodes(node):
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     sig = _format_function_sig(item, content)
-                    parts.append(f"    {sig}")
+                    if include_line_numbers:
+                        parts.append(f"    {sig}  # line {item.lineno}")
+                    else:
+                        parts.append(f"    {sig}")
                     method_doc = ast.get_docstring(item)
                     if method_doc:
                         parts.append(f'        """{method_doc}"""')
@@ -251,7 +260,7 @@ def _format_function_sig(node, source):
     return f"{prefix} {node.name}({', '.join(arg_names)}):"
 
 
-def format_structural_extract(files):
+def format_structural_extract(files, include_line_numbers=False):
     """Format a compact structural representation for medium repos.
 
     Python files: AST-extracted function/class signatures + docstrings.
@@ -261,7 +270,9 @@ def format_structural_extract(files):
     for f in files:
         parts.append(f'<file path="{f["path"]}">')
         if f["path"].endswith(".py"):
-            extract = _extract_python_signatures(f["content"])
+            extract = _extract_python_signatures(
+                f["content"], include_line_numbers=include_line_numbers
+            )
             if isinstance(extract, list):
                 parts.append("\n".join(extract))
             else:
@@ -404,10 +415,13 @@ def _identify_relevant_files(extract_text, task_context, model):
 def maybe_distill(repo_context, issue_context, model, root="."):
     """Run context distillation pre-step.
 
-    Returns (context_text, input_tokens, output_tokens, cost).
-    On failure or skip, returns (repo_context, 0, 0, 0.0).
+    Returns (context_text, input_tokens, output_tokens, cost, structural_extract).
+    On failure or skip, returns (repo_context, 0, 0, 0.0, "").
+    The structural_extract is a compact index of all functions/classes with line
+    numbers, intended to be included in the agent's system prompt alongside the
+    distilled context.
     """
-    fallback = (repo_context, 0, 0, 0.0)
+    fallback = (repo_context, 0, 0, 0.0, "")
 
     try:
         files = gather_repo_files(root=root)
@@ -417,6 +431,15 @@ def maybe_distill(repo_context, issue_context, model, root="."):
 
         total_tokens = estimate_tokens_for_files(files)
         print(f"  [Distill] Gathered {len(files)} files, ~{total_tokens:,} tokens estimated")
+
+        # Always build the agent-facing structural extract with line numbers.
+        # This is cheap (no LLM call) and gives the agent a complete index of
+        # every function/class so it can jump directly to definitions.
+        agent_structural_extract = format_structural_extract(
+            files, include_line_numbers=True
+        )
+        extract_tokens = len(agent_structural_extract) // 4
+        print(f"  [Distill] Structural extract: ~{extract_tokens:,} tokens")
 
         total_input = 0
         total_output = 0
@@ -434,6 +457,9 @@ def maybe_distill(repo_context, issue_context, model, root="."):
         elif total_tokens <= DISTILL_STRUCT_EXTRACT_LIMIT:
             # Tier 2: Medium repo — structural extract + second pass
             print("  [Distill] Tier 2 (medium repo): structural extract + targeted read")
+            # The distillation input uses the extract without line numbers
+            # (line numbers aren't useful for the distillation LLM's task of
+            # identifying relevant files).
             extract_text = format_structural_extract(files)
 
             # Pass 1: identify relevant files
@@ -472,7 +498,7 @@ def maybe_distill(repo_context, issue_context, model, root="."):
             return fallback
 
         print(f"  [Distill] Distillation complete: ~{len(result) // 4:,} tokens output")
-        return result, total_input, total_output, total_cost
+        return result, total_input, total_output, total_cost, agent_structural_extract
 
     except Exception as e:
         print(f"  [Distill] Distillation failed: {e} — proceeding with full repo context")
