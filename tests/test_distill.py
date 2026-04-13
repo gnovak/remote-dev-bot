@@ -439,10 +439,10 @@ class TestMaybeDistill:
         assert result[2] == 150   # 50 + 100
 
     def test_returns_tuple(self, tmp_path):
-        """maybe_distill returns (context, input_tokens, output_tokens, cost)."""
+        """maybe_distill returns (context, input_tokens, output_tokens, cost, structural_extract)."""
         files = {"main.py": "x"}
         make_git_repo(tmp_path, files)
-        
+
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "distilled"
@@ -450,14 +450,15 @@ class TestMaybeDistill:
         mock_response.usage.prompt_tokens = 10
         mock_response.usage.completion_tokens = 5
         mock_response._hidden_params = {"response_cost": 0.001}
-        
+
         with patch("lib.distill.completion", return_value=mock_response):
-            ctx, inp, out, cost = maybe_distill("repo", "task", "anthropic/claude-sonnet-4-5", root=str(tmp_path))
-        
+            ctx, inp, out, cost, struct_extract = maybe_distill("repo", "task", "anthropic/claude-sonnet-4-5", root=str(tmp_path))
+
         assert ctx == "distilled"
         assert inp == 10
         assert out == 5
         assert cost == 0.001
+        assert "<structural_extract>" in struct_extract
 
 
 # ---------------------------------------------------------------------------

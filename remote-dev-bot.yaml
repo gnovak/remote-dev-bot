@@ -173,14 +173,18 @@ agent:
   # Bash output truncation limit in characters. Long outputs are trimmed to
   # first half + last half of this length to prevent context bloat.
   # Set to 0 to disable truncation.
-  bash_output_limit: 8000
+  # NOTE: Temporarily disabled (was 8000) to gather baseline data on tool
+  # output sizes without truncation. See design-workspace.md.
+  bash_output_limit: 0
   # Rolling status log: post a one-sentence status update every N iterations
   # as an issue comment. Set to 0 to disable (default — enable per-repo).
   status_log_interval: 0
   # Number of recent tool call/result pairs to keep in context. Older pairs
   # are replaced with a placeholder to prevent O(N²) token growth on long runs.
-  # Set to 0 to keep all tool results (not recommended for runs > ~20 iterations).
-  context_keep_tool_results: 20
+  # Set to 0 to keep all tool results.
+  # NOTE: Temporarily disabled (was 20) to gather baseline data on context
+  # growth without dropping. See design-workspace.md.
+  context_keep_tool_results: 0
   # Context window compaction: when the context grows too large, the oldest
   # messages are summarized by the LLM and replaced with a compact summary.
   # Set max_context_tokens to 0 to disable compaction entirely.
