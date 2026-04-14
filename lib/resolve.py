@@ -1904,7 +1904,6 @@ def main():
             # Estimate cost saved using LiteLLM model pricing
             cost_saved_str = ""
             try:
-                import litellm
                 model_info = litellm.get_model_info(LLM_MODEL)
                 input_cost_per_token = model_info.get("input_cost_per_token", 0)
                 if input_cost_per_token:
