@@ -105,16 +105,6 @@ _issue_title: str = ""               # set after issue/PR context is fetched
 
 # --- Utilities ---
 
-def _should_cache(model: str) -> bool:
-    """Return True if the model provider supports explicit cache_control markers.
-
-    Anthropic and Gemini both use the same cache_control block syntax; LiteLLM
-    translates to each provider's native API.  OpenAI caches automatically for
-    any repeating prefix ≥ 1024 tokens — no code changes needed there.
-    """
-    return model.startswith(("anthropic/", "claude", "gemini/", "vertex_ai/"))
-
-
 def run(cmd, *, check=True, timeout=60):
     """Run a shell command, return combined stdout+stderr."""
     result = subprocess.run(
@@ -1289,23 +1279,13 @@ def main():
     trigger_type = "PR" if ISSUE_TYPE == "pr" else "issue"
     initial_user_text = f"Please resolve {trigger_type} #{ISSUE_NUMBER} as described above."
 
-    if _should_cache(LLM_MODEL):
-        # Attach a cache_control marker so providers cache the static initial
-        # context (system prompt + first user message).  LiteLLM translates
-        # this to Anthropic's cache breakpoint API or Gemini's /cachedContent.
-        # Gemini also accepts an optional TTL; include it for long runs.
-        cache_control: dict = {"type": "ephemeral"}
-        if LLM_MODEL.startswith(("gemini/", "vertex_ai/")):
-            cache_control["ttl"] = "3600s"
-        initial_user_content = [
-            {
-                "type": "text",
-                "text": initial_user_text,
-                "cache_control": cache_control,
-            }
-        ]
-    else:
-        initial_user_content = initial_user_text
+    # NOTE: Explicit cache_control markers removed as an experiment.
+    # Anthropic (Claude 3.5+) and OpenAI do automatic prefix caching
+    # for identical prefixes — with append-only messages, this should
+    # give good cache hit rates without markers.  The per-iteration
+    # cache hit log (see "[tokens]" line below) will show whether this
+    # works.  If cache hits drop, re-add markers.  See design-workspace.md.
+    initial_user_content = initial_user_text
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -1411,36 +1391,6 @@ def main():
                             "2. Call finish() now — do not start any new work."
                         ),
                     })
-
-            # Place a cache marker at the conversation tail so the entire
-            # prefix (all prior turns) is cached on the next iteration.
-            # With append-only messages (no tool result dropping), this gives
-            # near-perfect cache hit rates — only the newest turn is uncached.
-            # Uses 2 of 4 Anthropic markers (one on initial user msg, one here).
-            if _should_cache(LLM_MODEL) and len(messages) > 2:
-                # Strip cache_control from all messages except the initial
-                # user message (index 1).  Previous iterations leave stale
-                # tail markers that accumulate and exceed Anthropic's 4-marker
-                # limit.
-                for _msg in messages[2:]:
-                    _mc = _msg.get("content")
-                    if isinstance(_mc, list):
-                        for _blk in _mc:
-                            if isinstance(_blk, dict):
-                                _blk.pop("cache_control", None)
-
-                _tail_msg = messages[-1]
-                _tail_content = _tail_msg.get("content")
-                _cc: dict = {"type": "ephemeral"}
-                if LLM_MODEL.startswith(("gemini/", "vertex_ai/")):
-                    _cc["ttl"] = "3600s"
-                if isinstance(_tail_content, str):
-                    _tail_msg["content"] = [
-                        {"type": "text", "text": _tail_content, "cache_control": _cc}
-                    ]
-                elif isinstance(_tail_content, list) and _tail_content:
-                    if isinstance(_tail_content[-1], dict):
-                        _tail_content[-1]["cache_control"] = _cc
 
             try:
                 response = completion_with_retries(
@@ -1718,29 +1668,6 @@ def main():
                             f"tokens {total_tokens:,} → {new_total:,} ({ratio:.1f}% reduction)",
                         ))
 
-                        # Re-anchor the cache marker on the new last static message.
-                        # After compaction the summary message is at index 1 — it
-                        # becomes the new cached prefix boundary for Anthropic/Gemini.
-                        if _should_cache(LLM_MODEL) and len(messages) > 1:
-                            new_static = messages[1]
-                            content = new_static.get("content")
-                            cache_control: dict = {"type": "ephemeral"}
-                            if LLM_MODEL.startswith(("gemini/", "vertex_ai/")):
-                                cache_control["ttl"] = "3600s"
-                            if isinstance(content, str):
-                                new_static["content"] = [
-                                    {
-                                        "type": "text",
-                                        "text": content,
-                                        "cache_control": cache_control,
-                                    }
-                                ]
-                            elif isinstance(content, list) and content:
-                                # Move marker to the last block in the list
-                                for block in content:
-                                    block.pop("cache_control", None)
-                                if isinstance(content[-1], dict):
-                                    content[-1]["cache_control"] = cache_control
 
             if done:
                 break
