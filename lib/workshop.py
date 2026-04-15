@@ -483,19 +483,11 @@ def run_build_council(
                 f"contained `/agent` command(s). Blocked for safety."
             )
         else:
-            cost_table = _build_cost_table(
-                input_tokens=cr.get("input_tokens", 0),
-                output_tokens=cr.get("output_tokens", 0),
-                cost=cr.get("cost", 0.0),
-                elapsed=cr.get("elapsed", 0.0),
-                output_text=cr.get("review", ""),
-            )
             post(
                 f"🤖 **Council reviewer:** `{cr['model_alias']}` (`{cr['model_id']}`)\n\n"
                 f"{cr['review']}\n\n"
                 f"---\n"
-                f"_Council code review by `/agent-build` Stage 2 (`{cr['model_alias']}`)_\n\n"
-                f"{cost_table}"
+                f"_Council code review by `/agent-build` Stage 2 (`{cr['model_alias']}`)_"
             )
 
     n = len(council_results)
@@ -792,19 +784,11 @@ def run_workshop(
                 f"contained `/agent` command(s). Blocked for safety."
             )
         else:
-            cost_table = _build_cost_table(
-                input_tokens=cr.get("input_tokens", 0),
-                output_tokens=cr.get("output_tokens", 0),
-                cost=cr.get("cost", 0.0),
-                elapsed=cr.get("elapsed", 0.0),
-                output_text=cr.get("review", ""),
-            )
             post(
                 f"🤖 **Council reviewer:** `{cr['model_alias']}` (`{cr['model_id']}`)\n\n"
                 f"{cr['review']}\n\n"
                 f"---\n"
-                f"_Council review by `/agent-workshop` Stage 2 (`{cr['model_alias']}`)_\n\n"
-                f"{cost_table}"
+                f"_Council review by `/agent-workshop` Stage 2 (`{cr['model_alias']}`)_"
             )
 
     # Post summary comment
@@ -1242,19 +1226,11 @@ def run_delegate(
                     f"contained `/agent` command(s). Blocked for safety."
                 )
             else:
-                cost_table = _build_cost_table(
-                    input_tokens=cr.get("input_tokens", 0),
-                    output_tokens=cr.get("output_tokens", 0),
-                    cost=cr.get("cost", 0.0),
-                    elapsed=cr.get("elapsed", 0.0),
-                    output_text=cr.get("review", ""),
-                )
                 post(
                     f"🤖 **Council reviewer:** `{cr['model_alias']}` (`{cr['model_id']}`)\n\n"
                     f"{cr['review']}\n\n"
                     f"---\n"
-                    f"_Council review by `/agent-delegate` Stage 2 (`{cr['model_alias']}`)_\n\n"
-                    f"{cost_table}"
+                    f"_Council review by `/agent-delegate` Stage 2 (`{cr['model_alias']}`)_"
                 )
 
             all_input_tokens += cr.get("input_tokens", 0)
@@ -1510,19 +1486,11 @@ def run_delegate(
                         f"Blocked for safety."
                     )
                 else:
-                    cost_table = _build_cost_table(
-                        input_tokens=cr.get("input_tokens", 0),
-                        output_tokens=cr.get("output_tokens", 0),
-                        cost=cr.get("cost", 0.0),
-                        elapsed=cr.get("elapsed", 0.0),
-                        output_text=cr.get("review", ""),
-                    )
                     post(
                         f"🤖 **Council spec reviewer:** `{cr['model_alias']}` (`{cr['model_id']}`)\n\n"
                         f"{cr['review']}\n\n"
                         f"---\n"
-                        f"_Council spec review by `/agent-delegate` Stage 3b (`{cr['model_alias']}`)_\n\n"
-                        f"{cost_table}"
+                        f"_Council spec review by `/agent-delegate` Stage 3b (`{cr['model_alias']}`)_"
                     )
 
                 all_input_tokens += cr.get("input_tokens", 0)
