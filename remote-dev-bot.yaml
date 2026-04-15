@@ -133,12 +133,12 @@ models:
     description: "Most capable — for complex multi-file features"
 
   gpt-small:
-    id: openai/gpt-5.3-codex-spark
-    description: "OpenAI GPT-5.3 Codex Spark — fast, >1000 tok/s"
+    id: openai/gpt-5.4-mini
+    description: "OpenAI GPT-5.4 Mini — fast, cost-effective coding"
 
   gpt-large:
-    id: openai/gpt-5.3-codex
-    description: "OpenAI GPT-5.3 Codex — best coding model"
+    id: openai/gpt-5.4
+    description: "OpenAI GPT-5.4 — frontier coding + reasoning"
 
   gemini-small:
     id: gemini/gemini-2.5-flash
