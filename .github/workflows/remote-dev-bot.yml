@@ -628,6 +628,7 @@ jobs:
               ('Output', _fmt_tok(output_tokens) + ' tokens'),
               ('Diff', shortstat if shortstat else 'N/A'),
               ('LOC/$', f'{_fmt_loc(int(loc_changed / cost))} loc/$' if cost > 0 and loc_changed > 0 else 'N/A'),
+              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Info/$', _fmt_bpd(bits_text, cost)),
               ('**Cost**', f'**${rounded:.2f}**'),
           ]
@@ -670,7 +671,16 @@ jobs:
                   if sfx == 'K': v *= 1000
                   elif sfx == 'M': v *= 1_000_000
                   total_out_tok += int(v)
-              return total_cost, total_ins, total_del, total_in_tok, total_out_tok
+              # Find Info bits from per-step | Info | X.X Kbit | rows
+              # IMPORTANT: Only matches "| Info |" (not "| Cumulative info |") to avoid
+              # double-counting the cumulative section.
+              total_info_bits = 0.0
+              for m in _re2.finditer(r'\| Info \| ([0-9.]+) (Kbit|Mbit) \|', text):
+                  v = float(m.group(1))
+                  if m.group(2) == 'Mbit': v *= 1_000_000
+                  else: v *= 1_000
+                  total_info_bits += v
+              return total_cost, total_ins, total_del, total_in_tok, total_out_tok, total_info_bits
 
           # Try to get the linked issue number from the PR body (Fixes/Closes/Resolves #N)
           _repo = _os2.environ.get('GITHUB_REPOSITORY', '')
@@ -703,6 +713,7 @@ jobs:
           _prior_total_cost = 0.0
           _prior_total_ins = 0; _prior_total_del = 0
           _prior_total_in_tok = 0; _prior_total_out_tok = 0
+          _prior_total_info_bits = 0.0
           _all_prior_text = _pr_body  # start with current PR body (prior runs appended there)
 
           if _linked_issue_num and _repo:
@@ -726,12 +737,13 @@ jobs:
           # Count cost tables across all prior text (skip Feature total sections)
           _num_prior = len(_re2.findall(r'### 💰 Cost', _all_prior_text))
           if _num_prior > 0:
-              _pc, _pi, _pd, _pit, _pot = _extract_costs_from_text(_all_prior_text)
+              _pc, _pi, _pd, _pit, _pot, _pib = _extract_costs_from_text(_all_prior_text)
               _prior_total_cost = _pc
               _prior_total_ins = _pi
               _prior_total_del = _pd
               _prior_total_in_tok = _pit
               _prior_total_out_tok = _pot
+              _prior_total_info_bits = _pib
               _prior_costs = list(range(_num_prior))  # just count
 
           # Compute cumulative totals (prior + current step)
@@ -740,6 +752,8 @@ jobs:
           _cum_ins = _prior_total_ins + loc_changed  # loc_changed is insertions+deletions this step
           _cum_in_tok = _prior_total_in_tok + input_tokens
           _cum_out_tok = _prior_total_out_tok + output_tokens
+          _cur_info_bits = len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8 if bits_text else 0
+          _cum_info_bits = _prior_total_info_bits + _cur_info_bits
 
           # Only append cumulative section if there are prior steps
           if len(_prior_costs) > 0 and _cum_cost > 0:
@@ -766,8 +780,10 @@ jobs:
                   _ctbl.append(f'| LOC | ~{_fmt_loc_c(_cum_ins)} (estimate) |')
               if _cum_loc_per_dollar > 0:
                   _ctbl.append(f'| LOC/$ | ~{_fmt_loc_c(_cum_loc_per_dollar)} loc/$ |')
-              if _cum_cost > 0 and diff_text:
-                  _ctbl.append(f'| Info/$ | {_fmt_bpd(diff_text, _cum_cost)} |')
+              if _cum_info_bits > 0:
+                  _ctbl.append(f'| Cumulative info | {f"{_cum_info_bits/1_000_000:.1f} Mbit" if _cum_info_bits >= 1_000_000 else f"{_cum_info_bits/1_000:.1f} Kbit"} |')
+              if _cum_cost > 0 and _cum_info_bits > 0:
+                  _ctbl.append(f'| Cumulative info/$ | {f"{_cum_info_bits/1_000_000:.1f} Mbit/$" if _cum_info_bits/_cum_cost >= 1_000_000 else f"{_cum_info_bits/_cum_cost/1_000:.1f} Kbit/$"} |')
               if _cum_in_tok > 0:
                   _ctbl.append(f'| Input | {_fmt_tok(_cum_in_tok)} tokens |')
               if _cum_out_tok > 0:
@@ -1461,6 +1477,7 @@ jobs:
               ('Output', _fmt_tok(output_tokens) + ' tokens'),
               ('Diff', shortstat if shortstat else 'N/A'),
               ('LOC/$', f'{_fmt_loc(int(loc_changed / cost))} loc/$' if cost > 0 and loc_changed > 0 else 'N/A'),
+              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Info/$', _fmt_bpd(bits_text, cost)),
               ('**Cost**', f'**${rounded:.2f}**'),
           ]
@@ -1503,7 +1520,16 @@ jobs:
                   if sfx == 'K': v *= 1000
                   elif sfx == 'M': v *= 1_000_000
                   total_out_tok += int(v)
-              return total_cost, total_ins, total_del, total_in_tok, total_out_tok
+              # Find Info bits from per-step | Info | X.X Kbit | rows
+              # IMPORTANT: Only matches "| Info |" (not "| Cumulative info |") to avoid
+              # double-counting the cumulative section.
+              total_info_bits = 0.0
+              for m in _re2.finditer(r'\| Info \| ([0-9.]+) (Kbit|Mbit) \|', text):
+                  v = float(m.group(1))
+                  if m.group(2) == 'Mbit': v *= 1_000_000
+                  else: v *= 1_000
+                  total_info_bits += v
+              return total_cost, total_ins, total_del, total_in_tok, total_out_tok, total_info_bits
 
           # Try to get the linked issue number from the PR body (Fixes/Closes/Resolves #N)
           _repo = _os2.environ.get('GITHUB_REPOSITORY', '')
@@ -1536,6 +1562,7 @@ jobs:
           _prior_total_cost = 0.0
           _prior_total_ins = 0; _prior_total_del = 0
           _prior_total_in_tok = 0; _prior_total_out_tok = 0
+          _prior_total_info_bits = 0.0
           _all_prior_text = _pr_body  # start with current PR body (prior runs appended there)
 
           if _linked_issue_num and _repo:
@@ -1559,12 +1586,13 @@ jobs:
           # Count cost tables across all prior text (skip Feature total sections)
           _num_prior = len(_re2.findall(r'### 💰 Cost', _all_prior_text))
           if _num_prior > 0:
-              _pc, _pi, _pd, _pit, _pot = _extract_costs_from_text(_all_prior_text)
+              _pc, _pi, _pd, _pit, _pot, _pib = _extract_costs_from_text(_all_prior_text)
               _prior_total_cost = _pc
               _prior_total_ins = _pi
               _prior_total_del = _pd
               _prior_total_in_tok = _pit
               _prior_total_out_tok = _pot
+              _prior_total_info_bits = _pib
               _prior_costs = list(range(_num_prior))  # just count
 
           # Compute cumulative totals (prior + current step)
@@ -1573,6 +1601,8 @@ jobs:
           _cum_ins = _prior_total_ins + loc_changed  # loc_changed is insertions+deletions this step
           _cum_in_tok = _prior_total_in_tok + input_tokens
           _cum_out_tok = _prior_total_out_tok + output_tokens
+          _cur_info_bits = len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8 if bits_text else 0
+          _cum_info_bits = _prior_total_info_bits + _cur_info_bits
 
           # Only append cumulative section if there are prior steps
           if len(_prior_costs) > 0 and _cum_cost > 0:
@@ -1599,8 +1629,10 @@ jobs:
                   _ctbl.append(f'| LOC | ~{_fmt_loc_c(_cum_ins)} (estimate) |')
               if _cum_loc_per_dollar > 0:
                   _ctbl.append(f'| LOC/$ | ~{_fmt_loc_c(_cum_loc_per_dollar)} loc/$ |')
-              if _cum_cost > 0 and diff_text:
-                  _ctbl.append(f'| Info/$ | {_fmt_bpd(diff_text, _cum_cost)} |')
+              if _cum_info_bits > 0:
+                  _ctbl.append(f'| Cumulative info | {f"{_cum_info_bits/1_000_000:.1f} Mbit" if _cum_info_bits >= 1_000_000 else f"{_cum_info_bits/1_000:.1f} Kbit"} |')
+              if _cum_cost > 0 and _cum_info_bits > 0:
+                  _ctbl.append(f'| Cumulative info/$ | {f"{_cum_info_bits/1_000_000:.1f} Mbit/$" if _cum_info_bits/_cum_cost >= 1_000_000 else f"{_cum_info_bits/_cum_cost/1_000:.1f} Kbit/$"} |')
               if _cum_in_tok > 0:
                   _ctbl.append(f'| Input | {_fmt_tok(_cum_in_tok)} tokens |')
               if _cum_out_tok > 0:
@@ -2310,6 +2342,7 @@ jobs:
               ('Iterations', iterations_fmt),
               ('Input', _fmt_tok(input_tokens) + ' tokens'),
               ('Output', _fmt_tok(output_tokens) + ' tokens'),
+              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Info/$', _fmt_bpd(bits_text, cost)),
               ('**Cost**', f'**${rounded:.2f}**'),
           ]
@@ -2719,6 +2752,7 @@ jobs:
               ('Output', _fmt_tok(output_tokens) + ' tokens'),
               ('Diff', shortstat if shortstat else 'N/A'),
               ('LOC/$', f'{_fmt_loc(int(loc_changed / cost))} loc/$' if cost > 0 and loc_changed > 0 else 'N/A'),
+              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Info/$', _fmt_bpd(bits_text, cost)),
               ('**Cost**', f'**${rounded:.2f}**'),
           ]
@@ -3319,6 +3353,7 @@ jobs:
               ('Iterations', iterations_fmt),
               ('Input', _fmt_tok(input_tokens) + ' tokens'),
               ('Output', _fmt_tok(output_tokens) + ' tokens'),
+              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Info/$', _fmt_bpd(bits_text, cost)),
               ('**Cost**', f'**${rounded:.2f}**'),
           ]
