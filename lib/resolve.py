@@ -1418,6 +1418,17 @@ def main():
             # near-perfect cache hit rates — only the newest turn is uncached.
             # Uses 2 of 4 Anthropic markers (one on initial user msg, one here).
             if _should_cache(LLM_MODEL) and len(messages) > 2:
+                # Strip cache_control from all messages except the initial
+                # user message (index 1).  Previous iterations leave stale
+                # tail markers that accumulate and exceed Anthropic's 4-marker
+                # limit.
+                for _msg in messages[2:]:
+                    _mc = _msg.get("content")
+                    if isinstance(_mc, list):
+                        for _blk in _mc:
+                            if isinstance(_blk, dict):
+                                _blk.pop("cache_control", None)
+
                 _tail_msg = messages[-1]
                 _tail_content = _tail_msg.get("content")
                 _cc: dict = {"type": "ephemeral"}
@@ -1428,10 +1439,6 @@ def main():
                         {"type": "text", "text": _tail_content, "cache_control": _cc}
                     ]
                 elif isinstance(_tail_content, list) and _tail_content:
-                    # Remove any prior cache_control markers in this message
-                    for block in _tail_content:
-                        if isinstance(block, dict):
-                            block.pop("cache_control", None)
                     if isinstance(_tail_content[-1], dict):
                         _tail_content[-1]["cache_control"] = _cc
 
