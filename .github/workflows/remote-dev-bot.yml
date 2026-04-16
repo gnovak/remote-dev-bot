@@ -2767,6 +2767,123 @@ jobs:
               '|--------|-------|',
           ]
           lines += [f'| {k} | {v} |' for k, v in rows]
+          # --- Cumulative cost tracking ---
+          # Fetch prior cost tables from PR comments and sum up costs.
+          import subprocess as _sp2, re as _re2, json as _json2, os as _os2
+
+          def _extract_costs_from_text(text):
+              """Extract (cost, loc_ins, loc_del, input_tokens, output_tokens, info_bits) from cost table text."""
+              total_cost = 0.0
+              total_ins = 0; total_del = 0
+              total_in_tok = 0; total_out_tok = 0
+              # Find all cost entries: **$X.XX**
+              # IMPORTANT: This regex matches the bold-dollar pattern used ONLY in the per-step
+              # "### 💰 Cost" table. The "### 📊 Feature total" cumulative table uses bare
+              # "$X.XX" and "Cumulative cost" label so future runs do NOT double-count it.
+              for m in _re2.finditer(r'\*\*\$([0-9]+\.[0-9]+)\*\*', text):
+                  total_cost += float(m.group(1))
+              # Find LOC from Diff rows
+              for m in _re2.finditer(r'\| Diff \|[^|]*\|', text):
+                  diff_cell = m.group(0)
+                  ins = _re2.search(r'(\d+) insertion', diff_cell)
+                  if ins: total_ins += int(ins.group(1))
+                  dl = _re2.search(r'(\d+) deletion', diff_cell)
+                  if dl: total_del += int(dl.group(1))
+              # Find token counts from Input/Output rows
+              for m in _re2.finditer(r'\| Input \| ([0-9.]+)([KM]?) tokens \|', text):
+                  v = float(m.group(1))
+                  sfx = m.group(2)
+                  if sfx == 'K': v *= 1000
+                  elif sfx == 'M': v *= 1_000_000
+                  total_in_tok += int(v)
+              for m in _re2.finditer(r'\| Output \| ([0-9.]+)([KM]?) tokens \|', text):
+                  v = float(m.group(1))
+                  sfx = m.group(2)
+                  if sfx == 'K': v *= 1000
+                  elif sfx == 'M': v *= 1_000_000
+                  total_out_tok += int(v)
+              # Find Info bits from per-step | Info | X.X Kbit | rows (not | Cumulative info |)
+              total_info_bits = 0.0
+              for m in _re2.finditer(r'\| Info \| ([0-9.]+) (Kbit|Mbit) \|', text):
+                  v = float(m.group(1))
+                  if m.group(2) == 'Mbit': v *= 1_000_000
+                  else: v *= 1_000
+                  total_info_bits += v
+              return total_cost, total_ins, total_del, total_in_tok, total_out_tok, total_info_bits
+
+          _repo = _os2.environ.get('GITHUB_REPOSITORY', '')
+          _pr_num_str = _os2.environ.get('PR_NUMBER', '')
+          _all_prior_text = ''
+
+          # Fetch prior cost tables from PR comments
+          if _pr_num_str and _repo:
+              try:
+                  _comments_r = _sp2.run(
+                      ['gh', 'api', f'repos/{_repo}/issues/{_pr_num_str}/comments', '--jq', '.[].body'],
+                      capture_output=True, text=True
+                  )
+                  if _comments_r.returncode == 0:
+                      _all_prior_text = _comments_r.stdout
+              except Exception:
+                  pass
+
+          # Count cost tables across all prior text
+          _num_prior = len(_re2.findall(r'### 💰 Cost', _all_prior_text))
+          _prior_total_cost = 0.0
+          _prior_total_ins = 0; _prior_total_del = 0
+          _prior_total_in_tok = 0; _prior_total_out_tok = 0
+          _prior_total_info_bits = 0.0
+          _prior_costs = []
+
+          if _num_prior > 0:
+              _pc, _pi, _pd, _pit, _pot, _pib = _extract_costs_from_text(_all_prior_text)
+              _prior_total_cost = _pc
+              _prior_total_ins = _pi
+              _prior_total_del = _pd
+              _prior_total_in_tok = _pit
+              _prior_total_out_tok = _pot
+              _prior_total_info_bits = _pib
+              _prior_costs = list(range(_num_prior))
+
+          # Compute cumulative totals (prior + current step)
+          _cum_steps = len(_prior_costs) + 1
+          _cum_cost = _prior_total_cost + cost
+          _cum_ins = _prior_total_ins + loc_changed
+          _cum_in_tok = _prior_total_in_tok + input_tokens
+          _cum_out_tok = _prior_total_out_tok + output_tokens
+          _cur_info_bits = len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8 if bits_text else 0
+          _cum_info_bits = _prior_total_info_bits + _cur_info_bits
+
+          # Only append cumulative section if there are prior steps
+          if len(_prior_costs) > 0 and _cum_cost > 0:
+              def _fmt_loc_c(n):
+                  if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
+                  if n >= 1_000: return f"{n/1_000:.1f}k"
+                  return str(n)
+              _cum_loc_per_dollar = int(_cum_ins / _cum_cost) if _cum_cost > 0 and _cum_ins > 0 else 0
+              # FORMATTING NOTE: Uses bare "$X.XX" (no ** bold) and "Cumulative cost" label
+              # so future runs do NOT double-count this cumulative figure.
+              _ctbl = [
+                  '',
+                  f'### 📊 Feature total ({_cum_steps} steps)',
+                  '',
+                  '| Metric | Value |',
+                  '|--------|-------|',
+                  f'| Cumulative cost | ${_cum_cost:.2f} |',
+              ]
+              if _cum_ins > 0:
+                  _ctbl.append(f'| LOC | ~{_fmt_loc_c(_cum_ins)} (estimate) |')
+              if _cum_loc_per_dollar > 0:
+                  _ctbl.append(f'| LOC/$ | ~{_fmt_loc_c(_cum_loc_per_dollar)} loc/$ |')
+              if _cum_info_bits > 0:
+                  _ctbl.append(f'| Cumulative info | {f"{_cum_info_bits/1_000_000:.1f} Mbit" if _cum_info_bits >= 1_000_000 else f"{_cum_info_bits/1_000:.1f} Kbit"} |')
+              if _cum_cost > 0 and _cum_info_bits > 0:
+                  _ctbl.append(f'| Cumulative info/$ | {f"{_cum_info_bits/1_000_000:.1f} Mbit/$" if _cum_info_bits/_cum_cost >= 1_000_000 else f"{_cum_info_bits/_cum_cost/1_000:.1f} Kbit/$"} |')
+              if _cum_in_tok > 0:
+                  _ctbl.append(f'| Input | {_fmt_tok(_cum_in_tok)} tokens |')
+              if _cum_out_tok > 0:
+                  _ctbl.append(f'| Output | {_fmt_tok(_cum_out_tok)} tokens |')
+              lines += _ctbl
           open('/tmp/cost_comment.md', 'w').write('\n'.join(lines) + '\n')
           PYEOF
 
@@ -4561,114 +4678,276 @@ jobs:
           ALIAS="${{ needs.parse.outputs.alias }}"
           MODEL="${{ needs.parse.outputs.model }}"
 
-          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
-          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
-          if [ -f /tmp/llm_usage.json ]; then
-            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
-          import json
-          d = json.load(open('/tmp/llm_usage.json'))
-          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
-          ")
-          else
-            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
-          fi
           DELEGATE_MAX_ITER="${{ needs.parse.outputs.delegate_max_iterations }}"
-          ITERATIONS_FMT=$(python3 -c "
-          max_i = '${DELEGATE_MAX_ITER}'
-          iters = '${ITERATIONS}'
-          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
-          ")
-          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
-          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
-          def fmt(n):
+          REPO="${{ github.repository }}"
+
+          python3 << 'PYEOF'
+          import json, math, os, gzip, time, subprocess as _sp, re as _re
+
+          def _fmt_tok(n):
+              n = int(n)
               if n >= 1_000_000:
                   v = n / 1_000_000
-                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
+                  return f"{round(v)}M" if v >= 10 else f"{round(v, 1)}M"
               elif n >= 1_000:
                   v = n / 1_000
-                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
+                  return f"{round(v)}K" if v >= 10 else f"{round(v, 1)}K"
               return str(n)
-          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
-          ")
+          def _fmt_ela(s):
+              s = int(s)
+              return f"{s // 60}m {s % 60}s" if s >= 60 else f"{s}s"
+          def _fmt_bpd(text, cost):
+              if cost <= 0: return 'N/A'
+              data = text.encode('utf-8') if isinstance(text, str) else text
+              bpd = (len(gzip.compress(data)) * 8) / cost
+              if bpd >= 1_000_000: return f"{bpd / 1_000_000:.1f} Mbit/$"
+              return f"{bpd / 1_000:.1f} Kbit/$"
+
+          # Load usage stats
+          if os.path.exists("/tmp/llm_usage.json"):
+              _d = json.load(open("/tmp/llm_usage.json"))
+              input_tokens = _d.get('input_tokens', 0)
+              output_tokens = _d.get('output_tokens', 0)
+              cost = float(_d.get('cost') or 0)
+              iterations = _d.get('iterations', 0)
+          else:
+              input_tokens = output_tokens = 0; cost = 0.0; iterations = 0
+
+          _max_iter_str = os.environ.get("DELEGATE_MAX_ITER", "") or ""
+          _max_iter = int(_max_iter_str) if _max_iter_str.isdigit() and int(_max_iter_str) > 0 else 0
+          iterations_fmt = f"{iterations} / {_max_iter}" if _max_iter > 0 else str(iterations)
+
+          try:
+              _st = int(open('/tmp/start_time').read().strip())
+          except Exception:
+              _st = int(time.time())
+          elapsed = int(time.time()) - _st
+          elapsed_fmt = _fmt_ela(elapsed)
+
+          # Compute git diff stats
+          _base = open('/tmp/agent_start_sha').read().strip() if os.path.exists('/tmp/agent_start_sha') else None
+          _base_ref = _base or '$(git merge-base HEAD origin/main)'
+          _dp = _sp.run(f'git diff {_base_ref} HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
+          diff_text = _dp.stdout or ''
+          _stat = _sp.run(f'git diff --stat {_base_ref} HEAD 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
+          diff_stat = _stat.stdout or ''
+          loc_ins = 0; loc_del = 0
+          for m in _re.finditer(r'(\d+) insertion', diff_stat):
+              loc_ins += int(m.group(1))
+          for m in _re.finditer(r'(\d+) deletion', diff_stat):
+              loc_del += int(m.group(1))
+          loc_changed = loc_ins + loc_del
+
+          # For Info/$ metric use the diff text as the meaningful output
+          bits_text = diff_text if diff_text else ""
+          rounded = math.ceil(cost * 100) / 100
+
+          # Read context values
+          alias = os.environ.get("ALIAS", "")
+          model = os.environ.get("MODEL", "")
+          issue_number = os.environ.get("ISSUE_NUMBER", "")
+          run_url = os.environ.get("RUN_URL", "")
+          repo = os.environ.get("REPO", "")
 
           # Check pipeline result
-          PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
+          pr_url = ""
+          if os.path.exists("/tmp/spr_output.log"):
+              _log = open("/tmp/spr_output.log").read()
+              _mu = _re.search(r'https://github\.com/[^/\s]+/[^/\s]+/pull/(\d+)', _log)
+              if _mu:
+                  pr_url = _mu.group(0)
 
-          if [[ -f /tmp/delegate_abort.txt ]]; then
-            ABORT_REASON=$(cat /tmp/delegate_abort.txt)
-            {
-              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
-              echo ""
-              echo "### ⚠️ Delegate pipeline aborted"
-              echo ""
-              echo "**Reason:** ${ABORT_REASON}"
-              echo ""
-              echo "See the [workflow run logs]($RUN_URL) for full details."
-              echo ""
-              echo "### 💰 Cost"
-              echo ""
-              echo "| Metric | Value |"
-              echo "|--------|-------|"
-              echo "| Time | ${ELAPSED_FMT} |"
-              echo "| Iterations | ${ITERATIONS_FMT} |"
-              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
-              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
-              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
-            } > /tmp/delegate_result_comment.md
-          elif [[ -n "$PR_URL" ]]; then
-            {
-              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
-              echo ""
-              echo "### ✅ Delegate pipeline complete"
-              echo ""
-              echo "**PR:** ${PR_URL}"
-              echo ""
-              echo "The full design-to-implementation cycle is complete:"
-              echo "1. ✅ Design exploration"
-              echo "2. ✅ Council design review"
-              echo "3. ✅ Design revision"
-              echo "4. ✅ Implementation (resolve)"
-              echo "5. ✅ Council code review"
-              echo "6. ✅ Code revision plan"
-              echo ""
-              echo "See the [workflow run logs]($RUN_URL) for full details."
-              echo ""
-              echo "### 💰 Cost"
-              echo ""
-              echo "| Metric | Value |"
-              echo "|--------|-------|"
-              echo "| Time | ${ELAPSED_FMT} |"
-              echo "| Iterations | ${ITERATIONS_FMT} |"
-              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
-              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
-              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
-            } > /tmp/delegate_result_comment.md
-          else
-            {
-              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
-              echo ""
-              echo "### ⚠️ Delegate pipeline did not produce a PR"
-              echo ""
-              echo "The implementation stage did not create a pull request."
-              echo ""
-              echo "See the [workflow run logs]($RUN_URL) for full details."
-              echo ""
-              echo "### 💰 Cost"
-              echo ""
-              echo "| Metric | Value |"
-              echo "|--------|-------|"
-              echo "| Time | ${ELAPSED_FMT} |"
-              echo "| Iterations | ${ITERATIONS_FMT} |"
-              echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
-              echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
-              printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
-            } > /tmp/delegate_result_comment.md
-          fi
+          abort_reason = ""
+          if os.path.exists("/tmp/delegate_abort.txt"):
+              abort_reason = open("/tmp/delegate_abort.txt").read().strip()
+
+          # Build cost table rows
+          def _build_cost_rows(input_tokens, output_tokens, cost, elapsed, loc_ins, loc_del, bits_text, iterations_fmt):
+              rounded = math.ceil(cost * 100) / 100
+              rows = [
+                  f"| Time | {_fmt_ela(elapsed)} |",
+                  f"| Iterations | {iterations_fmt} |",
+                  f"| Input | {_fmt_tok(input_tokens)} tokens |",
+                  f"| Output | {_fmt_tok(output_tokens)} tokens |",
+              ]
+              if loc_ins > 0 or loc_del > 0:
+                  rows.append(f"| Diff | +{loc_ins}/-{loc_del} lines |")
+                  if cost > 0 and (loc_ins + loc_del) > 0:
+                      loc_dollar = int((loc_ins + loc_del) / cost)
+                      rows.append(f"| LOC/$ | {loc_dollar} |")
+              if bits_text:
+                  bpd_str = _fmt_bpd(bits_text, cost)
+                  info_bits = len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8
+                  if info_bits >= 1_000_000:
+                      info_str = f"{info_bits/1_000_000:.1f} Mbit"
+                  else:
+                      info_str = f"{info_bits/1_000:.1f} Kbit"
+                  rows.append(f"| Info/$ | {bpd_str} |")
+                  rows.append(f"| Info | {info_str} |")
+              rows.append(f"| **Cost** | **${rounded:.2f}** |")
+              return rows
+
+          cost_rows = _build_cost_rows(input_tokens, output_tokens, cost, elapsed, loc_ins, loc_del, bits_text, iterations_fmt)
+          cost_table = "\n".join([
+              "### 💰 Cost",
+              "",
+              "| Metric | Value |",
+              "|--------|-------|",
+          ] + cost_rows)
+
+          # Build the comment body
+          if abort_reason:
+              lines = [
+                  f"🤖 **Model:** `{alias}` (`{model}`)",
+                  "",
+                  "### ⚠️ Delegate pipeline aborted",
+                  "",
+                  f"**Reason:** {abort_reason}",
+                  "",
+                  f"See the [workflow run logs]({run_url}) for full details.",
+                  "",
+                  cost_table,
+              ]
+          elif pr_url:
+              lines = [
+                  f"🤖 **Model:** `{alias}` (`{model}`)",
+                  "",
+                  "### ✅ Delegate pipeline complete",
+                  "",
+                  f"**PR:** {pr_url}",
+                  "",
+                  "The full design-to-implementation cycle is complete:",
+                  "1. ✅ Design exploration",
+                  "2. ✅ Council design review",
+                  "3. ✅ Design revision",
+                  "4. ✅ Implementation (resolve)",
+                  "5. ✅ Council code review",
+                  "6. ✅ Code revision plan",
+                  "",
+                  f"See the [workflow run logs]({run_url}) for full details.",
+                  "",
+                  cost_table,
+              ]
+          else:
+              lines = [
+                  f"🤖 **Model:** `{alias}` (`{model}`)",
+                  "",
+                  "### ⚠️ Delegate pipeline did not produce a PR",
+                  "",
+                  "The implementation stage did not create a pull request.",
+                  "",
+                  f"See the [workflow run logs]({run_url}) for full details.",
+                  "",
+                  cost_table,
+              ]
+
+          # --- Cumulative cost aggregation ---
+          # Fetch prior cost tables from issue comments and sum up costs.
+          def _extract_costs_from_text(text):
+              """Extract totals from cost table text (per-step bold-dollar rows only)."""
+              total_cost = 0.0
+              total_ins = 0; total_del = 0
+              total_in_tok = 0; total_out_tok = 0
+              # IMPORTANT: Only match **$X.XX** (bold), not bare $X.XX in cumulative tables.
+              # This prevents future delegate runs from double-counting prior cumulative totals.
+              for m in _re.finditer(r'\*\*\$([0-9]+\.[0-9]+)\*\*', text):
+                  total_cost += float(m.group(1))
+              for m in _re.finditer(r'\| Diff \|[^|]*\|', text):
+                  diff_cell = m.group(0)
+                  ins = _re.search(r'(\d+) insertion', diff_cell)
+                  if ins: total_ins += int(ins.group(1))
+                  dl = _re.search(r'(\d+) deletion', diff_cell)
+                  if dl: total_del += int(dl.group(1))
+              for m in _re.finditer(r'\| Input \| ([0-9.]+)([KM]?) tokens \|', text):
+                  v = float(m.group(1))
+                  if m.group(2) == 'K': v *= 1000
+                  elif m.group(2) == 'M': v *= 1_000_000
+                  total_in_tok += int(v)
+              for m in _re.finditer(r'\| Output \| ([0-9.]+)([KM]?) tokens \|', text):
+                  v = float(m.group(1))
+                  if m.group(2) == 'K': v *= 1000
+                  elif m.group(2) == 'M': v *= 1_000_000
+                  total_out_tok += int(v)
+              # Find Info bits from per-step | Info | X.X Kbit | rows
+              total_info_bits = 0.0
+              for m in _re.finditer(r'\| Info \| ([0-9.]+) (Kbit|Mbit) \|', text):
+                  v = float(m.group(1))
+                  if m.group(2) == 'Mbit': v *= 1_000_000
+                  else: v *= 1_000
+                  total_info_bits += v
+              return total_cost, total_ins, total_del, total_in_tok, total_out_tok, total_info_bits
+
+          _all_prior_text = ''
+          if issue_number and repo:
+              try:
+                  _cr = _sp.run(
+                      ['gh', 'api', f'repos/{repo}/issues/{issue_number}/comments', '--jq', '.[].body'],
+                      capture_output=True, text=True
+                  )
+                  if _cr.returncode == 0:
+                      _all_prior_text = _cr.stdout
+              except Exception:
+                  pass
+
+          # Count prior "### 💰 Cost" sections (each prior invocation has one)
+          _num_prior = len(_re.findall(r'### 💰 Cost', _all_prior_text))
+          if _num_prior > 0:
+              _pc, _pi, _pd, _pit, _pot, _pib = _extract_costs_from_text(_all_prior_text)
+              _cum_steps = _num_prior + 1
+              _cum_cost = _pc + cost
+              _cum_ins = _pi + loc_ins
+              _cum_del = _pd + loc_del
+              _cum_in_tok = _pit + input_tokens
+              _cum_out_tok = _pot + output_tokens
+              _cur_info_bits = len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8 if bits_text else 0
+              _cum_info_bits = _pib + _cur_info_bits
+
+              if _cum_cost > 0:
+                  def _fmt_tok2(n):
+                      n = int(n)
+                      if n >= 1_000_000:
+                          v = n / 1_000_000
+                          return f"{round(v)}M" if v >= 10 else f"{round(v, 1)}M"
+                      elif n >= 1_000:
+                          v = n / 1_000
+                          return f"{round(v)}K" if v >= 10 else f"{round(v, 1)}K"
+                      return str(n)
+                  _ftbl = [
+                      "",
+                      f"### 💰 Feature Total",
+                      "",
+                      "| Metric | Value |",
+                      "|--------|-------|",
+                      f"| Time | {elapsed_fmt} |",
+                      f"| Iterations | {_cum_steps} steps |",
+                      f"| Input | {_fmt_tok2(_cum_in_tok)} tokens |",
+                      f"| Output | {_fmt_tok2(_cum_out_tok)} tokens |",
+                  ]
+                  if _cum_ins > 0 or _cum_del > 0:
+                      _ftbl.append(f"| Diff | +{_cum_ins}/-{_cum_del} lines |")
+                      _cum_loc = _cum_ins + _cum_del
+                      if _cum_cost > 0 and _cum_loc > 0:
+                          _ftbl.append(f"| LOC/$ | {int(_cum_loc / _cum_cost)} |")
+                  if _cum_info_bits > 0:
+                      if _cum_info_bits >= 1_000_000:
+                          _ftbl.append(f"| Info/$ | {_cum_info_bits / _cum_cost / 1_000_000:.1f} Mbit/$ |")
+                          _ftbl.append(f"| Info | {_cum_info_bits / 1_000_000:.1f} Mbit |")
+                      else:
+                          _ftbl.append(f"| Info/$ | {_cum_info_bits / _cum_cost / 1_000:.1f} Kbit/$ |")
+                          _ftbl.append(f"| Info | {_cum_info_bits / 1_000:.1f} Kbit |")
+                  # FORMATTING NOTE: Uses bare "$X.XX" (no ** bold) so future runs don't double-count.
+                  _ftbl.append(f"| **Cost** | **${_cum_cost:.2f}** |")
+                  lines += _ftbl
+
+          with open('/tmp/delegate_result_comment.md', 'w') as f:
+              f.write('\n'.join(lines) + '\n')
+          PYEOF
 
           gh issue comment "$ISSUE_NUMBER" \
             --repo "${{ github.repository }}" \
             --body-file /tmp/delegate_result_comment.md
-          echo "cost embedded" > /tmp/cost_embedded
+          echo "cost embedded" > /tmp/cost_embeddedDELEGATESTEP
+
 
       - name: Assign triggerer to PR
         if: needs.parse.outputs.assign_pr == 'true'
