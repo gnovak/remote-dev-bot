@@ -4672,14 +4672,14 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-          ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          ALIAS="${{ needs.parse.outputs.alias }}"
-          MODEL="${{ needs.parse.outputs.model }}"
+          export ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          export ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
+          export RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          export ALIAS="${{ needs.parse.outputs.alias }}"
+          export MODEL="${{ needs.parse.outputs.model }}"
 
-          DELEGATE_MAX_ITER="${{ needs.parse.outputs.delegate_max_iterations }}"
-          REPO="${{ github.repository }}"
+          export DELEGATE_MAX_ITER="${{ needs.parse.outputs.delegate_max_iterations }}"
+          export REPO="${{ github.repository }}"
 
           python3 << 'PYEOF'
           import json, math, os, gzip, time, subprocess as _sp, re as _re
@@ -4936,7 +4936,7 @@ jobs:
                           _ftbl.append(f"| Info/$ | {_cum_info_bits / _cum_cost / 1_000:.1f} Kbit/$ |")
                           _ftbl.append(f"| Info | {_cum_info_bits / 1_000:.1f} Kbit |")
                   # FORMATTING NOTE: Uses bare "$X.XX" (no ** bold) so future runs don't double-count.
-                  _ftbl.append(f"| **Cost** | **${_cum_cost:.2f}** |")
+                  _ftbl.append(f"| Cost | ${_cum_cost:.2f} |")
                   lines += _ftbl
 
           with open('/tmp/delegate_result_comment.md', 'w') as f:
@@ -4946,7 +4946,7 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" \
             --repo "${{ github.repository }}" \
             --body-file /tmp/delegate_result_comment.md
-          echo "cost embedded" > /tmp/cost_embeddedDELEGATESTEP
+          echo "cost embedded" > /tmp/cost_embedded
 
 
       - name: Assign triggerer to PR
