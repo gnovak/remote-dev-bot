@@ -567,6 +567,18 @@ def main():
                     ),
                 })
 
+            # Guard: Claude 4.6+ rejects conversations ending with an
+            # assistant message ("does not support assistant message prefill").
+            # Normally messages end with a tool result, but edge cases in
+            # LiteLLM's Anthropic message translation can produce a trailing
+            # assistant turn. Append a nudge-user message to fix the sequence.
+            if messages and messages[-1].get("role") == "assistant":
+                print(f"  [Prefill guard] Messages end with assistant role — injecting user message")
+                messages.append({
+                    "role": "user",
+                    "content": "Continue with the reconcile task. Use the tools available to proceed.",
+                })
+
             try:
                 response = completion(
                     model=LLM_MODEL,
@@ -593,6 +605,17 @@ def main():
                     write_status(False, f"Model hit output token limit at iteration {iteration + 1} — context too large")
                 else:
                     write_status(False, f"API connection error at iteration {iteration + 1}: {exc}")
+                break
+            except litellm.exceptions.BadRequestError as exc:
+                err_msg = str(exc)
+                if "prefill" in err_msg.lower():
+                    # Claude 4.6+ doesn't support assistant prefill. The
+                    # prefill guard above should prevent this, but if it
+                    # slips through, log the message roles for debugging.
+                    roles = [m.get("role") for m in messages[-5:]]
+                    print(f"Prefill error at iteration {iteration + 1}. "
+                          f"Last 5 roles: {roles}. Error: {exc}")
+                write_status(False, f"Bad request at iteration {iteration + 1}: {exc}")
                 break
             except litellm.exceptions.APIError as exc:
                 err_msg = str(exc)
