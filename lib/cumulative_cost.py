@@ -237,30 +237,35 @@ def compute_cumulative_table(
         '',
         '| Metric | Value |',
         '|--------|-------|',
-        f'| Cumulative cost | ${cum_cost:.2f} |',
     ]
 
     if cum_loc > 0:
         lines.append(f'| Cumulative LOC | ~{_fmt_loc(cum_loc)} (estimate) |')
-        cum_loc_per_dollar = int(cum_loc / cum_cost) if cum_cost > 0 else 0
-        if cum_loc_per_dollar > 0:
-            lines.append(f'| Cumulative LOC/$ | ~{_fmt_loc(cum_loc_per_dollar)} loc/$ |')
 
     if cum_info > 0:
         info_str = (f"{cum_info / 1_000_000:.1f} Mbit"
                     if cum_info >= 1_000_000
                     else f"{cum_info / 1_000:.1f} Kbit")
         lines.append(f'| Cumulative info | {info_str} |')
-        if cum_cost > 0:
-            bpd = cum_info / cum_cost
-            bpd_str = (f"{bpd / 1_000_000:.1f} Mbit/$"
-                       if bpd >= 1_000_000
-                       else f"{bpd / 1_000:.1f} Kbit/$")
-            lines.append(f'| Cumulative info/$ | {bpd_str} |')
 
     if cum_in_tok > 0:
         lines.append(f'| Cumulative input | {_fmt_tok(cum_in_tok)} tokens |')
     if cum_out_tok > 0:
         lines.append(f'| Cumulative output | {_fmt_tok(cum_out_tok)} tokens |')
+
+    # Last three rows: LOC/$, info/$, cumulative cost
+    if cum_loc > 0:
+        cum_loc_per_dollar = int(cum_loc / cum_cost) if cum_cost > 0 else 0
+        if cum_loc_per_dollar > 0:
+            lines.append(f'| Cumulative LOC/$ | ~{_fmt_loc(cum_loc_per_dollar)} loc/$ |')
+
+    if cum_info > 0 and cum_cost > 0:
+        bpd = cum_info / cum_cost
+        bpd_str = (f"{bpd / 1_000_000:.1f} Mbit/$"
+                   if bpd >= 1_000_000
+                   else f"{bpd / 1_000:.1f} Kbit/$")
+        lines.append(f'| Cumulative info/$ | {bpd_str} |')
+
+    lines.append(f'| Cumulative cost | ${cum_cost:.2f} |')
 
     return '\n'.join(lines)
