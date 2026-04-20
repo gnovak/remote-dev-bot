@@ -285,6 +285,11 @@ class TestRunRevisionCall:
 class TestRunDelegate:
     """Tests for the full delegate pipeline (Stages 1-3)."""
 
+    @pytest.fixture(autouse=True)
+    def set_api_key(self, monkeypatch):
+        """Set a fake API key so council review API key checks don't skip mocked calls."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
     def _mock_design_result(self, analysis="## Proposed Design\n\nDo the thing."):
         return {
             "analysis": analysis,
