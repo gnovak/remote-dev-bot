@@ -1062,14 +1062,26 @@ def build_cost_table():
     if _m:
         loc_changed += int(_m.group(1))
 
+    def _fmt_info(text):
+        if not text:
+            return None
+        data = text.encode("utf-8") if isinstance(text, str) else text
+        b = len(gzip.compress(data)) * 8
+        if b >= 1_000_000:
+            return f"{b / 1_000_000:.1f} Mbit"
+        return f"{b / 1_000:.1f} Kbit"
+
     rows = [
         ("Time", elapsed_fmt),
         ("Iterations", str(iterations)),
-        ("Input", f"{_fmt_tok(input_toks)} tokens"),
-        ("Output", f"{_fmt_tok(output_toks)} tokens"),
     ]
     if shortstat:
         rows.append(("Diff", shortstat))
+    _info = _fmt_info(diff_text)
+    if _info:
+        rows.append(("Info", _info))
+    rows.append(("Input", f"{_fmt_tok(input_toks)} tokens"))
+    rows.append(("Output", f"{_fmt_tok(output_toks)} tokens"))
     if cost_val > 0 and loc_changed > 0:
         rows.append(("LOC/$", f"{_fmt_loc(int(loc_changed / cost_val))} loc/$"))
     if cost_val > 0 and diff_text:
