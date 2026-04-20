@@ -56,10 +56,23 @@ def _fmt_bpd(text, cost):
     return f"{bpd / 1_000:.1f} Kbit/$"
 
 
+def _fmt_info(text):
+    if not text:
+        return None
+    data = text.encode('utf-8') if isinstance(text, str) else text
+    b = len(gzip.compress(data)) * 8
+    if b >= 1_000_000:
+        return f"{b / 1_000_000:.1f} Mbit"
+    return f"{b / 1_000:.1f} Kbit"
+
+
 def _build_cost_table(input_tokens, output_tokens, cost, elapsed, output_text):
     rounded = math.ceil(cost * 100) / 100
-    rows = [
-        ('Time', _fmt_ela(elapsed)),
+    rows = [('Time', _fmt_ela(elapsed))]
+    _info = _fmt_info(output_text)
+    if _info:
+        rows.append(('Info', _info))
+    rows += [
         ('Input', _fmt_tok(input_tokens) + ' tokens'),
         ('Output', _fmt_tok(output_tokens) + ' tokens'),
         ('Info/$', _fmt_bpd(output_text, cost)),

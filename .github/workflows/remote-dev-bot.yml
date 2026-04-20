@@ -654,11 +654,11 @@ Fixes #${ISSUE_NUMBER}"
           rows = [
               ('Time', _fmt_ela(elapsed)),
               ('Iterations', iterations_fmt),
+              ('Diff', shortstat if shortstat else 'N/A'),
+              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Input', _fmt_tok(input_tokens) + ' tokens'),
               ('Output', _fmt_tok(output_tokens) + ' tokens'),
-              ('Diff', shortstat if shortstat else 'N/A'),
               ('LOC/$', f'{_fmt_loc(int(loc_changed / cost))} loc/$' if cost > 0 and loc_changed > 0 else 'N/A'),
-              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Info/$', _fmt_bpd(bits_text, cost)),
               ('**Cost**', f'**${rounded:.2f}**'),
           ]
@@ -1397,11 +1397,11 @@ Fixes #${ISSUE_NUMBER}"
           rows = [
               ('Time', _fmt_ela(elapsed)),
               ('Iterations', iterations_fmt),
+              ('Diff', shortstat if shortstat else 'N/A'),
+              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Input', _fmt_tok(input_tokens) + ' tokens'),
               ('Output', _fmt_tok(output_tokens) + ' tokens'),
-              ('Diff', shortstat if shortstat else 'N/A'),
               ('LOC/$', f'{_fmt_loc(int(loc_changed / cost))} loc/$' if cost > 0 and loc_changed > 0 else 'N/A'),
-              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Info/$', _fmt_bpd(bits_text, cost)),
               ('**Cost**', f'**${rounded:.2f}**'),
           ]
@@ -2129,9 +2129,9 @@ Fixes #${ISSUE_NUMBER}"
           rows = [
               ('Time', _fmt_ela(elapsed)),
               ('Iterations', iterations_fmt),
+              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Input', _fmt_tok(input_tokens) + ' tokens'),
               ('Output', _fmt_tok(output_tokens) + ' tokens'),
-              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Info/$', _fmt_bpd(bits_text, cost)),
               ('**Cost**', f'**${rounded:.2f}**'),
           ]
@@ -2556,11 +2556,11 @@ Fixes #${ISSUE_NUMBER}"
           rows = [
               ('Time', _fmt_ela(elapsed)),
               ('Iterations', iterations_fmt),
+              ('Diff', shortstat if shortstat else 'N/A'),
+              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Input', _fmt_tok(input_tokens) + ' tokens'),
               ('Output', _fmt_tok(output_tokens) + ' tokens'),
-              ('Diff', shortstat if shortstat else 'N/A'),
               ('LOC/$', f'{_fmt_loc(int(loc_changed / cost))} loc/$' if cost > 0 and loc_changed > 0 else 'N/A'),
-              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Info/$', _fmt_bpd(bits_text, cost)),
               ('**Cost**', f'**${rounded:.2f}**'),
           ]
@@ -3179,9 +3179,9 @@ Fixes #${ISSUE_NUMBER}"
           rows = [
               ('Time', _fmt_ela(elapsed)),
               ('Iterations', iterations_fmt),
+              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Input', _fmt_tok(input_tokens) + ' tokens'),
               ('Output', _fmt_tok(output_tokens) + ' tokens'),
-              ('Info', (lambda b: f"{b/1_000_000:.1f} Mbit" if b >= 1_000_000 else f"{b/1_000:.1f} Kbit")(len(gzip.compress(bits_text.encode('utf-8') if isinstance(bits_text, str) else bits_text)) * 8) if bits_text else 'N/A'),
               ('Info/$', _fmt_bpd(bits_text, cost)),
               ('**Cost**', f'**${rounded:.2f}**'),
           ]
