@@ -331,6 +331,33 @@ jobs:
           fi
           git push origin HEAD 2>/dev/null || echo "Push failed or nothing to push"
 
+          # If on_failure=draft and no PR was created by resolve.py, create a draft PR now.
+          # This covers the case where resolve.py crashed hard (OOM, SIGKILL) before _cleanup() ran.
+          ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
+          ISSUE_TYPE="${{ needs.parse.outputs.issue_type }}"
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          if [[ "$ON_FAILURE" == "draft" && "$ISSUE_TYPE" == "issue" ]]; then
+            CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+            PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
+            if [[ -z "$PR_URL" ]]; then
+              TARGET_BRANCH="${{ needs.parse.outputs.target_branch }}"
+              DRAFT_BODY="⚠️ **Partial work** — agent terminated unexpectedly before completing the task.
+
+This draft PR contains whatever was committed and pushed during the run. To continue, trigger \`/agent-resolve\` as a comment on this PR and the agent will pick up from this branch.
+
+Fixes #${ISSUE_NUMBER}"
+              echo "$DRAFT_BODY" > /tmp/safety_net_pr_body.txt
+              gh pr create \
+                --draft \
+                --repo "${{ github.repository }}" \
+                --base "$TARGET_BRANCH" \
+                --head "$CURRENT_BRANCH" \
+                --title "WIP on issue #${ISSUE_NUMBER}" \
+                --body-file /tmp/safety_net_pr_body.txt \
+              2>/dev/null && echo "Safety-net draft PR created" || echo "Safety-net draft PR creation failed (may already exist)"
+            fi
+          fi
+
       - name: Post result comment
         if: always()
         env:
@@ -924,6 +951,33 @@ jobs:
             echo "Committed uncommitted changes"
           fi
           git push origin HEAD 2>/dev/null || echo "Push failed or nothing to push"
+
+          # If on_failure=draft and no PR was created by resolve.py, create a draft PR now.
+          # This covers the case where resolve.py crashed hard (OOM, SIGKILL) before _cleanup() ran.
+          ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
+          ISSUE_TYPE="${{ needs.parse.outputs.issue_type }}"
+          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          if [[ "$ON_FAILURE" == "draft" && "$ISSUE_TYPE" == "issue" ]]; then
+            CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+            PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
+            if [[ -z "$PR_URL" ]]; then
+              TARGET_BRANCH="${{ needs.parse.outputs.target_branch }}"
+              DRAFT_BODY="⚠️ **Partial work** — agent terminated unexpectedly before completing the task.
+
+This draft PR contains whatever was committed and pushed during the run. To continue, trigger \`/agent-resolve\` as a comment on this PR and the agent will pick up from this branch.
+
+Fixes #${ISSUE_NUMBER}"
+              echo "$DRAFT_BODY" > /tmp/safety_net_pr_body.txt
+              gh pr create \
+                --draft \
+                --repo "${{ github.repository }}" \
+                --base "$TARGET_BRANCH" \
+                --head "$CURRENT_BRANCH" \
+                --title "WIP on issue #${ISSUE_NUMBER}" \
+                --body-file /tmp/safety_net_pr_body.txt \
+              2>/dev/null && echo "Safety-net draft PR created" || echo "Safety-net draft PR creation failed (may already exist)"
+            fi
+          fi
 
       - name: Post result comment
         if: always()
