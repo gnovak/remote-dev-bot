@@ -341,12 +341,7 @@ jobs:
             PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
             if [[ -z "$PR_URL" ]]; then
               TARGET_BRANCH="${{ needs.parse.outputs.target_branch }}"
-              DRAFT_BODY="⚠️ **Partial work** — agent terminated unexpectedly before completing the task.
-
-This draft PR contains whatever was committed and pushed during the run. To continue, trigger \`/agent-resolve\` as a comment on this PR and the agent will pick up from this branch.
-
-Fixes #${ISSUE_NUMBER}"
-              echo "$DRAFT_BODY" > /tmp/safety_net_pr_body.txt
+              printf '⚠️ **Partial work** — agent terminated unexpectedly before completing the task.\n\nThis draft PR contains whatever was committed and pushed during the run. To continue, trigger `/agent-resolve` as a comment on this PR and the agent will pick up from this branch.\n\nFixes #%s\n' "$ISSUE_NUMBER" > /tmp/safety_net_pr_body.txt
               gh pr create \
                 --draft \
                 --repo "${{ github.repository }}" \
@@ -962,12 +957,7 @@ Fixes #${ISSUE_NUMBER}"
             PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)
             if [[ -z "$PR_URL" ]]; then
               TARGET_BRANCH="${{ needs.parse.outputs.target_branch }}"
-              DRAFT_BODY="⚠️ **Partial work** — agent terminated unexpectedly before completing the task.
-
-This draft PR contains whatever was committed and pushed during the run. To continue, trigger \`/agent-resolve\` as a comment on this PR and the agent will pick up from this branch.
-
-Fixes #${ISSUE_NUMBER}"
-              echo "$DRAFT_BODY" > /tmp/safety_net_pr_body.txt
+              printf '⚠️ **Partial work** — agent terminated unexpectedly before completing the task.\n\nThis draft PR contains whatever was committed and pushed during the run. To continue, trigger `/agent-resolve` as a comment on this PR and the agent will pick up from this branch.\n\nFixes #%s\n' "$ISSUE_NUMBER" > /tmp/safety_net_pr_body.txt
               gh pr create \
                 --draft \
                 --repo "${{ github.repository }}" \
