@@ -66,6 +66,11 @@ jobs:
       graceful_wrapup_iteration: ${{ steps.parse.outputs.graceful_wrapup_iteration }}
       timeout_minutes: ${{ steps.parse.outputs.timeout_minutes }}
       status_log_interval: ${{ steps.parse.outputs.status_log_interval }}
+      context_keep_tool_results: ${{ steps.parse.outputs.context_keep_tool_results }}
+      bash_output_limit: ${{ steps.parse.outputs.bash_output_limit }}
+      max_context_tokens: ${{ steps.parse.outputs.max_context_tokens }}
+      compaction_coverage: ${{ steps.parse.outputs.compaction_coverage }}
+      compaction_factor: ${{ steps.parse.outputs.compaction_factor }}
       design_context_keep_tool_results: ${{ steps.parse.outputs.design_context_keep_tool_results }}
       review_context_keep_tool_results: ${{ steps.parse.outputs.review_context_keep_tool_results }}
       workshop_max_iterations: ${{ steps.parse.outputs.workshop_max_iterations }}
@@ -281,6 +286,11 @@ jobs:
           MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
           DEBUG_LOGGING: ${{ needs.parse.outputs.debug_logging }}
           DISTILL_ENABLED: ${{ needs.parse.outputs.distill_enabled }}
+          CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.context_keep_tool_results }}
+          BASH_OUTPUT_LIMIT: ${{ needs.parse.outputs.bash_output_limit }}
+          MAX_CONTEXT_TOKENS: ${{ needs.parse.outputs.max_context_tokens }}
+          COMPACTION_COVERAGE: ${{ needs.parse.outputs.compaction_coverage }}
+          COMPACTION_FACTOR: ${{ needs.parse.outputs.compaction_factor }}
         run: |
           ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
           ISSUE_TYPE="${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}"
@@ -897,6 +907,11 @@ jobs:
           MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
           DEBUG_LOGGING: ${{ needs.parse.outputs.debug_logging }}
           DISTILL_ENABLED: ${{ needs.parse.outputs.distill_enabled }}
+          CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.context_keep_tool_results }}
+          BASH_OUTPUT_LIMIT: ${{ needs.parse.outputs.bash_output_limit }}
+          MAX_CONTEXT_TOKENS: ${{ needs.parse.outputs.max_context_tokens }}
+          COMPACTION_COVERAGE: ${{ needs.parse.outputs.compaction_coverage }}
+          COMPACTION_FACTOR: ${{ needs.parse.outputs.compaction_factor }}
         run: |
           ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
           ISSUE_TYPE="${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}"
@@ -3983,6 +3998,11 @@ jobs:
           MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
           DEBUG_LOGGING: ${{ needs.parse.outputs.debug_logging }}
           DISTILL_ENABLED: ${{ needs.parse.outputs.distill_enabled }}
+          CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.context_keep_tool_results }}
+          BASH_OUTPUT_LIMIT: ${{ needs.parse.outputs.bash_output_limit }}
+          MAX_CONTEXT_TOKENS: ${{ needs.parse.outputs.max_context_tokens }}
+          COMPACTION_COVERAGE: ${{ needs.parse.outputs.compaction_coverage }}
+          COMPACTION_FACTOR: ${{ needs.parse.outputs.compaction_factor }}
         run: |
           ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
           ISSUE_TYPE="${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}"
@@ -4255,6 +4275,11 @@ jobs:
           MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
           DEBUG_LOGGING: ${{ needs.parse.outputs.debug_logging }}
           DISTILL_ENABLED: ${{ needs.parse.outputs.distill_enabled }}
+          CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.context_keep_tool_results }}
+          BASH_OUTPUT_LIMIT: ${{ needs.parse.outputs.bash_output_limit }}
+          MAX_CONTEXT_TOKENS: ${{ needs.parse.outputs.max_context_tokens }}
+          COMPACTION_COVERAGE: ${{ needs.parse.outputs.compaction_coverage }}
+          COMPACTION_FACTOR: ${{ needs.parse.outputs.compaction_factor }}
           GITHUB_REPO: ${{ github.repository }}
         run: |
           PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log 2>/dev/null | head -1)

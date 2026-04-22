@@ -629,7 +629,17 @@ class TestCompressLinkedIssue:
 # parse_linked_issues (from lib/resolve.py)
 # ---------------------------------------------------------------------------
 
-from lib.resolve import parse_linked_issues
+with patch.dict(os.environ, {
+    "ISSUE_NUMBER": "1",
+    "GITHUB_REPOSITORY": "test/repo",
+    "LLM_MODEL": "anthropic/test",
+    "BASH_OUTPUT_LIMIT": "0",
+    "CONTEXT_KEEP_TOOL_RESULTS": "0",
+    "MAX_CONTEXT_TOKENS": "0",
+    "COMPACTION_COVERAGE": "0.5",
+    "COMPACTION_FACTOR": "0.5",
+}):
+    from lib.resolve import parse_linked_issues
 
 
 class TestParseLinkedIssues:
