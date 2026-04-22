@@ -27,6 +27,11 @@ _ENV_PATCH = patch.dict(
         "ISSUE_NUMBER": "456",
         "GITHUB_REPOSITORY": "owner/repo",
         "LLM_MODEL": "anthropic/claude-3-5-sonnet-20241022",
+        "BASH_OUTPUT_LIMIT": "0",
+        "CONTEXT_KEEP_TOOL_RESULTS": "0",
+        "MAX_CONTEXT_TOKENS": "0",
+        "COMPACTION_COVERAGE": "0.5",
+        "COMPACTION_FACTOR": "0.5",
     },
 )
 _ENV_PATCH.start()

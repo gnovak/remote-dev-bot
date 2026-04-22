@@ -45,11 +45,21 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "")
 EXTRA_FILES = json.loads(os.environ.get("EXTRA_FILES", "[]") or "[]")
 EXTRA_INSTRUCTIONS = os.environ.get("EXTRA_INSTRUCTIONS", "")
 MODEL_EXTRA_INSTRUCTIONS = os.environ.get("MODEL_EXTRA_INSTRUCTIONS", "")
-BASH_OUTPUT_LIMIT = int(os.environ.get("BASH_OUTPUT_LIMIT", "8000") or "8000")
-CONTEXT_KEEP_TOOL_RESULTS = int(os.environ.get("CONTEXT_KEEP_TOOL_RESULTS", "20") or "20")
-MAX_CONTEXT_TOKENS = int(os.environ.get("MAX_CONTEXT_TOKENS", "0") or "0")
-COMPACTION_COVERAGE = float(os.environ.get("COMPACTION_COVERAGE", "0.5") or "0.5")
-COMPACTION_FACTOR = float(os.environ.get("COMPACTION_FACTOR", "0.5") or "0.5")
+def _require_env(name: str) -> str:
+    """Return env var value or die. These are internal plumbing, not user input."""
+    val = os.environ.get(name)
+    if val is None or val == "":
+        raise RuntimeError(
+            f"Required env var {name} is not set. "
+            f"This is a wiring bug — the workflow must pass it."
+        )
+    return val
+
+BASH_OUTPUT_LIMIT = int(_require_env("BASH_OUTPUT_LIMIT"))
+CONTEXT_KEEP_TOOL_RESULTS = int(_require_env("CONTEXT_KEEP_TOOL_RESULTS"))
+MAX_CONTEXT_TOKENS = int(_require_env("MAX_CONTEXT_TOKENS"))
+COMPACTION_COVERAGE = float(_require_env("COMPACTION_COVERAGE"))
+COMPACTION_FACTOR = float(_require_env("COMPACTION_FACTOR"))
 # Hardcoded: fire at 85% of max to leave headroom for the summary to land
 _COMPACTION_THRESHOLD = 0.85
 # Safety net threshold: at this fraction of the model's actual context window,
@@ -1291,13 +1301,28 @@ def main():
     trigger_type = "PR" if ISSUE_TYPE == "pr" else "issue"
     initial_user_text = f"Please resolve {trigger_type} #{ISSUE_NUMBER} as described above."
 
-    # NOTE: Explicit cache_control markers removed as an experiment.
-    # Anthropic (Claude 3.5+) and OpenAI do automatic prefix caching
-    # for identical prefixes — with append-only messages, this should
-    # give good cache hit rates without markers.  The per-iteration
-    # cache hit log (see "[tokens]" line below) will show whether this
-    # works.  If cache hits drop, re-add markers.  See design-workspace.md.
-    initial_user_content = initial_user_text
+    # Anthropic requires explicit cache_control markers — there is no
+    # automatic prefix caching without them.  OpenAI caches automatically
+    # for any repeating prefix >= 1024 tokens; no markers needed there.
+    # Gemini supports cache_control with optional TTL.
+    #
+    # We place a single marker on the initial user message so the system
+    # prompt + first user turn are cached across iterations.  This is
+    # simpler than the old tail-marker approach (which had accumulation
+    # bugs exceeding Anthropic's 4-marker limit).
+    if LLM_MODEL.startswith(("anthropic/", "claude", "gemini/", "vertex_ai/")):
+        cache_control: dict = {"type": "ephemeral"}
+        if LLM_MODEL.startswith(("gemini/", "vertex_ai/")):
+            cache_control["ttl"] = "3600s"
+        initial_user_content = [
+            {
+                "type": "text",
+                "text": initial_user_text,
+                "cache_control": cache_control,
+            }
+        ]
+    else:
+        initial_user_content = initial_user_text
 
     messages = [
         {"role": "system", "content": system_prompt},
