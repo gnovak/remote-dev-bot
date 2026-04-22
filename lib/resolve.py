@@ -1301,17 +1301,15 @@ def main():
     trigger_type = "PR" if ISSUE_TYPE == "pr" else "issue"
     initial_user_text = f"Please resolve {trigger_type} #{ISSUE_NUMBER} as described above."
 
-    # Anthropic requires explicit cache_control markers — there is no
-    # automatic prefix caching without them.  OpenAI caches automatically
-    # for any repeating prefix >= 1024 tokens; no markers needed there.
-    # Gemini supports cache_control with optional TTL.
-    #
-    # We place a cache marker on the tail message before each API call,
-    # so the entire conversation prefix is cached across iterations.
-    # Before placing the new marker, all existing markers are stripped
-    # to avoid accumulation (which previously exceeded Anthropic's
-    # 4-marker limit).
-    _use_cache_markers = LLM_MODEL.startswith(("anthropic/", "claude", "gemini/", "vertex_ai/"))
+    # Anthropic requires explicit cache_control to enable prompt caching.
+    # LiteLLM supports a top-level cache_control parameter (PR #22442,
+    # merged March 2026) that tells the provider to cache the request
+    # prefix automatically — no per-message markers needed.
+    _cache_control: dict | None = None
+    if LLM_MODEL.startswith(("anthropic/", "claude")):
+        _cache_control = {"type": "ephemeral"}
+    elif LLM_MODEL.startswith(("gemini/", "vertex_ai/")):
+        _cache_control = {"type": "ephemeral", "ttl": "3600s"}
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -1429,26 +1427,6 @@ def main():
                     "role": "user",
                     "content": "Continue working on the task. Use the tools available to proceed.",
                 })
-            # Place cache marker on the tail message so the entire prefix
-            # is cached.  Strip all existing markers first to avoid
-            # accumulation past Anthropic's 4-marker limit.
-            if _use_cache_markers and messages:
-                for msg in messages:
-                    c = msg.get("content")
-                    if isinstance(c, list):
-                        for blk in c:
-                            if isinstance(blk, dict):
-                                blk.pop("cache_control", None)
-                tail = messages[-1]
-                tail_content = tail.get("content")
-                cc: dict = {"type": "ephemeral"}
-                if LLM_MODEL.startswith(("gemini/", "vertex_ai/")):
-                    cc["ttl"] = "3600s"
-                if isinstance(tail_content, str):
-                    tail["content"] = [{"type": "text", "text": tail_content, "cache_control": cc}]
-                elif isinstance(tail_content, list) and tail_content:
-                    tail_content[-1]["cache_control"] = cc
-
             try:
                 response = completion_with_retries(
                     completion,
@@ -1457,6 +1435,7 @@ def main():
                     tools=TOOLS,
                     max_tokens=16384,
                     transient_error_counter=transient_error_counter,
+                    **({} if _cache_control is None else {"cache_control": _cache_control}),
                 )
             except litellm.exceptions.BadRequestError as exc:
                 err_msg = str(exc)
