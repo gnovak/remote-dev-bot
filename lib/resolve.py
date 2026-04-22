@@ -1306,29 +1306,18 @@ def main():
     # for any repeating prefix >= 1024 tokens; no markers needed there.
     # Gemini supports cache_control with optional TTL.
     #
-    # We place a single marker on the initial user message so the system
-    # prompt + first user turn are cached across iterations.  This is
-    # simpler than the old tail-marker approach (which had accumulation
-    # bugs exceeding Anthropic's 4-marker limit).
-    if LLM_MODEL.startswith(("anthropic/", "claude", "gemini/", "vertex_ai/")):
-        cache_control: dict = {"type": "ephemeral"}
-        if LLM_MODEL.startswith(("gemini/", "vertex_ai/")):
-            cache_control["ttl"] = "3600s"
-        initial_user_content = [
-            {
-                "type": "text",
-                "text": initial_user_text,
-                "cache_control": cache_control,
-            }
-        ]
-    else:
-        initial_user_content = initial_user_text
+    # We place a cache marker on the tail message before each API call,
+    # so the entire conversation prefix is cached across iterations.
+    # Before placing the new marker, all existing markers are stripped
+    # to avoid accumulation (which previously exceeded Anthropic's
+    # 4-marker limit).
+    _use_cache_markers = LLM_MODEL.startswith(("anthropic/", "claude", "gemini/", "vertex_ai/"))
 
     messages = [
         {"role": "system", "content": system_prompt},
         {
             "role": "user",
-            "content": initial_user_content,
+            "content": initial_user_text,
         },
     ]
 
@@ -1440,6 +1429,26 @@ def main():
                     "role": "user",
                     "content": "Continue working on the task. Use the tools available to proceed.",
                 })
+            # Place cache marker on the tail message so the entire prefix
+            # is cached.  Strip all existing markers first to avoid
+            # accumulation past Anthropic's 4-marker limit.
+            if _use_cache_markers and messages:
+                for msg in messages:
+                    c = msg.get("content")
+                    if isinstance(c, list):
+                        for blk in c:
+                            if isinstance(blk, dict):
+                                blk.pop("cache_control", None)
+                tail = messages[-1]
+                tail_content = tail.get("content")
+                cc: dict = {"type": "ephemeral"}
+                if LLM_MODEL.startswith(("gemini/", "vertex_ai/")):
+                    cc["ttl"] = "3600s"
+                if isinstance(tail_content, str):
+                    tail["content"] = [{"type": "text", "text": tail_content, "cache_control": cc}]
+                elif isinstance(tail_content, list) and tail_content:
+                    tail_content[-1]["cache_control"] = cc
+
             try:
                 response = completion_with_retries(
                     completion,
