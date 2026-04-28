@@ -27,6 +27,13 @@ from litellm import completion
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from lib.context import compact_messages, completion_with_retries, estimate_tokens
+from lib.tools import (
+    validate_path,
+    is_dangerous_command,
+    execute_bash as _execute_bash,
+    execute_read_file,
+    execute_grep,
+)
 
 # --- Environment ---
 
@@ -205,113 +212,13 @@ def setup_branch():
     return branch
 
 
-# --- Path validation ---
-
-def validate_path(path):
-    """Validate that a path is safe (no directory traversal, within repo)."""
-    normalized = os.path.normpath(path)
-    if normalized.startswith("..") or normalized.startswith("/"):
-        return False, "Path must be relative to repository root and cannot use '..'"
-    abs_path = os.path.abspath(normalized)
-    repo_root = os.path.abspath(".")
-    if not abs_path.startswith(repo_root):
-        return False, "Path must be within the repository"
-    return True, normalized
-
-
-# --- Tool implementations ---
-
-def is_dangerous_command(command):
-    """Return (True, reason) if a command matches a blocked pattern."""
-    dangerous_patterns = [
-        (r"\brm\s+-rf\s+/", "rm -rf / is not allowed"),
-        (r"\bdd\s+if=", "dd if= is not allowed"),
-        (r":\(\)\s*\{.*\}", "fork bomb pattern is not allowed"),
-        (r">\s*/dev/sd[a-z]", "direct disk write is not allowed"),
-    ]
-    for pattern, reason in dangerous_patterns:
-        if re.search(pattern, command):
-            return True, reason
-    return False, ""
+# --- Tool wrappers ---
 
 
 def execute_bash(command):
-    """Execute a bash command in the repository root."""
-    dangerous, reason = is_dangerous_command(command)
-    if dangerous:
-        return f"Error: {reason}"
-    try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=os.path.abspath("."),
-        )
-        output = (result.stdout or "") + (result.stderr or "")
-        if result.returncode != 0:
-            output = f"(exit code {result.returncode})\n" + output
-        output = output or "(no output)"
-        if BASH_OUTPUT_LIMIT > 0 and len(output) > BASH_OUTPUT_LIMIT:
-            half = BASH_OUTPUT_LIMIT // 2
-            output = (
-                output[:half]
-                + f"\n\n... [output truncated: {len(output)} chars total, showing first and last {half} chars] ...\n\n"
-                + output[-half:]
-            )
-        return output
-    except subprocess.TimeoutExpired:
-        return "Error: Command timed out after 30 seconds"
-    except Exception as e:
-        return f"Error executing command: {e}"
+    """Execute a bash command; uses module-level BASH_OUTPUT_LIMIT."""
+    return _execute_bash(command, timeout=30, bash_output_limit=BASH_OUTPUT_LIMIT)
 
-
-def execute_read_file(path):
-    """Read a file from the repository."""
-    valid, result = validate_path(path)
-    if not valid:
-        return f"Error: {result}"
-    if not os.path.exists(result):
-        return f"Error: File not found: {path}"
-    if os.path.isdir(result):
-        return f"Error: Path is a directory, not a file: {path}"
-    try:
-        with open(result) as f:
-            content = f.read()
-        if len(content) > 50000:
-            content = (
-                content[:50000]
-                + "\n\n... (file truncated, showing first 50000 characters)"
-            )
-        return content
-    except Exception as e:
-        return f"Error reading file: {e}"
-
-
-def execute_grep(pattern, path=None):
-    """Search for a pattern in repository files using git grep."""
-    try:
-        cmd = ["git", "grep", "-n", "--no-color", pattern]
-        if path:
-            valid, validated_path = validate_path(path)
-            if not valid:
-                return f"Error: {validated_path}"
-            cmd.extend(["--", validated_path])
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=30
-        )
-        output = result.stdout.strip()
-        if not output:
-            return "No matches found."
-        lines = output.split("\n")
-        if len(lines) > 100:
-            output = "\n".join(lines[:100]) + f"\n\n... ({len(lines) - 100} more matches truncated)"
-        return output
-    except subprocess.TimeoutExpired:
-        return "Error: Search timed out"
-    except Exception as e:
-        return f"Error executing grep: {e}"
 
 
 # --- Context gathering ---

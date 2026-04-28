@@ -10,6 +10,11 @@ import re
 import subprocess
 import sys
 
+from lib.tools import (
+    validate_path as _tools_validate_path,
+    execute_read_file as _tools_execute_read_file,
+)
+
 
 # ---------------------------------------------------------------------------
 # Tool definitions (shared by the design loop)
@@ -86,50 +91,23 @@ TOOLS = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Path validation
-# ---------------------------------------------------------------------------
-
-def validate_path(path):
-    """Validate and resolve a file path within the repository.
-
-    Returns (True, resolved_path) on success or (False, error_message) on
-    failure.
-    """
-    normalized = os.path.normpath(path)
-    if normalized.startswith("..") or os.path.isabs(normalized):
-        return False, f"Access denied: path '{path}' is outside the repository"
-    if not os.path.exists(normalized):
-        return False, f"File not found: {normalized}"
-    return True, normalized
 
 
 # ---------------------------------------------------------------------------
 # Tool execution
 # ---------------------------------------------------------------------------
 
+def validate_path(path):
+    """Validate a path (design_loop variant: no repo-bounds check, checks existence).
+
+    Returns (True, resolved_path) on success or (False, error_message) on failure.
+    """
+    return _tools_validate_path(path, repo_bounds=False)
+
+
 def execute_read_file(path):
-    """Execute the read_file tool."""
-    valid, result = validate_path(path)
-    if not valid:
-        return result
-    if os.path.isdir(result):
-        try:
-            entries = sorted(os.listdir(result))
-            return f"Directory listing for {result}:\n" + "\n".join(entries)
-        except Exception as e:
-            return f"Error listing directory: {e}"
-    try:
-        with open(result) as f:
-            content = f.read()
-        if len(content) > 50000:
-            content = (
-                content[:50000]
-                + "\n\n... (file truncated, showing first 50000 characters)"
-            )
-        return content
-    except Exception as e:
-        return f"Error reading file: {e}"
+    """Execute the read_file tool (design_loop variant: enables directory listing)."""
+    return _tools_execute_read_file(path, list_directory=True, repo_bounds=False)
 
 
 def execute_grep(pattern, path=None):
