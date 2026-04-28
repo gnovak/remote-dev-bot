@@ -219,7 +219,7 @@ def test_format_issue_body():
     assert "## Environment" in body
     assert "Linux-5.4.0" in body
     assert "/bin/bash" in body
-    assert "Python: 3.11.0" in body
+    assert "- Python: 3.11.0" in body
     assert "## Step that failed" in body
     assert "Step 2.1" in body
     assert "## Expected behavior" in body
@@ -293,7 +293,7 @@ def test_format_summary_issue_body(mock_env):
 
     assert "## Environment" in body
     assert "Linux-5.4.0" in body
-    assert "Python: 3.11.0" in body
+    assert "- Python: 3.11.0" in body
     assert "2 problems" in body
     assert "### 1. Step 1.1: Problem 1" in body
     assert "### 2. Step 2.1: Problem 2" in body
@@ -339,7 +339,7 @@ def test_get_consent_prompt(mock_env):
     assert "1 problem" in prompt
     assert "Linux-5.4.0" in prompt
     assert "GitHub" in prompt
-    assert "yes/no" in prompt.lower() or "consent" in prompt.lower() or "continue" in prompt.lower()
+    assert "(yes/no)" in prompt
 
 
 def test_get_consent_prompt_plural():

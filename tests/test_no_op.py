@@ -150,9 +150,30 @@ def workflow_content():
 
 def test_workflow_detects_no_op_flag(workflow_content):
     """The workflow YAML must extract NO_OP from resolve_status.json."""
-    # There should be at least two occurrences (two resolve job variants)
-    assert workflow_content.count("no_op") >= 2, (
-        "Expected at least 2 occurrences of 'no_op' in workflow YAML"
+    import yaml
+    data = yaml.safe_load(workflow_content)
+
+    # Collect all 'run' step values from YAML jobs
+    run_scripts = []
+    def collect_runs(obj):
+        if isinstance(obj, dict):
+            if "run" in obj and isinstance(obj["run"], str):
+                run_scripts.append(obj["run"])
+            for v in obj.values():
+                collect_runs(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                collect_runs(item)
+
+    collect_runs(data.get("jobs", {}))
+
+    # Verify no_op is referenced via the actual Python extraction pattern
+    # (not just in comments), proving it's functionally checked in the workflow
+    extraction_pattern = "d.get('no_op')"
+    matching_scripts = [s for s in run_scripts if extraction_pattern in s]
+    assert len(matching_scripts) >= 2, (
+        f"Expected at least 2 workflow 'run' steps that extract no_op via "
+        f"d.get('no_op'), got {len(matching_scripts)}"
     )
 
 
