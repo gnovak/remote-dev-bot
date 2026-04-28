@@ -162,6 +162,14 @@ else
         '/agent-build' \
         "claude" "build"
 
+    # Delegate mode smoke test: full design-to-implementation cycle.
+    # Stages: 1) design exploration, 2) council design review, 3) design revision,
+    # 4) implementation (resolve), 5) council code review.
+    add_test "delegate" "Test: delegate mode full pipeline" \
+        "Create a file delegate_test.py with a function multiply(a, b) that returns a * b" \
+        '/agent-delegate-claude-small' \
+        "claude" "delegate"
+
     # Inline args smoke test: pass max_iterations as inline arg
     add_test "inline-args" "Test: inline max_iterations" \
         "Create a file inline_test.py with a stub function stub() that returns None." \
@@ -846,6 +854,44 @@ for pos in "${!issue_nums[@]}"; do
                 fi
                 ((pass++)) || true
             fi
+        elif [[ "$test_type" == "delegate" ]]; then
+            # Delegate mode: Stages 1-3 post design/council/revision comments on issue;
+            # Stage 4 creates a PR; Stage 5 posts council code review on the PR;
+            # final summary comment is posted on the issue.
+            pr_num=$(gh pr list --repo "$TEST_REPO" \
+                --search "head:rdb-fix-issue-$issue_num" \
+                --json number --jq '.[0].number // empty' 2>/dev/null || echo "")
+
+            if [[ -z "$pr_num" ]]; then
+                # Check if the pipeline at least started (design comment or abort comment)
+                pipeline_comment=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
+                    --jq '[.[] | select(.body | contains("Delegate pipeline"))] | length' \
+                    2>/dev/null || echo "0")
+                if [[ "$pipeline_comment" -gt 0 ]]; then
+                    status="FAIL (design ran but no PR created — Stage 4 failed)"
+                else
+                    status="FAIL (no PR created — delegate pipeline failed)"
+                fi
+                ((fail++)) || true
+            else
+                cleanup_branches+=("rdb-fix-issue-$issue_num")
+                # Check for council code review comment on the PR (Stage 5)
+                council_comment_count=$(gh api "repos/$TEST_REPO/issues/$pr_num/comments" \
+                    --jq '[.[] | select(.body | contains("Code Review by") or contains("council") or contains("Council"))] | length' \
+                    2>/dev/null || echo "0")
+                # Check for final pipeline summary comment on the issue
+                pipeline_comment=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
+                    --jq '[.[] | select(.body | contains("Delegate pipeline complete"))] | length' \
+                    2>/dev/null || echo "0")
+                if [[ "$pipeline_comment" -gt 0 ]] && [[ "$council_comment_count" -gt 0 ]]; then
+                    status="PASS (PR #$pr_num + council review + pipeline complete)"
+                elif [[ "$pipeline_comment" -gt 0 ]]; then
+                    status="PASS (PR #$pr_num created, pipeline complete, no council comment found)"
+                else
+                    status="PASS (PR #$pr_num created, no pipeline complete comment found)"
+                fi
+                ((pass++)) || true
+            fi
         else
             # Resolve mode: check if a PR was created
             pr_count=$(gh pr list --repo "$TEST_REPO" \
@@ -1188,6 +1234,13 @@ for pos in "${!issue_nums[@]}"; do
             2>/dev/null || echo "")
         cost="0.00"
         [[ -n "$cost_body" ]] && cost=$(parse_cost_from_comment "$cost_body")
+    elif [[ "$test_type" == "delegate" ]]; then
+        # Delegate mode: cost is embedded in the final pipeline summary comment on the issue
+        cost_body=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
+            --jq '[.[] | select(.body | contains("Delegate pipeline") or contains("💰 Cost"))] | last | .body' \
+            2>/dev/null || echo "")
+        cost="0.00"
+        [[ -n "$cost_body" ]] && cost=$(parse_cost_from_comment "$cost_body")
     else
         # Resolve / design: PR body (if PR created) or issue comment fallback
         cost=$(fetch_cost_for_issue "$issue_num" "$TEST_REPO")
@@ -1239,7 +1292,7 @@ log "  Total cost: \$$total_cost ($cost_count tests with cost data)"
 # --- Summary ---
 log ""
 log "========================================="
-log "  Resolve/Design: Pass: $pass  Fail: $fail  Timeout: $timeout_count"
+log "  Smoke tests:    Pass: $pass  Fail: $fail  Timeout: $timeout_count"
 log "  Review+Feedback:  Pass: $RF_PASS  Fail: $RF_FAIL"
 log "  Timeout test:   Pass: $TIMEOUT_PHASE_PASS  Fail: $TIMEOUT_PHASE_FAIL"
 log "  Wrapup test:    Pass: $WRAPUP_PHASE_PASS  Fail: $WRAPUP_PHASE_FAIL"
