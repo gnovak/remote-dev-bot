@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "remote-dev-bot"
+version = "0.9.0"
+description = "AI-powered GitHub Action that resolves issues and creates PRs autonomously"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = ["pytest", "PyYAML"]
+
+[tool.setuptools.packages.find]
+include = ["lib*"]
