@@ -7,6 +7,7 @@
 #   /agent-workshop  — design analysis + multi-model council critique
 #   /agent-build     — implement issue + multi-model council code review
 #   /agent-delegate  — full design-to-implementation cycle with no human pauses
+#   /agent-reconcile — rebase PR onto base branch and resolve conflicts
 #
 # To use a specific model, append it: /agent-resolve-claude-large
 # This works for any mode. See models: below for available aliases.
