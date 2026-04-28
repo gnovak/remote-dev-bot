@@ -1983,3 +1983,461 @@ def test_parse_args_max_design_iterations():
     assert parse_args(["max_design_iterations = 20"]) == {"max_design_iterations": 20}
     assert parse_args(["max design iterations = 15"]) == {"max_design_iterations": 15}
     assert parse_args(["max-design-iterations=8"]) == {"max_design_iterations": 8}
+
+
+# --- resolve_config comprehensive tests ---
+
+
+class TestResolveConfig:
+    """Tests for resolve_config() covering layer ordering, type coercion,
+    mode resolution, list merging, and edge cases."""
+
+    def _make_config(self, **overrides):
+        """Return a minimal valid config dict, with optional overrides merged in."""
+        base = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "claude-large": {"id": "anthropic/claude-opus-4-6"},
+            },
+            "modes": {
+                "resolve": {
+                    "default_model": "claude-small",
+                    "max_iterations": 30,
+                    "extra_files": ["AGENTS.md"],
+                },
+                "design": {
+                    "default_model": "claude-small",
+                    "max_iterations": 20,
+                    "extra_files": ["CONTRIBUTING.md"],
+                },
+            },
+            "agent": {
+                "max_iterations": 50,
+                "pr_type": "ready",
+            },
+        }
+        base.update(overrides)
+        return base
+
+    @pytest.fixture
+    def base_config_path(self, tmp_path):
+        """Write a minimal base config to a temp file and return its path."""
+        config = self._make_config()
+        path = str(tmp_path / "remote-dev-bot.yaml")
+        with open(path, "w") as f:
+            yaml.dump(config, f)
+        return path
+
+    @pytest.fixture
+    def rdb_base_path(self, tmp_path):
+        """Copy the real remote-dev-bot.yaml to a temp dir and return its path."""
+        import shutil
+        dest = tmp_path / "remote-dev-bot.yaml"
+        shutil.copy("remote-dev-bot.yaml", dest)
+        return str(dest)
+
+    # ------------------------------------------------------------------ #
+    # Layer ordering                                                       #
+    # ------------------------------------------------------------------ #
+
+    def test_base_config_loaded(self, base_config_path):
+        """When only base config exists, values come from it."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert result["mode"] == "resolve"
+        assert result["max_iterations"] == 30
+        assert result["alias"] == "claude-small"
+
+    def test_override_shadows_base(self, tmp_path, base_config_path):
+        """Override config (target repo) wins over base config."""
+        override_config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "claude-large": {"id": "anthropic/claude-opus-4-6"},
+            },
+            "modes": {
+                "resolve": {
+                    "max_iterations": 99,
+                },
+            },
+            "agent": {
+                "max_iterations": 50,
+                "pr_type": "draft",
+            },
+        }
+        override_path = str(tmp_path / "override.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        result = resolve_config(base_config_path, override_path, "resolve")
+        assert result["max_iterations"] == 99
+        assert result["pr_type"] == "draft"
+
+    def test_local_config_shadows_override(self, tmp_path, base_config_path):
+        """Local config (third layer) wins over both base and override."""
+        override_config = {
+            "modes": {
+                "resolve": {"max_iterations": 40},
+            },
+            "agent": {"max_iterations": 40},
+        }
+        local_config = {
+            "modes": {
+                "resolve": {"max_iterations": 77},
+            },
+            "agent": {"max_iterations": 40},
+        }
+        override_path = str(tmp_path / "override.yaml")
+        local_path = str(tmp_path / "local.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        with open(local_path, "w") as f:
+            yaml.dump(local_config, f)
+        result = resolve_config(
+            base_config_path, override_path, "resolve", local_path=local_path
+        )
+        assert result["max_iterations"] == 77
+
+    def test_inline_args_win_over_all_layers(self, tmp_path, base_config_path):
+        """Inline args beat base, override, and local configs."""
+        override_config = {
+            "modes": {"resolve": {"max_iterations": 40}},
+            "agent": {"max_iterations": 40},
+        }
+        override_path = str(tmp_path / "override.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        result = resolve_config(
+            base_config_path, override_path, "resolve",
+            args={"max_iterations": 999},
+        )
+        assert result["max_iterations"] == 999
+
+    def test_has_override_false_when_no_override(self, base_config_path):
+        """has_override is False when no override file exists."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert result["has_override"] is False
+
+    def test_has_override_true_when_override_exists(self, tmp_path, base_config_path):
+        """has_override is True when override file is present (even if mostly empty)."""
+        override_config = {"agent": {"pr_type": "ready"}}
+        override_path = str(tmp_path / "override.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        result = resolve_config(base_config_path, override_path, "resolve")
+        assert result["has_override"] is True
+
+    # ------------------------------------------------------------------ #
+    # Mode resolution                                                      #
+    # ------------------------------------------------------------------ #
+
+    def test_resolve_mode(self, base_config_path):
+        """'resolve' command string is recognized."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert result["mode"] == "resolve"
+
+    def test_design_mode(self, base_config_path):
+        """'design' command string is recognized."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "design")
+        assert result["mode"] == "design"
+
+    def test_mode_with_model_alias_in_command(self, base_config_path):
+        """Model alias appended to command string is parsed correctly."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve-claude-large"
+        )
+        assert result["mode"] == "resolve"
+        assert result["alias"] == "claude-large"
+        assert result["model"] == "anthropic/claude-opus-4-6"
+
+    def test_unknown_mode_raises_value_error(self, base_config_path):
+        """An unknown mode name raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown mode"):
+            resolve_config(base_config_path, "nonexistent.yaml", "frobnicate")
+
+    def test_mode_picks_up_mode_config(self, base_config_path):
+        """Mode-specific max_iterations overrides global agent.max_iterations."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        # Base config sets modes.resolve.max_iterations=30 vs agent.max_iterations=50
+        assert result["max_iterations"] == 30
+
+    def test_default_model_from_mode(self, base_config_path):
+        """Mode's default_model is used when no alias is specified."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert result["alias"] == "claude-small"
+
+    def test_default_model_from_global_when_not_in_mode(self, tmp_path):
+        """Global default_model is used when mode has no default_model set."""
+        config = self._make_config()
+        del config["modes"]["resolve"]["default_model"]
+        path = str(tmp_path / "base.yaml")
+        with open(path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(path, "nonexistent.yaml", "resolve")
+        assert result["alias"] == "claude-small"
+
+    # ------------------------------------------------------------------ #
+    # Inline-arg type coercion                                             #
+    # ------------------------------------------------------------------ #
+
+    def test_inline_arg_max_iterations_is_int(self, base_config_path):
+        """max_iterations inline arg is stored as int (already coerced by parse_args)."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"max_iterations": 75},
+        )
+        assert result["max_iterations"] == 75
+        assert isinstance(result["max_iterations"], int)
+
+    def test_inline_arg_timeout_minutes_is_int(self, base_config_path):
+        """timeout_minutes inline arg is stored as int."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"timeout_minutes": 60},
+        )
+        assert result["timeout_minutes"] == 60
+        assert isinstance(result["timeout_minutes"], int)
+
+    def test_inline_arg_status_log_interval(self, base_config_path):
+        """status_log_interval inline arg is stored as int."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"status_log_interval": 10},
+        )
+        assert result["status_log_interval"] == 10
+        assert isinstance(result["status_log_interval"], int)
+
+    def test_inline_arg_branch_is_str(self, base_config_path):
+        """branch inline arg is stored as a string."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"branch": "my-feature"},
+        )
+        assert result["target_branch"] == "my-feature"
+        assert isinstance(result["target_branch"], str)
+
+    def test_inline_arg_debug_logging_bool(self, base_config_path):
+        """debug_logging inline arg is coerced to bool."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"debug_logging": True},
+        )
+        assert result.get("debug_logging") is True
+
+    # ------------------------------------------------------------------ #
+    # List-vs-scalar (extra_files) additive merge                         #
+    # ------------------------------------------------------------------ #
+
+    def test_extra_files_base_only(self, base_config_path):
+        """extra_files from base config are included in result."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert "AGENTS.md" in result.get("extra_files", [])
+
+    def test_extra_files_additive_with_override(self, tmp_path, base_config_path):
+        """Override extra_files appends to base extra_files rather than replacing."""
+        override_config = {
+            "modes": {
+                "resolve": {
+                    "extra_files": ["CONTRIBUTING.md"],
+                },
+            },
+        }
+        override_path = str(tmp_path / "override.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        result = resolve_config(base_config_path, override_path, "resolve")
+        extra = result.get("extra_files", [])
+        # Both base and override files should be present
+        assert "AGENTS.md" in extra
+        assert "CONTRIBUTING.md" in extra
+
+    def test_extra_files_additive_with_local(self, tmp_path, base_config_path):
+        """Local config extra_files appends after base and override layers."""
+        override_config = {
+            "modes": {"resolve": {"extra_files": ["CONTRIBUTING.md"]}},
+        }
+        local_config = {
+            "modes": {"resolve": {"extra_files": ["LOCAL.md"]}},
+        }
+        override_path = str(tmp_path / "override.yaml")
+        local_path = str(tmp_path / "local.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        with open(local_path, "w") as f:
+            yaml.dump(local_config, f)
+        result = resolve_config(
+            base_config_path, override_path, "resolve", local_path=local_path
+        )
+        extra = result.get("extra_files", [])
+        assert "AGENTS.md" in extra
+        assert "CONTRIBUTING.md" in extra
+        assert "LOCAL.md" in extra
+
+    def test_extra_files_additive_with_inline_args(self, base_config_path):
+        """Inline extra_files arg appends on top of all config-layer files."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"extra_files": ["README.md"]},
+        )
+        extra = result.get("extra_files", [])
+        assert "AGENTS.md" in extra
+        assert "README.md" in extra
+
+    def test_extra_files_deduplication(self, tmp_path, base_config_path):
+        """Duplicate file names across layers appear only once."""
+        override_config = {
+            "modes": {"resolve": {"extra_files": ["AGENTS.md"]}},  # same as base
+        }
+        override_path = str(tmp_path / "override.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        result = resolve_config(base_config_path, override_path, "resolve")
+        extra = result.get("extra_files", [])
+        assert extra.count("AGENTS.md") == 1
+
+    def test_extra_files_order_preserved(self, tmp_path, base_config_path):
+        """extra_files order: base → override → local → inline args."""
+        override_config = {
+            "modes": {"resolve": {"extra_files": ["OVERRIDE.md"]}},
+        }
+        local_config = {
+            "modes": {"resolve": {"extra_files": ["LOCAL.md"]}},
+        }
+        override_path = str(tmp_path / "override.yaml")
+        local_path = str(tmp_path / "local.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        with open(local_path, "w") as f:
+            yaml.dump(local_config, f)
+        result = resolve_config(
+            base_config_path, override_path, "resolve",
+            local_path=local_path,
+            args={"extra_files": ["INLINE.md"]},
+        )
+        extra = result.get("extra_files", [])
+        # Verify relative ordering
+        assert extra.index("AGENTS.md") < extra.index("OVERRIDE.md")
+        assert extra.index("OVERRIDE.md") < extra.index("LOCAL.md")
+        assert extra.index("LOCAL.md") < extra.index("INLINE.md")
+
+    # ------------------------------------------------------------------ #
+    # Timeout defaults                                                     #
+    # ------------------------------------------------------------------ #
+
+    def test_timeout_defaults_to_120(self, base_config_path):
+        """Default timeout is 120 minutes when not set anywhere."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert result["timeout_minutes"] == 120
+
+    def test_timeout_from_yaml(self, tmp_path):
+        """Timeout from YAML agent config is used when no inline arg given."""
+        config = self._make_config()
+        config["agent"]["timeout_minutes"] = 90
+        path = str(tmp_path / "base.yaml")
+        with open(path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(path, "nonexistent.yaml", "resolve")
+        assert result["timeout_minutes"] == 90
+
+    def test_timeout_inline_arg_beats_yaml(self, tmp_path):
+        """Inline timeout_minutes arg wins over YAML agent.timeout_minutes."""
+        config = self._make_config()
+        config["agent"]["timeout_minutes"] = 90
+        path = str(tmp_path / "base.yaml")
+        with open(path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(
+            path, "nonexistent.yaml", "resolve",
+            args={"timeout_minutes": 45},
+        )
+        assert result["timeout_minutes"] == 45
+
+    def test_timeout_flag_beats_yaml(self, tmp_path):
+        """timeout_minutes parameter (from --timeout-minutes flag) wins over YAML."""
+        config = self._make_config()
+        config["agent"]["timeout_minutes"] = 90
+        path = str(tmp_path / "base.yaml")
+        with open(path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(path, "nonexistent.yaml", "resolve", timeout_minutes=30)
+        assert result["timeout_minutes"] == 30
+
+    # ------------------------------------------------------------------ #
+    # Edge cases                                                           #
+    # ------------------------------------------------------------------ #
+
+    def test_missing_base_config_uses_override_only(self, tmp_path):
+        """When base config is missing, override config is used on its own."""
+        override_config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+            },
+            "modes": {
+                "resolve": {"max_iterations": 25},
+            },
+            "agent": {"max_iterations": 25},
+        }
+        override_path = str(tmp_path / "override.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        result = resolve_config(
+            str(tmp_path / "nonexistent-base.yaml"), override_path, "resolve"
+        )
+        assert result["mode"] == "resolve"
+        assert result["max_iterations"] == 25
+
+    def test_empty_args_dict(self, base_config_path):
+        """Passing an empty args dict is equivalent to passing no args."""
+        result_none = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        result_empty = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve", args={}
+        )
+        assert result_none["max_iterations"] == result_empty["max_iterations"]
+        assert result_none["timeout_minutes"] == result_empty["timeout_minutes"]
+
+    def test_none_args_treated_as_empty(self, base_config_path):
+        """args=None (the default) is treated as an empty dict."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve", args=None
+        )
+        assert result["mode"] == "resolve"
+
+    def test_unknown_inline_arg_rejected_by_parse_args(self):
+        """parse_args raises ValueError for unknown argument names."""
+        with pytest.raises(ValueError, match="Unknown"):
+            parse_args(["totally_unknown_arg = 42"])
+
+    def test_result_has_required_keys(self, base_config_path):
+        """Result dict always includes the standard set of keys."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        for key in ("mode", "model", "alias", "max_iterations", "pr_type",
+                    "has_override", "timeout_minutes"):
+            assert key in result, f"Key '{key}' missing from resolve_config result"
+
+    def test_real_base_config_resolve_mode(self, rdb_base_path):
+        """resolve_config works end-to-end with the real remote-dev-bot.yaml."""
+        result = resolve_config(rdb_base_path, "nonexistent.yaml", "resolve")
+        assert result["mode"] == "resolve"
+        assert result["model"]  # non-empty model ID
+        assert result["timeout_minutes"] > 0
+
+    def test_real_base_config_design_mode(self, rdb_base_path):
+        """resolve_config works end-to-end with the real remote-dev-bot.yaml in design mode."""
+        result = resolve_config(rdb_base_path, "nonexistent.yaml", "design")
+        assert result["mode"] == "design"
+        assert result["model"]
+
+    def test_target_branch_explicit_false_by_default(self, base_config_path):
+        """target_branch_explicit is False when branch is not set via inline arg."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert result["target_branch_explicit"] is False
+
+    def test_target_branch_explicit_true_via_args(self, base_config_path):
+        """target_branch_explicit is True when branch is set via inline arg."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"branch": "my-feature"},
+        )
+        assert result["target_branch_explicit"] is True
+        assert result["target_branch"] == "my-feature"
