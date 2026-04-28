@@ -72,6 +72,8 @@ comment (no code changes).
 | `/agent-review-claude-large`    | Code review with a specific model                    |
 | `/agent-workshop[-<model>]`     | Design analysis + multi-model council critique       |
 | `/agent-build[-<model>]`        | Implement issue + multi-model council code review    |
+| `/agent-delegate[-<model>]`     | Full design-to-implementation cycle with no human pauses |
+| `/agent-reconcile[-<model>]`    | Rebase PR onto base branch and resolve conflicts     |
 
 Modes and model aliases are configured in `remote-dev-bot.yaml`.
 
