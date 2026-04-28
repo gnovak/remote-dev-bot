@@ -15,7 +15,6 @@ follow-up.
 """
 
 import gzip
-import json
 import math
 import os
 import re
