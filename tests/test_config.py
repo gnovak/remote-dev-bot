@@ -220,12 +220,6 @@ def test_parse_args_branch():
     assert parse_args(["branch = my-feature"]) == {"branch": "my-feature"}
 
 
-def test_parse_args_target_branch_backcompat():
-    """target_branch is still accepted as a BACKCOMPAT alias for branch."""
-    assert parse_args(["target_branch = design/gemini"]) == {"target_branch": "design/gemini"}
-    assert parse_args(["target branch = my-feature"]) == {"target_branch": "my-feature"}
-
-
 def test_parse_args_extra_files():
     """extra_files should be parsed as list (various normalized name forms)."""
     assert parse_args(["extra_files = file1.txt file2.txt"]) == {"extra_files": ["file1.txt", "file2.txt"]}
@@ -655,8 +649,15 @@ def test_resolve_config_agent_defaults():
         os.unlink(path)
 
 
-def test_resolve_config_openhands_key_backcompat():
-    """Config using openhands: key (old name) still works — BACKCOMPAT."""
+def test_resolve_config_on_failure_default(config_dir):
+    """on_failure defaults to 'draft'."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["on_failure"] == "draft"
+
+
+def test_resolve_config_openhands_key_raises():
+    """Config using openhands: key (removed in v0.9) raises ValueError with helpful message."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         yaml.dump(
             {
@@ -669,18 +670,35 @@ def test_resolve_config_openhands_key_backcompat():
         )
         path = f.name
     try:
-        result = resolve_config(path, "nonexistent.yaml", "resolve")
-        assert result["max_iterations"] == 42
-        assert result["pr_type"] == "draft"
+        with pytest.raises(ValueError, match="agent:"):
+            resolve_config(path, "nonexistent.yaml", "resolve")
     finally:
         os.unlink(path)
 
 
-def test_resolve_config_on_failure_default(config_dir):
-    """on_failure defaults to 'draft'."""
-    tmp_path, base_path = config_dir
-    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
-    assert result["on_failure"] == "draft"
+def test_resolve_config_context_files_raises():
+    """Mode config using context_files: (removed in v0.9) raises ValueError with helpful message."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(
+            {
+                "default_model": "m",
+                "models": {"m": {"id": "anthropic/test"}},
+                "modes": {"design": {"context_files": ["README.md"]}},
+            },
+            f,
+        )
+        path = f.name
+    try:
+        with pytest.raises(ValueError, match="extra_files"):
+            resolve_config(path, "nonexistent.yaml", "design")
+    finally:
+        os.unlink(path)
+
+
+def test_parse_args_target_branch_unknown():
+    """target_branch (removed in v0.9) is no longer accepted as an alias for branch."""
+    with pytest.raises(ValueError, match="Unknown argument"):
+        parse_args(["target_branch = design/gemini"])
 
 
 def test_resolve_config_on_failure_draft(config_dir):
@@ -732,16 +750,6 @@ def test_resolve_config_branch_key(config_dir):
         yaml.dump({"agent": {"branch": "dev"}}, f)
     result = resolve_config(base_path, override_path, "resolve")
     assert result["target_branch"] == "dev"
-
-
-def test_resolve_config_target_branch_override_backcompat(config_dir):
-    """target_branch key in agent: still works — BACKCOMPAT."""
-    tmp_path, base_path = config_dir
-    override_path = str(tmp_path / "override.yaml")
-    with open(override_path, "w") as f:
-        yaml.dump({"agent": {"target_branch": "master"}}, f)
-    result = resolve_config(base_path, override_path, "resolve")
-    assert result["target_branch"] == "master"
 
 
 def test_resolve_config_assign_issue_default(config_dir):
@@ -983,14 +991,6 @@ def test_resolve_config_args_branch(config_dir):
     """args can override branch (target branch)."""
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={"branch": "design/gemini"})
-    assert result["target_branch"] == "design/gemini"
-    assert result["target_branch_explicit"] is True
-
-
-def test_resolve_config_args_target_branch_backcompat(config_dir):
-    """args target_branch is accepted as BACKCOMPAT alias for branch."""
-    tmp_path, base_path = config_dir
-    result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={"target_branch": "design/gemini"})
     assert result["target_branch"] == "design/gemini"
     assert result["target_branch_explicit"] is True
 

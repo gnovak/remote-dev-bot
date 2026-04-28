@@ -19,9 +19,8 @@ Argument names are normalized (spaces/dashes/underscores are equivalent).
 Values after = can be single values or space-separated lists.
 
 Config key notes:
-  - 'agent:' is the current config section for agent settings (formerly 'openhands:')
-  - 'branch' is the current key for target branch (formerly 'target_branch')
-  Both old keys are accepted as aliases for backward compatibility.
+  - 'agent:' is the current config section for agent settings
+  - 'branch' is the current key for target branch
   - 'commit_trailer' is removed; instruct the agent via AGENTS.md instead.
 
 Called by remote-dev-bot.yml at runtime and imported directly by unit tests.
@@ -55,28 +54,27 @@ def normalize_config(config):
     rather than being silently ignored when a newer layer defines the
     replacement key.
 
-    Renames performed (all BACKCOMPAT, remove at v1.0):
-      openhands: → agent:          (top-level section rename)
+    Renames performed:
       mode.context_files: → mode.extra_files:
       mode.additional_instructions: → mode.extra_instructions:
-    """
-    # BACKCOMPAT(v0→v1, 2026-03-05): rename top-level openhands: → agent:
-    # Must normalize per-layer before deep_merge; a fallback in resolve_config
-    # only works when agent: is absent from the entire merged config, which
-    # fails as soon as any layer (e.g. the base config) defines agent:.
-    if "openhands" in config:
-        if "agent" not in config:
-            config["agent"] = config.pop("openhands")
-        else:
-            # Both present: merge openhands into agent, agent wins on conflict
-            config["agent"] = deep_merge(config.pop("openhands"), config["agent"])
 
-    # BACKCOMPAT(v0→v1, 2026-03-05): rename mode-level context_files: → extra_files:
-    # and additional_instructions: → extra_instructions:
+    Raises ValueError if deprecated keys (openhands:, context_files:) are used,
+    with a message directing users to the current key name.
+    """
+    # Raise clear errors for removed legacy keys
+    if "openhands" in config:
+        raise ValueError(
+            "Config key 'openhands:' was renamed to 'agent:' in v0.9. "
+            "Please update your remote-dev-bot.yaml."
+        )
+
     for mode_cfg in config.get("modes", {}).values():
         if isinstance(mode_cfg, dict):
-            if "context_files" in mode_cfg and "extra_files" not in mode_cfg:
-                mode_cfg["extra_files"] = mode_cfg.pop("context_files")
+            if "context_files" in mode_cfg:
+                raise ValueError(
+                    "Config key 'context_files:' was renamed to 'extra_files:' in v0.9. "
+                    "Please update your remote-dev-bot.yaml."
+                )
             if "additional_instructions" in mode_cfg and "extra_instructions" not in mode_cfg:
                 mode_cfg["extra_instructions"] = mode_cfg.pop("additional_instructions")
 
@@ -94,8 +92,6 @@ ALLOWED_ARGS = {
     "timeout_minutes": int,      # agent.timeout_minutes
     "extra_files": list,         # mode's extra_files
     "branch": str,               # agent.branch (target branch for PRs)
-    # BACKCOMPAT(v0→v1, 2026-03-05): target_branch accepted as alias for branch
-    "target_branch": str,
     "status_log_interval": int,       # rolling status log interval (0 = disabled)
     "bash_output_limit": int,          # agent bash output truncation
     "context_keep_tool_results": int,  # how many tool result pairs to keep (resolve)
@@ -399,16 +395,14 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     model_id = models[alias]["id"]
     model_extra_instructions = models[alias].get("extra_instructions", "")
 
-    # Read agent settings (formerly openhands:)
-    # BACKCOMPAT(v0→v1, 2026-03-05): accept openhands: as alias for agent:
-    oh = config.get("agent", config.get("openhands", {}))
+    # Read agent settings
+    oh = config.get("agent", {})
     # max_iter: mode_config wins over global agent config (per-mode default),
     # and inline arg wins over both (applied below).
     max_iter = oh.get("max_iterations", 50)
     pr_type = oh.get("pr_type", "ready")
     on_failure = oh.get("on_failure", "draft")
-    # BACKCOMPAT(v0→v1, 2026-03-05): accept target_branch as alias for branch
-    target_branch = oh.get("branch", oh.get("target_branch", "main"))
+    target_branch = oh.get("branch", "main")
     assign_issue = oh.get("assign_issue", True)
     assign_pr = oh.get("assign_pr", True)
     if on_failure not in ("comment", "draft"):
@@ -450,10 +444,6 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         resolved_timeout = args["timeout_minutes"]
     if "branch" in args:
         target_branch = args["branch"]
-        target_branch_explicit = True
-    # BACKCOMPAT(v0→v1, 2026-03-05): target_branch inline arg accepted as alias for branch
-    elif "target_branch" in args:
-        target_branch = args["target_branch"]
         target_branch_explicit = True
 
     status_log_interval = args.get("status_log_interval", oh.get("status_log_interval", 5))
