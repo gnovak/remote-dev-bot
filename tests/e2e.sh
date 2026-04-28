@@ -902,6 +902,19 @@ for pos in "${!issue_nums[@]}"; do
                 status="PASS"
                 ((pass++)) || true
                 cleanup_branches+=("rdb-fix-issue-$issue_num")
+
+                # Compaction test: additionally verify that compaction actually fired
+                # by checking the workflow run logs for the [Compaction] marker.
+                if [[ "$name" == "compaction" && -n "$run_id" ]]; then
+                    compaction_log=$(gh run view "$run_id" --repo "$TEST_REPO" --log 2>/dev/null || echo "")
+                    if echo "$compaction_log" | grep -q "\[Compaction\]"; then
+                        status="PASS (compaction fired)"
+                    else
+                        status="FAIL (no [Compaction] marker in logs — compaction did not fire)"
+                        ((pass--)) || true
+                        ((fail++)) || true
+                    fi
+                fi
             else
                 status="FAIL (no PR created)"
                 ((fail++)) || true
