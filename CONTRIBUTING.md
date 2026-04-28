@@ -110,14 +110,14 @@ rdb uses a three-layer config merge plus optional per-invocation runtime args (e
 | Runtime args | Inline `name = value` lines in the trigger comment | Override for a single run; see `ALLOWED_ARGS` in `lib/config.py` |
 
 All merges are deep (leaf-level), so overriding `modes.design.max_iterations`
-does not clobber `modes.design.context_files`. Lists replace entirely (no
+does not clobber `modes.design.extra_files`. Lists replace entirely (no
 concatenation).
 
 ### Self-dev local config (`remote-dev-bot.local.yaml`)
 
 This file lives in the rdb repo root and applies when rdb is used to develop
 itself. It adds rdb implementation files (`lib/config.py`, etc.) to the design
-agent's `context_files` so the design agent can see actual code rather than
+agent's `extra_files` so the design agent can see actual code rather than
 guessing.
 
 It is **not** distributed to users: the sparse-checkout uses non-cone mode and
@@ -172,6 +172,24 @@ rdb's own issues, use the `/dogfood` command instead of `/agent`:
 ```
 
 `dogfood.yml` is internal to this repo and is never distributed to users.
+
+## Code Conventions
+
+### BACKCOMPAT tags
+
+When adding a backwards-compatibility shim for a renamed or removed feature,
+tag it with:
+
+```python
+# BACKCOMPAT(remove-at-vX.Y, YYYY-MM-DD): <reason>
+```
+
+Open-interval semantics: the shim is present in versions `[introduced, X.Y)` and
+is removed when `vX.Y` is tagged. The date records when the shim was introduced,
+making it easy to audit and remove on schedule.
+
+When the named version is reached: remove the shim, remove the corresponding
+test(s), and add a test verifying the old key produces a clear error.
 
 ## Dev Cycle
 

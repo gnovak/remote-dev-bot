@@ -47,7 +47,7 @@ Remote Dev Bot — a GitHub Action that runs an AI coding agent to resolve issue
 - `remote-dev-bot.local.yaml` — local overrides (gitignored); use for dev without affecting CI
 - `install.md` — setup instructions designed to be followed by humans or AI assistants
 
-**Note on config layering:** The config system loads three layers: base (`remote-dev-bot.yaml` in this repo) → target repo override → local (`.local.yaml`). `normalize_config()` in `lib/config.py` runs on each layer before merging to handle renamed keys (e.g. `openhands:` → `agent:`). Do NOT document the `.local.yaml` mechanism in user-facing docs (README.md, how-it-works.md, install.md) — it belongs only in CONTRIBUTING.md. User-facing docs describe only the two-layer system: base + target repo override.
+**Note on config layering:** The config system loads three layers: base (`remote-dev-bot.yaml` in this repo) → target repo override → local (`.local.yaml`). `normalize_config()` in `lib/config.py` runs on each layer before merging to handle renamed keys. Do NOT document the `.local.yaml` mechanism in user-facing docs (README.md, how-it-works.md, install.md) — it belongs only in CONTRIBUTING.md. User-facing docs describe only the two-layer system: base + target repo override.
 
 ### Running Tests
 
