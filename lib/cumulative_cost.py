@@ -13,7 +13,6 @@ Usage from workflow Python heredoc:
         _tbl.append(cum)
 """
 
-import json
 import re
 import subprocess
 
