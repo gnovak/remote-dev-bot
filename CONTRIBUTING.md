@@ -178,6 +178,20 @@ rdb's own issues, use the `/dogfood` command instead of `/agent`:
 See [AGENTS.md](AGENTS.md) for the full dev cycle documentation, including how
 the `e2e-test` branch pointer works and how to trigger test runs.
 
+## Local Development
+
+Install the project in editable mode with all dev dependencies:
+
+```bash
+pip install -e '.[dev]'
+```
+
+Then run the unit tests:
+
+```bash
+PYTHONPATH=. pytest tests/ -v
+```
+
 ## Test Infrastructure
 
 ### Unit tests (`tests/test_config.py`, `tests/test_yaml.py`, `tests/test_compile.py`)
