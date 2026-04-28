@@ -14,7 +14,6 @@ critiques, then decides to call `/agent-design` for a revised proposal or
 `/agent-resolve` to implement directly.
 """
 
-import gzip
 import math
 import os
 import re
@@ -26,43 +25,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 
 # ---------------------------------------------------------------------------
-# Cost formatting helpers
+# Cost formatting helpers — imported from shared lib/formatting.py
 # ---------------------------------------------------------------------------
 
-def _fmt_tok(n):
-    n = int(n)
-    if n >= 1_000_000:
-        v = n / 1_000_000
-        return f"{round(v)}M" if v >= 10 else f"{round(v, 1)}M"
-    elif n >= 1_000:
-        v = n / 1_000
-        return f"{round(v)}K" if v >= 10 else f"{round(v, 1)}K"
-    return str(n)
-
-
-def _fmt_ela(s):
-    s = int(s)
-    return f"{s // 60}m {s % 60}s" if s >= 60 else f"{s}s"
-
-
-def _fmt_bpd(text, cost):
-    if cost <= 0:
-        return 'N/A'
-    data = text.encode('utf-8') if isinstance(text, str) else text
-    bpd = (len(gzip.compress(data)) * 8) / cost  # compressed bits / dollar
-    if bpd >= 1_000_000:
-        return f"{bpd / 1_000_000:.1f} Mbit/$"
-    return f"{bpd / 1_000:.1f} Kbit/$"
-
-
-def _fmt_info(text):
-    if not text:
-        return None
-    data = text.encode('utf-8') if isinstance(text, str) else text
-    b = len(gzip.compress(data)) * 8
-    if b >= 1_000_000:
-        return f"{b / 1_000_000:.1f} Mbit"
-    return f"{b / 1_000:.1f} Kbit"
+from lib.formatting import _fmt_tok, _fmt_ela, _fmt_bpd, _fmt_loc, _fmt_info, TABLE_HEADER
 
 
 def _build_cost_table(input_tokens, output_tokens, cost, elapsed, output_text):
