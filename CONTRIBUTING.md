@@ -264,6 +264,40 @@ their target repo. They share:
 **Do not run e2e workflows in parallel.** Use the full test suite workflow for
 sequential execution, or run individual workflows one at a time.
 
+## Cutting a release
+
+This section covers the CHANGELOG-first release workflow. It complements the
+[Release Procedure](#release-procedure) below (which covers compiling artifacts
+and tagging).
+
+### Steps
+
+1. **Draft a comprehensive CHANGELOG entry.** AI or the maintainer writes a
+   draft covering everything plausibly relevant: new features, bug fixes,
+   internal changes, refactors, model updates, deprecations. Err on the side of
+   over-inclusion at this stage — the next step trims it.
+
+2. **Human reviews and pares down — mandatory, not skippable.** Read the draft
+   and cut it to what users actually need to know. Remove internal-only changes,
+   implementation details, and redundant entries. **Do not tag without completing
+   this step.** Future automation must not skip it.
+
+3. **Merge `dev` → `main`** (fast-forward expected):
+   ```bash
+   git checkout main && git merge --ff-only dev && git push
+   ```
+
+4. **Tag and push the tag**:
+   ```bash
+   git tag -a vX.Y.Z -m "Release vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+5. **Verify `release.yml` ran.** Pushing a tag triggers `.github/workflows/release.yml`,
+   which automatically creates a GitHub release with the body extracted from the
+   matching `## vX.Y.Z` section in `CHANGELOG.md`. Check the Actions tab to
+   confirm the workflow succeeded and the release page shows the correct notes.
+
 ## Release Procedure
 
 Releases distribute three compiled workflows (`agent-resolve.yml`, `agent-design.yml`, `agent-review.yml`) that users download into their repos.
