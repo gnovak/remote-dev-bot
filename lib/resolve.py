@@ -908,7 +908,8 @@ def build_cost_table():
     Returns a markdown string (starting with a blank line + heading), or ''
     if usage data is unavailable.
     """
-    import math, gzip, subprocess as _sp, re as _re
+    import math, subprocess as _sp, re as _re
+    from lib.formatting import _fmt_tok, _fmt_ela, _fmt_bpd, _fmt_loc, _fmt_info, TABLE_HEADER
 
     try:
         with open("/tmp/llm_usage.json") as f:
@@ -926,30 +927,6 @@ def build_cost_table():
     except Exception:
         elapsed = 0
 
-    def _fmt_tok(n):
-        if n >= 1_000_000:
-            return f"{round(n / 1_000_000, 1)}M"
-        if n >= 1_000:
-            return f"{round(n / 1_000, 1)}K"
-        return str(n)
-
-    def _fmt_loc(n):
-        if n >= 1_000_000:
-            return f"{n / 1_000_000:.1f}M"
-        if n >= 1_000:
-            return f"{n / 1_000:.1f}k"
-        return str(n)
-
-    def _fmt_bpd(text, cost):
-        if cost <= 0:
-            return "N/A"
-        data = text.encode("utf-8") if isinstance(text, str) else text
-        bpd = (len(gzip.compress(data)) * 8) / cost
-        if bpd >= 1_000_000:
-            return f"{bpd / 1_000_000:.1f} Mbit/$"
-        return f"{bpd / 1_000:.1f} Kbit/$"
-
-    elapsed_fmt = f"{elapsed // 60}m {elapsed % 60}s" if elapsed >= 60 else f"{elapsed}s"
     rounded = math.ceil(cost_val * 100) / 100
 
     # Compute git diff metrics (LOC and compressed diff size)
@@ -979,17 +956,8 @@ def build_cost_table():
     if _m:
         loc_changed += int(_m.group(1))
 
-    def _fmt_info(text):
-        if not text:
-            return None
-        data = text.encode("utf-8") if isinstance(text, str) else text
-        b = len(gzip.compress(data)) * 8
-        if b >= 1_000_000:
-            return f"{b / 1_000_000:.1f} Mbit"
-        return f"{b / 1_000:.1f} Kbit"
-
     rows = [
-        ("Time", elapsed_fmt),
+        ("Time", _fmt_ela(elapsed)),
         ("Iterations", str(iterations)),
     ]
     if shortstat:
@@ -1004,11 +972,9 @@ def build_cost_table():
     if cost_val > 0 and diff_text:
         rows.append(("Info/$", _fmt_bpd(diff_text, cost_val)))
     rows.append(("**Cost**", f"**${rounded:.2f}**"))
-    lines = ["", "### 💰 Cost", "", "| Metric | Value |", "|--------|-------|"]
+    lines = TABLE_HEADER[:]
     lines += [f"| {k} | {v} |" for k, v in rows]
     return "\n".join(lines)
-
-
 def build_cache_savings_summary():
     """Build a cache savings summary string for the agent status log.
 
@@ -1031,12 +997,7 @@ def build_cache_savings_summary():
     if cache_read_toks == 0 and cache_creation_toks == 0:
         return ""
 
-    def _fmt_tok(n):
-        if n >= 1_000_000:
-            return f"{round(n / 1_000_000, 1)}M"
-        if n >= 1_000:
-            return f"{round(n / 1_000, 1)}K"
-        return str(n)
+    from lib.formatting import _fmt_tok
 
     parts = []
     if cache_read_toks > 0:

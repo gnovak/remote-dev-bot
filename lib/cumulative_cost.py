@@ -16,24 +16,7 @@ Usage from workflow Python heredoc:
 import re
 import subprocess
 
-
-def _fmt_tok(n: int) -> str:
-    n = int(n)
-    if n >= 1_000_000:
-        v = n / 1_000_000
-        return f"{round(v)}M" if v >= 10 else f"{round(v, 1)}M"
-    elif n >= 1_000:
-        v = n / 1_000
-        return f"{round(v)}K" if v >= 10 else f"{round(v, 1)}K"
-    return str(n)
-
-
-def _fmt_loc(n: int) -> str:
-    if n >= 1_000_000:
-        return f"{n / 1_000_000:.1f}M"
-    if n >= 1_000:
-        return f"{n / 1_000:.1f}k"
-    return str(n)
+from lib.formatting import _fmt_tok, _fmt_loc
 
 
 def extract_costs_from_text(text: str) -> tuple:
