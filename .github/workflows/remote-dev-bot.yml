@@ -690,67 +690,17 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          # Fallback: primary paths (resolve.py success comment, Post result comment
-          # failure without draft PR, Append cost to PR) already set cost_embedded.
-          # This only fires for true edge cases (e.g., resolve.py crashed before
-          # posting its success comment, or the Post result comment step itself failed).
           if [ -f /tmp/cost_embedded ]; then
             echo "Cost already reported — skipping fallback"
             exit 0
           fi
-          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-          MODEL="${{ needs.parse.outputs.model }}"
-          ALIAS="${{ needs.parse.outputs.alias }}"
-          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
-          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
-          if [ -f /tmp/llm_usage.json ]; then
-            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
-          import json
-          d = json.load(open('/tmp/llm_usage.json'))
-          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
-          ")
-          else
-            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
-          fi
-          MAX_ITER="${MAX_ITERATIONS:-}"
-          ITERATIONS_FMT=$(python3 -c "
-          max_i = '${MAX_ITER}'
-          iters = '${ITERATIONS}'
-          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
-          ")
-          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
-          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
-          def fmt(n):
-              if n >= 1_000_000:
-                  v = n / 1_000_000
-                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
-              elif n >= 1_000:
-                  v = n / 1_000
-                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
-              return str(n)
-          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
-          ")
-          {
-            echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
-            echo ""
-            echo "⚠️ Agent did not complete — partial cost:"
-            echo ""
-            echo "### 💰 Cost"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| Time | ${ELAPSED_FMT} |"
-            echo "| Iterations | ${ITERATIONS_FMT} |"
-            echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
-            echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
-            printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
-          } > /tmp/cost_comment_fallback.md
-          gh issue comment "$ISSUE_NUMBER" \
+          python3 .remote-dev-bot/lib/post_fallback_cost.py \
+            --issue-number "${{ github.event.issue.number || github.event.pull_request.number }}" \
+            --model-alias "${{ needs.parse.outputs.alias }}" \
+            --model "${{ needs.parse.outputs.model }}" \
             --repo "${{ github.repository }}" \
-            --body-file /tmp/cost_comment_fallback.md
-
-
-  # --- Mode: build — resolve Stage 1 + council code review Stage 2 ---
+            --max-iterations "${MAX_ITERATIONS:-}" \
+            --message "⚠️ Agent did not complete — partial cost:"
   build:
     needs: parse
     if: needs.parse.outputs.mode == 'build'
@@ -1413,66 +1363,17 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          # Fallback: primary paths (resolve.py success comment, Post result comment
-          # failure without draft PR, Append cost to PR) already set cost_embedded.
-          # This only fires for true edge cases (e.g., resolve.py crashed before
-          # posting its success comment, or the Post result comment step itself failed).
           if [ -f /tmp/cost_embedded ]; then
             echo "Cost already reported — skipping fallback"
             exit 0
           fi
-          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-          MODEL="${{ needs.parse.outputs.model }}"
-          ALIAS="${{ needs.parse.outputs.alias }}"
-          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
-          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
-          if [ -f /tmp/llm_usage.json ]; then
-            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
-          import json
-          d = json.load(open('/tmp/llm_usage.json'))
-          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
-          ")
-          else
-            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
-          fi
-          MAX_ITER="${MAX_ITERATIONS:-}"
-          ITERATIONS_FMT=$(python3 -c "
-          max_i = '${MAX_ITER}'
-          iters = '${ITERATIONS}'
-          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
-          ")
-          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
-          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
-          def fmt(n):
-              if n >= 1_000_000:
-                  v = n / 1_000_000
-                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
-              elif n >= 1_000:
-                  v = n / 1_000
-                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
-              return str(n)
-          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
-          ")
-          {
-            echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
-            echo ""
-            echo "⚠️ Agent did not complete — partial cost:"
-            echo ""
-            echo "### 💰 Cost"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| Time | ${ELAPSED_FMT} |"
-            echo "| Iterations | ${ITERATIONS_FMT} |"
-            echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
-            echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
-            printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
-          } > /tmp/cost_comment_fallback.md
-          gh issue comment "$ISSUE_NUMBER" \
+          python3 .remote-dev-bot/lib/post_fallback_cost.py \
+            --issue-number "${{ github.event.issue.number || github.event.pull_request.number }}" \
+            --model-alias "${{ needs.parse.outputs.alias }}" \
+            --model "${{ needs.parse.outputs.model }}" \
             --repo "${{ github.repository }}" \
-            --body-file /tmp/cost_comment_fallback.md
-
-  # --- Mode: review — lightweight agentic loop to review a PR ---
+            --max-iterations "${MAX_ITERATIONS:-}" \
+            --message "⚠️ Agent did not complete — partial cost:"
   review:
     needs: parse
     if: needs.parse.outputs.mode == 'review'
@@ -2139,65 +2040,18 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          # Sentinel: if cost was embedded in main comment, skip
           if [ -f /tmp/cost_embedded ]; then
-            echo "Cost already embedded in main comment — skipping fallback"
+            echo "Cost already reported — skipping fallback"
             exit 0
           fi
-          PR_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-          MODEL="${{ needs.parse.outputs.model }}"
-          ALIAS="${{ needs.parse.outputs.alias }}"
-          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
-          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
-          if [ -f /tmp/llm_usage.json ]; then
-            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
-          import json
-          d = json.load(open('/tmp/llm_usage.json'))
-          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
-          ")
-          else
-            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
-          fi
-          MAX_ITER="${REVIEW_MAX_ITERATIONS:-}"
-          ITERATIONS_FMT=$(python3 -c "
-          max_i = '${MAX_ITER}'
-          iters = '${ITERATIONS}'
-          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
-          ")
-          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
-          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
-          def fmt(n):
-              if n >= 1_000_000:
-                  v = n / 1_000_000
-                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
-              elif n >= 1_000:
-                  v = n / 1_000
-                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
-              return str(n)
-          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
-          ")
-          {
-            echo "⚠️ Agent did not complete — partial cost:"
-            echo ""
-            echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
-            echo ""
-            echo "---"
-            echo ""
-            echo "### 💰 Cost"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| Time | ${ELAPSED_FMT} |"
-            echo "| Iterations | ${ITERATIONS_FMT} |"
-            echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
-            echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
-            printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
-          } > /tmp/cost_comment_fallback.md
-          gh pr comment "$PR_NUMBER" \
+          python3 .remote-dev-bot/lib/post_fallback_cost.py \
+            --issue-number "${{ github.event.issue.number || github.event.pull_request.number }}" \
+            --model-alias "${{ needs.parse.outputs.alias }}" \
+            --model "${{ needs.parse.outputs.model }}" \
             --repo "${{ github.repository }}" \
-            --body-file /tmp/cost_comment_fallback.md
-
-  # --- Mode: reconcile — rebase PR onto base branch, resolve conflicts, force-push ---
+            --max-iterations "${REVIEW_MAX_ITERATIONS:-}" \
+            --pr \
+            --message "⚠️ Agent did not complete — partial cost:"
   reconcile:
     needs: parse
     if: needs.parse.outputs.mode == 'reconcile'
@@ -3149,65 +3003,17 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          # Sentinel: if cost was embedded in main comment, skip
           if [ -f /tmp/cost_embedded ]; then
-            echo "Cost already embedded in main comment — skipping fallback"
+            echo "Cost already reported — skipping fallback"
             exit 0
           fi
-          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-          MODEL="${{ needs.parse.outputs.model }}"
-          ALIAS="${{ needs.parse.outputs.alias }}"
-          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
-          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
-          if [ -f /tmp/llm_usage.json ]; then
-            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
-          import json
-          d = json.load(open('/tmp/llm_usage.json'))
-          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
-          ")
-          else
-            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
-          fi
-          MAX_ITER="${DESIGN_MAX_ITERATIONS:-}"
-          ITERATIONS_FMT=$(python3 -c "
-          max_i = '${MAX_ITER}'
-          iters = '${ITERATIONS}'
-          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
-          ")
-          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
-          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
-          def fmt(n):
-              if n >= 1_000_000:
-                  v = n / 1_000_000
-                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
-              elif n >= 1_000:
-                  v = n / 1_000
-                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
-              return str(n)
-          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
-          ")
-          {
-            echo "⚠️ Agent did not complete — partial cost:"
-            echo ""
-            echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
-            echo ""
-            echo "---"
-            echo ""
-            echo "### 💰 Cost"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| Time | ${ELAPSED_FMT} |"
-            echo "| Iterations | ${ITERATIONS_FMT} |"
-            echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
-            echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
-            printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
-          } > /tmp/cost_comment_fallback.md
-          gh issue comment "$ISSUE_NUMBER" \
+          python3 .remote-dev-bot/lib/post_fallback_cost.py \
+            --issue-number "${{ github.event.issue.number || github.event.pull_request.number }}" \
+            --model-alias "${{ needs.parse.outputs.alias }}" \
+            --model "${{ needs.parse.outputs.model }}" \
             --repo "${{ github.repository }}" \
-            --body-file /tmp/cost_comment_fallback.md
-
-  # --- Mode: workshop — multi-model design council with human checkpoints ---
+            --max-iterations "${DESIGN_MAX_ITERATIONS:-}" \
+            --message "⚠️ Agent did not complete — partial cost:"
   workshop:
     needs: parse
     if: needs.parse.outputs.mode == 'workshop'
@@ -3516,67 +3322,17 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
-          # Sentinel: if cost was embedded in workshop comments, skip
           if [ -f /tmp/cost_embedded ]; then
-            echo "Cost already embedded in workshop comments — skipping fallback"
+            echo "Cost already reported — skipping fallback"
             exit 0
           fi
-          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-          MODEL="${{ needs.parse.outputs.model }}"
-          ALIAS="${{ needs.parse.outputs.alias }}"
-          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
-          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
-          if [ -f /tmp/llm_usage.json ]; then
-            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
-          import json
-          d = json.load(open('/tmp/llm_usage.json'))
-          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
-          ")
-          else
-            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
-          fi
-          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
-          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
-          def fmt(n):
-              if n >= 1_000_000:
-                  v = n / 1_000_000
-                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
-              elif n >= 1_000:
-                  v = n / 1_000
-                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
-              return str(n)
-          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
-          ")
-
-          WORKSHOP_MAX_ITER="${{ needs.parse.outputs.workshop_max_iterations }}"
-          ITERATIONS_FMT=$(python3 -c "
-          max_i = '${WORKSHOP_MAX_ITER}'
-          iters = '${ITERATIONS}'
-          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
-          ")
-
-          {
-            echo "⚠️ Workshop did not complete — partial cost:"
-            echo ""
-            echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
-            echo ""
-            echo "---"
-            echo ""
-            echo "### 💰 Cost"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| Time | ${ELAPSED_FMT} |"
-            echo "| Iterations | ${ITERATIONS_FMT} |"
-            echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
-            echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
-            printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
-          } > /tmp/cost_comment_fallback.md
-          gh issue comment "$ISSUE_NUMBER" \
+          python3 .remote-dev-bot/lib/post_fallback_cost.py \
+            --issue-number "${{ github.event.issue.number || github.event.pull_request.number }}" \
+            --model-alias "${{ needs.parse.outputs.alias }}" \
+            --model "${{ needs.parse.outputs.model }}" \
             --repo "${{ github.repository }}" \
-            --body-file /tmp/cost_comment_fallback.md
-
-  # --- Mode: delegate — full design-to-implementation cycle with no human pauses ---
+            --max-iterations "${{ needs.parse.outputs.workshop_max_iterations }}" \
+            --message "⚠️ Workshop did not complete — partial cost:"
   delegate:
     needs: parse
     if: needs.parse.outputs.mode == 'delegate'
@@ -4463,53 +4219,10 @@ jobs:
             echo "Cost already reported — skipping fallback"
             exit 0
           fi
-          ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
-          MODEL="${{ needs.parse.outputs.model }}"
-          ALIAS="${{ needs.parse.outputs.alias }}"
-          ELAPSED=$(( $(date +%s) - $(cat /tmp/start_time 2>/dev/null || date +%s) ))
-          ELAPSED_FMT=$(python3 -c "s=${ELAPSED}; print(f'{s//60}m {s%60}s' if s >= 60 else f'{s}s')")
-          if [ -f /tmp/llm_usage.json ]; then
-            read INPUT_TOKENS OUTPUT_TOKENS COST ITERATIONS < <(python3 -c "
-          import json
-          d = json.load(open('/tmp/llm_usage.json'))
-          print(d.get('input_tokens', 0), d.get('output_tokens', 0), d.get('cost') or 0, d.get('iterations', 0))
-          ")
-          else
-            INPUT_TOKENS=0; OUTPUT_TOKENS=0; COST=0; ITERATIONS=0
-          fi
-          DELEGATE_MAX_ITER="${{ needs.parse.outputs.delegate_max_iterations }}"
-          ITERATIONS_FMT=$(python3 -c "
-          max_i = '${DELEGATE_MAX_ITER}'
-          iters = '${ITERATIONS}'
-          print(f'{iters} / {max_i}' if max_i.isdigit() and int(max_i) > 0 else iters)
-          ")
-          ROUNDED=$(python3 -c "import math; print(f'{math.ceil(float(\"${COST:-0}\") * 100) / 100:.2f}')")
-          IFS=$'\t' read INPUT_TOKENS_FMT OUTPUT_TOKENS_FMT < <(python3 -c "
-          def fmt(n):
-              if n >= 1_000_000:
-                  v = n / 1_000_000
-                  return f'{round(v)}M' if v >= 10 else f'{round(v, 1)}M'
-              elif n >= 1_000:
-                  v = n / 1_000
-                  return f'{round(v)}K' if v >= 10 else f'{round(v, 1)}K'
-              return str(n)
-          print(fmt(${INPUT_TOKENS}), fmt(${OUTPUT_TOKENS}), sep='\t')
-          ")
-          {
-            echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
-            echo ""
-            echo "⚠️ Delegate pipeline did not complete — partial cost:"
-            echo ""
-            echo "### 💰 Cost"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| Time | ${ELAPSED_FMT} |"
-            echo "| Iterations | ${ITERATIONS_FMT} |"
-            echo "| Input | ${INPUT_TOKENS_FMT} tokens |"
-            echo "| Output | ${OUTPUT_TOKENS_FMT} tokens |"
-            printf "| **Cost** | **\$%s** |\n" "$ROUNDED"
-          } > /tmp/cost_comment_fallback.md
-          gh issue comment "$ISSUE_NUMBER" \
+          python3 .remote-dev-bot/lib/post_fallback_cost.py \
+            --issue-number "${{ github.event.issue.number || github.event.pull_request.number }}" \
+            --model-alias "${{ needs.parse.outputs.alias }}" \
+            --model "${{ needs.parse.outputs.model }}" \
             --repo "${{ github.repository }}" \
-            --body-file /tmp/cost_comment_fallback.md
+            --max-iterations "${{ needs.parse.outputs.delegate_max_iterations }}" \
+            --message "⚠️ Delegate pipeline did not complete — partial cost:"
