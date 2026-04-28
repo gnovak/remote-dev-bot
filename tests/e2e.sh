@@ -878,6 +878,51 @@ for pos in "${!issue_nums[@]}"; do
     printf "  %-25s %-30s issue #%-5s %s\n" "$name" "$status" "$issue_num" "$log_url"
 done
 
+# --- Reconcile test results ---
+log ""
+log "--- Reconcile Test ---"
+RECONCILE_PASS=0
+RECONCILE_FAIL=0
+reconcile_url=""
+[[ -n "$RECONCILE_RUN_ID" ]] && reconcile_url="https://github.com/$TEST_REPO/actions/runs/$RECONCILE_RUN_ID"
+
+if ! $reconcile_active; then
+    log "  (reconcile test not active — skipped)"
+elif $RECONCILE_SKIP; then
+    log "  reconcile-setup: SKIP (branch/PR setup failed)"
+    ((RECONCILE_FAIL++)) || true
+elif [[ -z "$RECONCILE_RESULT" ]]; then
+    log "  reconcile-test: TIMEOUT  $reconcile_url"
+    ((RECONCILE_FAIL++)) || true
+elif [[ "$RECONCILE_RESULT" != "success" ]]; then
+    log "  reconcile-test: FAIL ($RECONCILE_RESULT)  $reconcile_url"
+    ((RECONCILE_FAIL++)) || true
+else
+    # Workflow reported success — verify force-push happened (HEAD SHA changed)
+    new_sha=$(gh api "repos/$TEST_REPO/git/ref/heads/$RECONCILE_PR_BRANCH"         --jq '.object.sha' 2>/dev/null || echo "")
+    if [[ -z "$new_sha" ]]; then
+        log "  reconcile-test: FAIL (could not get new branch SHA)  $reconcile_url"
+        ((RECONCILE_FAIL++)) || true
+    elif [[ "$new_sha" == "$RECONCILE_INITIAL_SHA" ]]; then
+        log "  reconcile-test: FAIL (branch SHA unchanged — no force-push detected)  $reconcile_url"
+        ((RECONCILE_FAIL++)) || true
+    else
+        # Check for "Reconcile complete" comment on the PR
+        reconcile_comment=$(gh api "repos/$TEST_REPO/issues/$RECONCILE_PR_NUM/comments"             --jq '[.[] | select(.body | test("Reconcile complete|reconcile complete"; "i"))] | length'             2>/dev/null || echo "0")
+        if [[ "$reconcile_comment" -gt 0 ]]; then
+            log "  reconcile-test: PASS (force-pushed new SHA ${new_sha:0:7}, Reconcile complete comment found)  $reconcile_url"
+        else
+            log "  reconcile-test: PASS (force-pushed new SHA ${new_sha:0:7}, no Reconcile complete comment found)  $reconcile_url"
+        fi
+        ((RECONCILE_PASS++)) || true
+    fi
+fi
+
+if $reconcile_active; then
+    printf "  %-25s %-30s PR #%-6s %s
+" "reconcile"         "$([[ $RECONCILE_PASS -gt 0 ]] && echo 'PASS' || echo 'FAIL/SKIP')"         "${RECONCILE_PR_NUM:-N/A}" "$reconcile_url"
+fi
+
 # --- Review + Feedback results ---
 log ""
 log "--- Review + Feedback Test ---"
