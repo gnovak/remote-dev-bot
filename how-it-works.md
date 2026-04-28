@@ -120,13 +120,12 @@ User comments /agent-resolve-claude-large
 
 ## Config Layering
 
-Configuration is merged across three layers (each is optional, deeper layers win):
+Configuration is merged across two layers (each is optional, deeper layers win):
 
 | Layer    | File                          | Where it lives                                    |
 | -------- | ----------------------------- | ------------------------------------------------- |
 | Base     | `remote-dev-bot.yaml`         | remote-dev-bot repo (fetched via sparse-checkout) |
 | Override | `remote-dev-bot.yaml`         | target repo root                                  |
-| Local    | `remote-dev-bot.local.yaml`   | target repo root (gitignored, for local overrides)|
 
 Example:
 
