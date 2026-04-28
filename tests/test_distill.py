@@ -704,3 +704,77 @@ class TestParseLinkedIssues:
         result = parse_linked_issues(body)
         assert "1" in result
         assert "2" in result
+
+
+# ---------------------------------------------------------------------------
+# maybe_distill — explicit above/below threshold tests (issue #566)
+# ---------------------------------------------------------------------------
+
+class TestMaybeDistillThresholds:
+    """Explicit tests that distill() is called above threshold and not called below.
+
+    'Threshold' here refers to the distillation threshold:
+      - above threshold (small/medium repo) → distill() is invoked
+      - below threshold (very large repo, Tier 3) → distill() is NOT called
+    """
+
+    def test_above_threshold_distill_called_and_result_returned(self, tmp_path):
+        """Tier 1 (small repo, <= DISTILL_SMALL_REPO_LIMIT tokens): distill() is called.
+
+        Input clearly within the small-repo limit so maybe_distill() must invoke
+        distill() exactly once (full-codebase path) and return its output.
+        """
+        files = {"main.py": "def foo(): pass"}
+        make_git_repo(tmp_path, files)
+
+        # Use a token estimate clearly below DISTILL_SMALL_REPO_LIMIT → Tier 1 path.
+        small_token_count = DISTILL_SMALL_REPO_LIMIT - 1
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "distilled result"
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 200
+        mock_response.usage.completion_tokens = 80
+        mock_response._hidden_params = {"response_cost": 0.005}
+
+        original_context = "original repo context"
+
+        with patch("lib.distill.gather_repo_files", return_value=[{"path": "main.py", "content": "def foo(): pass", "is_source": True, "truncated": False}]), \
+             patch("lib.distill.estimate_tokens_for_files", return_value=small_token_count), \
+             patch("lib.distill.completion", return_value=mock_response) as mock_comp:
+            result = maybe_distill(original_context, "Fix a bug", "anthropic/claude-sonnet-4-5", root=str(tmp_path))
+
+        # distill() must have been called exactly once (Tier 1 path)
+        mock_comp.assert_called_once()
+        # The distilled text — not the original — must be returned
+        assert result[0] == "distilled result"
+        assert result[0] != original_context
+
+    def test_below_threshold_distill_not_called_original_returned(self, tmp_path):
+        """Tier 3 (huge repo, > DISTILL_STRUCT_EXTRACT_LIMIT tokens): distill() NOT called.
+
+        When the repo is very large (above DISTILL_STRUCT_EXTRACT_LIMIT), maybe_distill()
+        falls back without making any LLM call, and returns the original repo_context
+        unchanged with zero token counts.
+        """
+        files = {"placeholder.py": "x"}
+        make_git_repo(tmp_path, files)
+
+        # Token estimate clearly above DISTILL_STRUCT_EXTRACT_LIMIT → Tier 3 skip.
+        huge_token_count = DISTILL_STRUCT_EXTRACT_LIMIT + 1
+
+        original_context = "original repo context — must flow through unchanged"
+
+        with patch("lib.distill.gather_repo_files", return_value=[]), \
+             patch("lib.distill.estimate_tokens_for_files", return_value=huge_token_count), \
+             patch("lib.distill.completion") as mock_comp:
+            result = maybe_distill(original_context, "Fix a bug", "anthropic/claude-sonnet-4-5", root=str(tmp_path))
+
+        # distill() must NOT have been called at all
+        mock_comp.assert_not_called()
+        # The original context must be returned unchanged
+        assert result[0] == original_context
+        assert result[1] == 0   # zero input tokens used
+        assert result[2] == 0   # zero output tokens
+        assert result[3] == 0.0 # zero cost
