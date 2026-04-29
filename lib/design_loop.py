@@ -13,6 +13,7 @@ import sys
 from lib.tools import (
     validate_path as _tools_validate_path,
     execute_read_file as _tools_execute_read_file,
+    execute_gh as _tools_execute_gh,
 )
 
 
@@ -64,6 +65,34 @@ TOOLS = [
                     },
                 },
                 "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "gh",
+            "description": (
+                "Run a `gh` CLI command to inspect GitHub state — issues, PRs, "
+                "comments, Actions run logs, etc. Read-only inspection only; do "
+                "not use this for write operations (no commenting, no editing, "
+                "no merging). Provide the subcommand and arguments without the "
+                "leading 'gh'. Examples: `issue view 584`, "
+                "`pr view 597 --json title,body,comments`, "
+                "`run view 25084646693 --log`, "
+                "`api repos/owner/repo/issues/N/comments`. "
+                "Token scope is current-repo by default; cross-repo when the "
+                "workflow was invoked via /dogfood. 30-second timeout."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "args": {
+                        "type": "string",
+                        "description": "gh subcommand and arguments, without the leading 'gh'.",
+                    }
+                },
+                "required": ["args"],
             },
         },
     },
@@ -137,12 +166,19 @@ def execute_grep(pattern, path=None):
         return f"Error executing grep: {e}"
 
 
+def execute_gh(args):
+    """Execute the gh tool (delegates to lib.tools.execute_gh)."""
+    return _tools_execute_gh(args)
+
+
 def execute_tool(tool_name, arguments):
     """Execute a tool and return the result."""
     if tool_name == "read_file":
         return execute_read_file(arguments.get("path", ""))
     elif tool_name == "grep":
         return execute_grep(arguments.get("pattern", ""), arguments.get("path"))
+    elif tool_name == "gh":
+        return execute_gh(arguments.get("args", ""))
     elif tool_name == "submit_analysis":
         return arguments.get("analysis", "")
     else:
@@ -155,9 +191,13 @@ def execute_tool(tool_name, arguments):
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are analyzing a GitHub issue for design discussion using an agentic exploration loop. "
-    "You have access to tools to read files and search the codebase.\n\n"
+    "You have access to tools to read files, search the codebase, and inspect GitHub state.\n\n"
     "Your goal is to understand the issue, explore the relevant code, and produce a thorough "
-    "design analysis. Use the read_file and grep tools to explore the repository.\n\n"
+    "design analysis. Use the read_file and grep tools to explore the repository. "
+    "Use the gh tool when you need to look at GitHub state — past issues, PRs, comments, "
+    "or Actions run logs — for example when the question is 'why did run X fail' or "
+    "'what was discussed on issue Y'. The gh tool is for read-only inspection only; "
+    "do not use it to comment, edit, or merge.\n\n"
     "When you have gathered enough information, call the submit_analysis tool with your "
     "complete analysis in Markdown format.\n\n"
     "Your analysis should include:\n"

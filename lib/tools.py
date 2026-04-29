@@ -8,6 +8,7 @@ implementations with flags for the minor behavioral variants each caller needs.
 
 import os
 import re
+import shlex
 import subprocess
 
 
@@ -165,3 +166,54 @@ def execute_grep(pattern, path=None):
         return "Error: Search timed out"
     except Exception as e:
         return f"Error executing grep: {e}"
+
+
+def execute_gh(args, *, timeout=30):
+    """Run a `gh` CLI command for read-only GitHub-state inspection.
+
+    Arguments are parsed with shlex and passed to subprocess as a list, so
+    `gh` is invoked directly without a shell — shell metacharacters in the
+    input have no effect. The agent supplies arguments without the leading
+    "gh"; a leading "gh" is tolerated and stripped.
+
+    Authentication relies on GH_TOKEN being set in the process environment
+    (the workflow does this). Token scope (current-repo vs cross-repo) is
+    determined by the workflow's app-token configuration, not by this
+    function.
+
+    Parameters
+    ----------
+    args : str
+        The gh subcommand and arguments (e.g. "issue view 584",
+        "run view 25084646693 --log", "api repos/owner/repo/issues/N/comments").
+    timeout : int
+        Seconds before the command is killed. Default 30.
+    """
+    args = (args or "").strip()
+    if args.startswith("gh "):
+        args = args[3:].strip()
+    elif args == "gh":
+        args = ""
+    if not args:
+        return "Error: provide a gh subcommand (e.g. 'issue view 123')"
+    try:
+        parsed = shlex.split(args)
+    except ValueError as e:
+        return f"Error parsing gh arguments: {e}"
+    try:
+        result = subprocess.run(
+            ["gh"] + parsed,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        output = (result.stdout or "") + (result.stderr or "")
+        if result.returncode != 0:
+            output = f"(exit code {result.returncode})\n" + output
+        return output or "(no output)"
+    except subprocess.TimeoutExpired:
+        return f"Error: gh command timed out after {timeout} seconds"
+    except FileNotFoundError:
+        return "Error: gh CLI not found in PATH"
+    except Exception as e:
+        return f"Error executing gh: {e}"
