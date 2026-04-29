@@ -464,6 +464,12 @@ def main():
     # wrote a more specific status".
     loop_completed_naturally = False
 
+    # Cache strategy: place a moving-tail cache_control marker on the LAST
+    # message before each API call so the entire prefix is cached. See
+    # lib/resolve.py for full discussion (issue #606).
+    _use_cache_markers = LLM_MODEL.startswith(("anthropic/", "claude", "gemini/", "vertex_ai/"))
+    _cache_ttl = "3600s" if LLM_MODEL.startswith(("gemini/", "vertex_ai/")) else None
+
     try:
         for iteration in range(MAX_ITERATIONS):
             last_iteration = iteration
@@ -495,6 +501,30 @@ def main():
                     "role": "user",
                     "content": "Continue with the reconcile task. Use the tools available to proceed.",
                 })
+
+            # Place the moving-tail cache_control marker on the last message.
+            # Strip every existing marker first to avoid accumulation past
+            # Anthropic's 4-marker limit.
+            if _use_cache_markers and messages:
+                for _msg in messages:
+                    _c = _msg.get("content")
+                    if isinstance(_c, list):
+                        for _blk in _c:
+                            if isinstance(_blk, dict):
+                                _blk.pop("cache_control", None)
+                _tail = messages[-1]
+                _tail_content = _tail.get("content")
+                _cc: dict = {"type": "ephemeral"}
+                if _cache_ttl:
+                    _cc["ttl"] = _cache_ttl
+                if isinstance(_tail_content, str):
+                    _tail["content"] = [
+                        {"type": "text", "text": _tail_content, "cache_control": _cc}
+                    ]
+                elif isinstance(_tail_content, list) and _tail_content:
+                    _last_blk = _tail_content[-1]
+                    if isinstance(_last_blk, dict):
+                        _last_blk["cache_control"] = _cc
 
             try:
                 response = completion(

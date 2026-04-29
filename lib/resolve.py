@@ -1178,15 +1178,19 @@ def main():
     trigger_type = "PR" if ISSUE_TYPE == "pr" else "issue"
     initial_user_text = f"Please resolve {trigger_type} #{ISSUE_NUMBER} as described above."
 
-    # Anthropic requires explicit cache_control to enable prompt caching.
-    # LiteLLM supports a top-level cache_control parameter (PR #22442,
-    # merged March 2026) that tells the provider to cache the request
-    # prefix automatically — no per-message markers needed.
-    _cache_control: dict | None = None
-    if LLM_MODEL.startswith(("anthropic/", "claude")):
-        _cache_control = {"type": "ephemeral"}
-    elif LLM_MODEL.startswith(("gemini/", "vertex_ai/")):
-        _cache_control = {"type": "ephemeral", "ttl": "3600s"}
+    # Cache strategy: place a moving-tail cache_control marker on the LAST
+    # message before each API call. Anthropic caches the entire prefix up to
+    # the marker, so as the conversation grows iteration by iteration, almost
+    # all of each request hits the cache. The 5-min TTL refreshes on each
+    # hit, so the cache stays warm across the whole run as long as iterations
+    # are <5 min apart (always the case for our agent loops).
+    #
+    # The simpler "top-level cache_control" form (LiteLLM PR #22442) only
+    # caches the system prompt and was a regression: cache hit rate on long
+    # runs dropped from ~80% (moving tail) to ~5-10% (system-only). See #606.
+    _use_cache_markers = LLM_MODEL.startswith(("anthropic/", "claude", "gemini/", "vertex_ai/"))
+    # Gemini's cache semantics differ from Anthropic; explicit TTL is required.
+    _cache_ttl = "3600s" if LLM_MODEL.startswith(("gemini/", "vertex_ai/")) else None
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -1310,6 +1314,30 @@ def main():
                     "role": "user",
                     "content": "Continue working on the task. Use the tools available to proceed.",
                 })
+            # Place the moving-tail cache_control marker on the last message.
+            # Strip every existing marker first to avoid accumulation past
+            # Anthropic's 4-marker limit.
+            if _use_cache_markers and messages:
+                for _msg in messages:
+                    _c = _msg.get("content")
+                    if isinstance(_c, list):
+                        for _blk in _c:
+                            if isinstance(_blk, dict):
+                                _blk.pop("cache_control", None)
+                _tail = messages[-1]
+                _tail_content = _tail.get("content")
+                _cc: dict = {"type": "ephemeral"}
+                if _cache_ttl:
+                    _cc["ttl"] = _cache_ttl
+                if isinstance(_tail_content, str):
+                    _tail["content"] = [
+                        {"type": "text", "text": _tail_content, "cache_control": _cc}
+                    ]
+                elif isinstance(_tail_content, list) and _tail_content:
+                    # Apply the marker to the last block of the list.
+                    _last_blk = _tail_content[-1]
+                    if isinstance(_last_blk, dict):
+                        _last_blk["cache_control"] = _cc
             try:
                 response = completion_with_retries(
                     completion,
@@ -1318,7 +1346,6 @@ def main():
                     tools=TOOLS,
                     max_tokens=16384,
                     transient_error_counter=transient_error_counter,
-                    **({} if _cache_control is None else {"cache_control": _cache_control}),
                 )
             except litellm.exceptions.BadRequestError as exc:
                 err_msg = str(exc)
