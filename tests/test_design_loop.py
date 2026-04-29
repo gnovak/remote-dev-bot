@@ -172,3 +172,42 @@ class TestSystemPrompt:
 
     def test_prompt_mentions_gh_tool(self):
         assert "gh" in DEFAULT_SYSTEM_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# Distillation flag
+# ---------------------------------------------------------------------------
+
+class TestDistillationFlag:
+    """Verify run_design_loop's distill_enabled parameter contract.
+
+    Full-loop behavior testing is infeasible without elaborate mocking of
+    litellm. These tests verify the public-API contract:
+      - the parameter exists, defaults to True
+      - workshop and delegate accept and thread it through
+      - the docstring documents the new return-dict keys
+
+    Behavioral verification happens via /dogfood runs after merge.
+    """
+
+    def test_run_design_loop_signature(self):
+        import inspect
+        from design_loop import run_design_loop
+        sig = inspect.signature(run_design_loop)
+        assert "distill_enabled" in sig.parameters
+        assert sig.parameters["distill_enabled"].default is True
+
+    def test_workshop_signatures_thread_distill_enabled(self):
+        import inspect
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
+        from workshop import run_workshop, run_delegate
+        for fn in (run_workshop, run_delegate):
+            sig = inspect.signature(fn)
+            assert "distill_enabled" in sig.parameters, f"{fn.__name__} missing distill_enabled"
+            assert sig.parameters["distill_enabled"].default is True
+
+    def test_docstring_documents_return_keys(self):
+        from design_loop import run_design_loop
+        doc = run_design_loop.__doc__ or ""
+        for key in ("distill_input_tokens", "distill_output_tokens", "distill_cost"):
+            assert key in doc, f"return-dict key {key!r} not documented in run_design_loop docstring"

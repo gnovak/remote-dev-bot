@@ -2449,6 +2449,7 @@ jobs:
           DESIGN_CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.design_context_keep_tool_results }}
           DESIGN_WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           DESIGN_WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
+          DISTILL_ENABLED: ${{ needs.parse.outputs.distill_enabled }}
         run: |
           date +%s > /tmp/start_time
           python3 << 'PYEOF'
@@ -2504,6 +2505,32 @@ jobs:
               body = f.read().strip()
           with open("/tmp/issue_comments.txt") as f:
               comments = f.read().strip()
+
+          # Distillation pre-pass: pre-select the parts of the codebase
+          # relevant to the issue, mirroring resolve.py's behavior.
+          distill_input_tokens = 0
+          distill_output_tokens = 0
+          distill_cost = 0.0
+          distill_enabled = os.environ.get("DISTILL_ENABLED", "true").lower() == "true"
+          if distill_enabled:
+              try:
+                  from distill import maybe_distill
+                  issue_context_text = (
+                      f"## Issue: {title}\n\n{body}"
+                      + (f"\n\n## Discussion so far:\n{comments}" if comments else "")
+                  )
+                  print("Running context distillation pre-step (design)...")
+                  distilled, distill_input_tokens, distill_output_tokens, distill_cost, structural_extract = maybe_distill(
+                      repo_context, issue_context_text, model
+                  )
+                  if distilled != repo_context:
+                      new_repo = f"## Distilled Context\n\n{distilled}"
+                      if structural_extract:
+                          new_repo += f"\n\n## Codebase Index\n\n{structural_extract}"
+                      repo_context = new_repo
+                      print(f"  Distillation: ~{distill_input_tokens} in, ~{distill_output_tokens} out, ${distill_cost:.4f}")
+              except Exception as e:
+                  print(f"Distillation failed: {e} — proceeding with full repo context")
 
           # Build the user content
           user_content = f"""## Issue: {title}
@@ -3064,6 +3091,7 @@ jobs:
           EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
+          DISTILL_ENABLED: ${{ needs.parse.outputs.distill_enabled }}
         run: |
           date +%s > /tmp/start_time
           python3 << 'PYEOF'
@@ -3085,6 +3113,7 @@ jobs:
           max_iterations = int(os.environ.get("MAX_ITERATIONS", "15") or "15")
           wrapup_enabled = os.environ.get("WRAPUP_ENABLED", "true").lower() == "true"
           wrapup_iteration = int(os.environ.get("WRAPUP_ITERATION", "0") or "0")
+          distill_enabled = os.environ.get("DISTILL_ENABLED", "true").lower() == "true"
 
           # Council models from parse job (JSON list of {alias, id} dicts)
           council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
@@ -3148,6 +3177,7 @@ jobs:
               wrapup_enabled=wrapup_enabled,
               wrapup_iteration=wrapup_iteration,
               post_comment_fn=post_comment,
+              distill_enabled=distill_enabled,
           )
 
           # Save usage data for the cost fallback step
@@ -3340,6 +3370,7 @@ jobs:
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
           DESIGN_ROUNDS: ${{ needs.parse.outputs.design_rounds }}
+          DISTILL_ENABLED: ${{ needs.parse.outputs.distill_enabled }}
         run: |
           date +%s > /tmp/start_time
           python3 << 'PYEOF'
@@ -3365,6 +3396,7 @@ jobs:
           wrapup_enabled = os.environ.get("WRAPUP_ENABLED", "true").lower() == "true"
           wrapup_iteration = int(os.environ.get("WRAPUP_ITERATION", "0") or "0")
           design_rounds = int(os.environ.get("DESIGN_ROUNDS", "1") or "1")
+          distill_enabled = os.environ.get("DISTILL_ENABLED", "true").lower() == "true"
 
           council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
 
@@ -3423,6 +3455,7 @@ jobs:
               wrapup_iteration=wrapup_iteration,
               post_comment_fn=post_comment,
               design_rounds=design_rounds,
+              distill_enabled=distill_enabled,
           )
 
           # Save usage data

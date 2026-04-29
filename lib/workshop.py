@@ -551,6 +551,7 @@ def run_workshop(
     wrapup_iteration=0,
     context_keep_tool_results=0,
     post_comment_fn=None,
+    distill_enabled=True,
 ):
     """Run the full workshop MVP (Stages 1 and 2).
 
@@ -618,6 +619,7 @@ def run_workshop(
         wrapup_enabled=wrapup_enabled,
         wrapup_iteration=wrapup_iteration,
         context_keep_tool_results=context_keep_tool_results,
+        distill_enabled=distill_enabled,
     )
     design_elapsed = time.time() - design_start
 
@@ -972,6 +974,7 @@ def run_delegate(
     context_keep_tool_results=0,
     post_comment_fn=None,
     design_rounds=1,
+    distill_enabled=True,
 ):
     """Run the full delegate pipeline (6 stages, no human checkpoints).
 
@@ -1076,6 +1079,7 @@ def run_delegate(
         wrapup_enabled=wrapup_enabled,
         wrapup_iteration=wrapup_iteration,
         context_keep_tool_results=context_keep_tool_results,
+        distill_enabled=distill_enabled,
     )
     design_elapsed = time.time() - design_start
 
@@ -1317,6 +1321,7 @@ def run_delegate(
             wrapup_enabled=wrapup_enabled,
             wrapup_iteration=wrapup_iteration,
             context_keep_tool_results=context_keep_tool_results,
+            distill_enabled=distill_enabled,
             system_prompt=SPEC_DESIGN_SYSTEM_PROMPT,
         )
         spec_elapsed = time.time() - spec_start
