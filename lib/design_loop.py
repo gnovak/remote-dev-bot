@@ -237,6 +237,7 @@ def run_design_loop(
     wrapup_iteration=0,
     context_keep_tool_results=0,
     system_prompt=None,
+    distill_enabled=True,
 ):
     """Run the agentic design exploration loop.
 
@@ -264,6 +265,11 @@ def run_design_loop(
         Number of recent tool results to keep (0 = keep all).
     system_prompt : str or None
         Override the default system prompt entirely.
+    distill_enabled : bool
+        If True (default), run a distillation pre-pass via
+        lib.distill.maybe_distill to focus extra_context on the parts
+        relevant to the issue. Set False to skip (e.g. for tests, or
+        when extra_context is already focused).
 
     Returns
     -------
@@ -273,6 +279,9 @@ def run_design_loop(
         - output_tokens: int
         - cost: float
         - iterations: int
+        - distill_input_tokens: int
+        - distill_output_tokens: int
+        - distill_cost: float
     """
     from litellm import completion as litellm_completion
 
@@ -289,6 +298,38 @@ def run_design_loop(
 
     if extra_instructions:
         system_prompt += f"\n\n## Additional Instructions\n\n{extra_instructions}"
+
+    # Distillation pre-pass: pre-select the parts of the codebase relevant
+    # to the issue, so the agent doesn't have to discover them via tool
+    # calls. Mirrors the pattern used in resolve.py.
+    distill_input_tokens = 0
+    distill_output_tokens = 0
+    distill_cost = 0.0
+    if distill_enabled and extra_context:
+        try:
+            try:
+                from distill import maybe_distill
+            except ImportError:
+                sys.path.insert(0, os.path.dirname(__file__))
+                from distill import maybe_distill
+            issue_context_text = (
+                f"## Issue: {issue_title}\n\n{issue_body}"
+                + (f"\n\n## Discussion so far:\n{issue_comments}" if issue_comments else "")
+            )
+            print("Running context distillation pre-step (design loop)...")
+            distilled, distill_input_tokens, distill_output_tokens, distill_cost, structural_extract = maybe_distill(
+                extra_context, issue_context_text, model
+            )
+            if distilled != extra_context:
+                # Replace extra_context with focused content + index of all
+                # function/class definitions for direct navigation.
+                new_extra = f"## Distilled Context\n\n{distilled}"
+                if structural_extract:
+                    new_extra += f"\n\n## Codebase Index\n\n{structural_extract}"
+                extra_context = new_extra
+                print(f"  Distillation: ~{distill_input_tokens} in, ~{distill_output_tokens} out, ${distill_cost:.4f}")
+        except Exception as e:
+            print(f"Distillation failed: {e} — proceeding with full extra_context")
 
     # Build user content
     user_content = f"## Issue: {issue_title}\n\n{issue_body}"
@@ -413,6 +454,9 @@ def run_design_loop(
         "iterations": (iteration + 1) if max_iterations > 0 else 0,
         "cache_read_tokens": total_cache_read_tokens,
         "cache_creation_tokens": total_cache_creation_tokens,
+        "distill_input_tokens": distill_input_tokens,
+        "distill_output_tokens": distill_output_tokens,
+        "distill_cost": distill_cost,
     }
 
 
