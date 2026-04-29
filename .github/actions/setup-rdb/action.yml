@@ -31,6 +31,15 @@ inputs:
     description: 'Whether to include /remote-dev-bot.yaml in the sparse checkout'
     required: false
     default: 'true'
+  app_token_owner:
+    description: >-
+      Optional: scope the generated app token to all repos under this owner
+      that have the App installed. Empty (default) keeps the token scoped to
+      the current repo only. Used by the rdb-internal dogfood shim so
+      self-debugging agents can read other repos owned by the same user;
+      not set by the public agent.yml shim.
+    required: false
+    default: ''
 
 outputs:
   token:
@@ -47,7 +56,7 @@ runs:
       with:
         app-id: ${{ inputs.app_id }}
         private-key: ${{ inputs.app_private_key }}
-        owner: ${{ github.repository_owner }}
+        owner: ${{ inputs.app_token_owner }}
 
     - name: Checkout target repository
       uses: actions/checkout@v5
