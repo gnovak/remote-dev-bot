@@ -31,6 +31,11 @@ on:
         required: false
         default: 'agent'
         type: string
+      app_token_owner:
+        description: 'Optional: scope the generated GitHub App token to all repos under this owner instead of just the current repo. Empty (default) keeps current-repo-only scope. Set by the rdb-internal dogfood shim so self-debugging agents can read other repos owned by the same user; not set by the public agent.yml shim.'
+        required: false
+        default: ''
+        type: string
     secrets:
       ANTHROPIC_API_KEY:
         required: false
@@ -92,6 +97,7 @@ jobs:
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
           pat_token: ${{ secrets.RDB_PAT_TOKEN }}
           rdb_ref: ${{ inputs.rdb_ref }}
+          app_token_owner: ${{ inputs.app_token_owner }}
 
       - name: Install PyYAML
         run: pip install PyYAML
@@ -143,6 +149,7 @@ jobs:
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
           pat_token: ${{ secrets.RDB_PAT_TOKEN }}
           rdb_ref: ${{ inputs.rdb_ref }}
+          app_token_owner: ${{ inputs.app_token_owner }}
           include_rdb_config: 'false'
 
       - name: Determine API key
@@ -675,6 +682,7 @@ jobs:
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
           pat_token: ${{ secrets.RDB_PAT_TOKEN }}
           rdb_ref: ${{ inputs.rdb_ref }}
+          app_token_owner: ${{ inputs.app_token_owner }}
           include_rdb_config: 'false'
 
       - name: Determine API key
@@ -1330,6 +1338,7 @@ jobs:
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
           pat_token: ${{ secrets.RDB_PAT_TOKEN }}
           rdb_ref: ${{ inputs.rdb_ref }}
+          app_token_owner: ${{ inputs.app_token_owner }}
           fetch_depth: '0'
 
       - name: Install dependencies
@@ -1986,6 +1995,7 @@ jobs:
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
           pat_token: ${{ secrets.RDB_PAT_TOKEN }}
           rdb_ref: ${{ inputs.rdb_ref }}
+          app_token_owner: ${{ inputs.app_token_owner }}
           fetch_depth: '0'
           include_rdb_config: 'false'
 
@@ -2312,6 +2322,7 @@ jobs:
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
           pat_token: ${{ secrets.RDB_PAT_TOKEN }}
           rdb_ref: ${{ inputs.rdb_ref }}
+          app_token_owner: ${{ inputs.app_token_owner }}
           target_ref: ${{ steps.resolve_ref.outputs.ref }}
 
       - name: Capture checkout info
@@ -2930,6 +2941,7 @@ jobs:
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
           pat_token: ${{ secrets.RDB_PAT_TOKEN }}
           rdb_ref: ${{ inputs.rdb_ref }}
+          app_token_owner: ${{ inputs.app_token_owner }}
           target_ref: ${{ steps.resolve_ref.outputs.ref }}
 
       - name: Install dependencies
@@ -3209,6 +3221,7 @@ jobs:
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
           pat_token: ${{ secrets.RDB_PAT_TOKEN }}
           rdb_ref: ${{ inputs.rdb_ref }}
+          app_token_owner: ${{ inputs.app_token_owner }}
           target_ref: ${{ needs.parse.outputs.target_branch }}
 
       - name: Install dependencies

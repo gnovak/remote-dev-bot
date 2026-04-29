@@ -635,6 +635,10 @@ TOOLS = [
             "description": (
                 "Execute a bash command in the repository root. "
                 "Use this to read files, make edits, run tests, git add/commit/push, etc. "
+                "The `gh` CLI is available with a working GH_TOKEN, so you can also run "
+                "`gh issue view N`, `gh pr view N`, `gh run view RUN_ID --log`, "
+                "`gh api repos/<owner>/<repo>/...`, etc. to inspect issues, PRs, "
+                "comments, and Actions run logs when that helps you debug. "
                 "Commands have a 30-second timeout."
             ),
             "parameters": {
