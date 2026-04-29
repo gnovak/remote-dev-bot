@@ -89,9 +89,16 @@ jobs:
       distill_enabled: ${{ steps.parse.outputs.distill_enabled }}
 
     steps:
+      - name: Checkout rdb action source
+        uses: actions/checkout@v5
+        with:
+          repository: gnovak/remote-dev-bot
+          ref: ${{ inputs.rdb_ref }}
+          path: .rdb-action
+
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: ./.rdb-action/.github/actions/setup-rdb
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -141,9 +148,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout rdb action source
+        uses: actions/checkout@v5
+        with:
+          repository: gnovak/remote-dev-bot
+          ref: ${{ inputs.rdb_ref }}
+          path: .rdb-action
+
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: ./.rdb-action/.github/actions/setup-rdb
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -674,9 +688,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout rdb action source
+        uses: actions/checkout@v5
+        with:
+          repository: gnovak/remote-dev-bot
+          ref: ${{ inputs.rdb_ref }}
+          path: .rdb-action
+
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: ./.rdb-action/.github/actions/setup-rdb
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -1330,9 +1351,16 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      - name: Checkout rdb action source
+        uses: actions/checkout@v5
+        with:
+          repository: gnovak/remote-dev-bot
+          ref: ${{ inputs.rdb_ref }}
+          path: .rdb-action
+
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: ./.rdb-action/.github/actions/setup-rdb
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -1987,9 +2015,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout rdb action source
+        uses: actions/checkout@v5
+        with:
+          repository: gnovak/remote-dev-bot
+          ref: ${{ inputs.rdb_ref }}
+          path: .rdb-action
+
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: ./.rdb-action/.github/actions/setup-rdb
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -2314,9 +2349,16 @@ jobs:
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
           echo "Resolved checkout ref: $REF (issue_type=$ISSUE_TYPE)"
 
+      - name: Checkout rdb action source
+        uses: actions/checkout@v5
+        with:
+          repository: gnovak/remote-dev-bot
+          ref: ${{ inputs.rdb_ref }}
+          path: .rdb-action
+
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: ./.rdb-action/.github/actions/setup-rdb
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -2960,9 +3002,16 @@ jobs:
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
           echo "Resolved checkout ref: $REF (issue_type=$ISSUE_TYPE)"
 
+      - name: Checkout rdb action source
+        uses: actions/checkout@v5
+        with:
+          repository: gnovak/remote-dev-bot
+          ref: ${{ inputs.rdb_ref }}
+          path: .rdb-action
+
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: ./.rdb-action/.github/actions/setup-rdb
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -3243,9 +3292,16 @@ jobs:
     timeout-minutes: 120
 
     steps:
+      - name: Checkout rdb action source
+        uses: actions/checkout@v5
+        with:
+          repository: gnovak/remote-dev-bot
+          ref: ${{ inputs.rdb_ref }}
+          path: .rdb-action
+
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: ./.rdb-action/.github/actions/setup-rdb
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
