@@ -84,35 +84,14 @@ jobs:
       distill_enabled: ${{ steps.parse.outputs.distill_enabled }}
 
     steps:
-      - name: Generate app token
-        if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v3
-        id: app-token
+      - name: Setup RDB
+        id: setup
+        uses: ./.github/actions/setup-rdb
         with:
-          app-id: ${{ vars.RDB_APP_ID }}
-          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
-
-      - name: Checkout target repository
-        uses: actions/checkout@v5
-        with:
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-
-      - name: Checkout remote-dev-bot config
-        uses: actions/checkout@v5
-        with:
-          repository: gnovak/remote-dev-bot
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ inputs.rdb_ref }}
-          path: .remote-dev-bot
-          sparse-checkout: |
-            /remote-dev-bot.yaml
-            /lib/
-          sparse-checkout-cone-mode: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+          app_id: ${{ vars.RDB_APP_ID }}
+          app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+          pat_token: ${{ secrets.RDB_PAT_TOKEN }}
+          rdb_ref: ${{ inputs.rdb_ref }}
 
       - name: Install PyYAML
         run: pip install PyYAML
@@ -137,7 +116,7 @@ jobs:
           gh api repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions \
             --method POST --field content=rocket
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Assign commenter to issue
         if: steps.parse.outputs.assign_issue == 'true'
@@ -147,7 +126,7 @@ jobs:
           gh issue edit "$ISSUE_NUMBER" --repo "${{ github.repository }}" \
             --add-assignee "${{ github.event.comment.user.login }}"
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
   # --- Mode: resolve — run LiteLLM agent loop, open a PR ---
   resolve:
@@ -156,39 +135,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Generate app token
-        if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v3
-        id: app-token
+      - name: Setup RDB
+        id: setup
+        uses: ./.github/actions/setup-rdb
         with:
-          app-id: ${{ vars.RDB_APP_ID }}
-          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
-
-      - name: Checkout target repository
-        uses: actions/checkout@v5
-        with:
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-
-      - name: Checkout remote-dev-bot lib
-        uses: actions/checkout@v5
-        with:
-          repository: gnovak/remote-dev-bot
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ inputs.rdb_ref }}
-          path: .remote-dev-bot
-          sparse-checkout: |
-            /lib/
-          sparse-checkout-cone-mode: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+          app_id: ${{ vars.RDB_APP_ID }}
+          app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+          pat_token: ${{ secrets.RDB_PAT_TOKEN }}
+          rdb_ref: ${{ inputs.rdb_ref }}
+          include_rdb_config: 'false'
 
       - name: Determine API key
         id: apikey
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # Select the correct API key based on the model's provider prefix.
           # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
@@ -265,8 +225,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           GITHUB_USERNAME: ${{ github.repository_owner }}
           GIT_USERNAME: ${{ github.repository_owner }}
           E2E_TEST_TOKEN: ${{ secrets.E2E_TEST_TOKEN }}
@@ -325,7 +285,7 @@ jobs:
       - name: Safety-net push
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # If the agent made commits but forgot to push, or exhausted iterations without
           # calling finish(), save the work now. Skipped for no_op runs (nothing to push).
@@ -366,7 +326,7 @@ jobs:
       - name: Post result comment
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
@@ -565,7 +525,7 @@ jobs:
         if: needs.parse.outputs.assign_pr == 'true'
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # Extract PR number from send_pull_request output
           PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log | head -1)
@@ -582,7 +542,7 @@ jobs:
           always() &&
           !(github.event.issue.pull_request || github.event.pull_request)
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # For issue triggers: append the cost table to the newly created PR body.
           # Write /tmp/cost_embedded as sentinel so the fallback step skips.
@@ -688,7 +648,7 @@ jobs:
       - name: Post cost comment (fallback)
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           if [ -f /tmp/cost_embedded ]; then
             echo "Cost already reported — skipping fallback"
@@ -707,39 +667,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Generate app token
-        if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v3
-        id: app-token
+      - name: Setup RDB
+        id: setup
+        uses: ./.github/actions/setup-rdb
         with:
-          app-id: ${{ vars.RDB_APP_ID }}
-          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
-
-      - name: Checkout target repository
-        uses: actions/checkout@v5
-        with:
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-
-      - name: Checkout remote-dev-bot lib
-        uses: actions/checkout@v5
-        with:
-          repository: gnovak/remote-dev-bot
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ inputs.rdb_ref }}
-          path: .remote-dev-bot
-          sparse-checkout: |
-            /lib/
-          sparse-checkout-cone-mode: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+          app_id: ${{ vars.RDB_APP_ID }}
+          app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+          pat_token: ${{ secrets.RDB_PAT_TOKEN }}
+          rdb_ref: ${{ inputs.rdb_ref }}
+          include_rdb_config: 'false'
 
       - name: Determine API key
         id: apikey
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # Select the correct API key based on the model's provider prefix.
           # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
@@ -816,8 +757,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           GITHUB_USERNAME: ${{ github.repository_owner }}
           GIT_USERNAME: ${{ github.repository_owner }}
           E2E_TEST_TOKEN: ${{ secrets.E2E_TEST_TOKEN }}
@@ -876,7 +817,7 @@ jobs:
       - name: Safety-net push
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # If the agent made commits but forgot to push, or exhausted iterations without
           # calling finish(), save the work now. Skipped for no_op runs (nothing to push).
@@ -917,7 +858,7 @@ jobs:
       - name: Post result comment
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           ON_FAILURE="${{ needs.parse.outputs.on_failure }}"
@@ -1085,7 +1026,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
           GITHUB_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
@@ -1238,7 +1179,7 @@ jobs:
         if: needs.parse.outputs.assign_pr == 'true'
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # Extract PR number from send_pull_request output
           PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log | head -1)
@@ -1255,7 +1196,7 @@ jobs:
           always() &&
           !(github.event.issue.pull_request || github.event.pull_request)
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # For issue triggers: append the cost table to the newly created PR body.
           # Write /tmp/cost_embedded as sentinel so the fallback step skips.
@@ -1361,7 +1302,7 @@ jobs:
       - name: Post cost comment (fallback)
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           if [ -f /tmp/cost_embedded ]; then
             echo "Cost already reported — skipping fallback"
@@ -1381,36 +1322,15 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Generate app token
-        if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v3
-        id: app-token
+      - name: Setup RDB
+        id: setup
+        uses: ./.github/actions/setup-rdb
         with:
-          app-id: ${{ vars.RDB_APP_ID }}
-          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
-
-      - name: Checkout target repository
-        uses: actions/checkout@v5
-        with:
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          fetch-depth: 0
-
-      - name: Checkout remote-dev-bot config
-        uses: actions/checkout@v5
-        with:
-          repository: gnovak/remote-dev-bot
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ inputs.rdb_ref }}
-          path: .remote-dev-bot
-          sparse-checkout: |
-            /remote-dev-bot.yaml
-            /lib/
-          sparse-checkout-cone-mode: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+          app_id: ${{ vars.RDB_APP_ID }}
+          app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+          pat_token: ${{ secrets.RDB_PAT_TOKEN }}
+          rdb_ref: ${{ inputs.rdb_ref }}
+          fetch_depth: '0'
 
       - name: Install dependencies
         run: pip install PyYAML litellm
@@ -1425,7 +1345,7 @@ jobs:
       - name: Determine API key
         id: apikey
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # Select the correct API key based on the model's provider prefix.
           # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
@@ -1557,7 +1477,7 @@ jobs:
             fi
           fi
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Run review loop
         id: review
@@ -1944,7 +1864,7 @@ jobs:
 
       - name: Post review comment
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           PR_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           ALIAS="${{ needs.parse.outputs.alias }}"
@@ -2038,7 +1958,7 @@ jobs:
       - name: Post cost comment (fallback)
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           if [ -f /tmp/cost_embedded ]; then
             echo "Cost already reported — skipping fallback"
@@ -2058,40 +1978,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Generate app token
-        if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v3
-        id: app-token
+      - name: Setup RDB
+        id: setup
+        uses: ./.github/actions/setup-rdb
         with:
-          app-id: ${{ vars.RDB_APP_ID }}
-          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
-
-      - name: Checkout target repository
-        uses: actions/checkout@v5
-        with:
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          fetch-depth: 0
-
-      - name: Checkout remote-dev-bot lib
-        uses: actions/checkout@v5
-        with:
-          repository: gnovak/remote-dev-bot
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ inputs.rdb_ref }}
-          path: .remote-dev-bot
-          sparse-checkout: |
-            /lib/
-          sparse-checkout-cone-mode: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+          app_id: ${{ vars.RDB_APP_ID }}
+          app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+          pat_token: ${{ secrets.RDB_PAT_TOKEN }}
+          rdb_ref: ${{ inputs.rdb_ref }}
+          fetch_depth: '0'
+          include_rdb_config: 'false'
 
       - name: Determine API key
         id: apikey
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           MODEL="${{ needs.parse.outputs.model }}"
           ALIAS="${{ needs.parse.outputs.alias }}"
@@ -2150,7 +2051,7 @@ jobs:
 
       - name: Verify this is a PR
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           PR_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           IS_PR=${{ (github.event.issue.pull_request || github.event.pull_request) && 'true' || 'false' }}
@@ -2172,8 +2073,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           GITHUB_USERNAME: ${{ github.repository_owner }}
           GIT_USERNAME: ${{ github.repository_owner }}
           PR_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
@@ -2211,7 +2112,7 @@ jobs:
       - name: Post result comment
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           PR_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -2290,7 +2191,7 @@ jobs:
       - name: Post cost comment
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           PR_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           MODEL="${{ needs.parse.outputs.model }}"
@@ -2383,18 +2284,11 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Generate app token
-        if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v3
-        id: app-token
-        with:
-          app-id: ${{ vars.RDB_APP_ID }}
-          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 
       - name: Resolve checkout ref
         id: resolve_ref
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.RDB_PAT_TOKEN || github.token }}
           TARGET_BRANCH_EXPLICIT: ${{ needs.parse.outputs.target_branch_explicit }}
           TARGET_BRANCH: ${{ needs.parse.outputs.target_branch }}
         run: |
@@ -2410,11 +2304,15 @@ jobs:
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
           echo "Resolved checkout ref: $REF (issue_type=$ISSUE_TYPE)"
 
-      - name: Checkout target repository
-        uses: actions/checkout@v5
+      - name: Setup RDB
+        id: setup
+        uses: ./.github/actions/setup-rdb
         with:
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ steps.resolve_ref.outputs.ref }}
+          app_id: ${{ vars.RDB_APP_ID }}
+          app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+          pat_token: ${{ secrets.RDB_PAT_TOKEN }}
+          rdb_ref: ${{ inputs.rdb_ref }}
+          target_ref: ${{ steps.resolve_ref.outputs.ref }}
 
       - name: Capture checkout info
         id: checkout_info
@@ -2424,23 +2322,6 @@ jobs:
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "Checked out branch=$BRANCH sha=$SHA"
-
-      - name: Checkout remote-dev-bot config
-        uses: actions/checkout@v5
-        with:
-          repository: gnovak/remote-dev-bot
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ inputs.rdb_ref }}
-          path: .remote-dev-bot
-          sparse-checkout: |
-            /remote-dev-bot.yaml
-            /lib/
-          sparse-checkout-cone-mode: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
 
       - name: Install dependencies
         run: pip install PyYAML litellm
@@ -2455,7 +2336,7 @@ jobs:
       - name: Determine API key
         id: apikey
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # Select the correct API key based on the model's provider prefix.
           # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
@@ -2543,7 +2424,7 @@ jobs:
           echo "$ISSUE_BODY" > /tmp/issue_body.txt
           echo "$COMMENTS" > /tmp/issue_comments.txt
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Run design loop
         id: design
@@ -2900,7 +2781,7 @@ jobs:
 
       - name: Post analysis comment
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           ALIAS="${{ needs.parse.outputs.alias }}"
@@ -3001,7 +2882,7 @@ jobs:
       - name: Post cost comment (fallback)
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           if [ -f /tmp/cost_embedded ]; then
             echo "Cost already reported — skipping fallback"
@@ -3021,18 +2902,11 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Generate app token
-        if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v3
-        id: app-token
-        with:
-          app-id: ${{ vars.RDB_APP_ID }}
-          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
 
       - name: Resolve checkout ref
         id: resolve_ref
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.RDB_PAT_TOKEN || github.token }}
           TARGET_BRANCH_EXPLICIT: ${{ needs.parse.outputs.target_branch_explicit }}
           TARGET_BRANCH: ${{ needs.parse.outputs.target_branch }}
         run: |
@@ -3048,28 +2922,15 @@ jobs:
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
           echo "Resolved checkout ref: $REF (issue_type=$ISSUE_TYPE)"
 
-      - name: Checkout target repository
-        uses: actions/checkout@v5
+      - name: Setup RDB
+        id: setup
+        uses: ./.github/actions/setup-rdb
         with:
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ steps.resolve_ref.outputs.ref }}
-
-      - name: Checkout remote-dev-bot config
-        uses: actions/checkout@v5
-        with:
-          repository: gnovak/remote-dev-bot
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ inputs.rdb_ref }}
-          path: .remote-dev-bot
-          sparse-checkout: |
-            /remote-dev-bot.yaml
-            /lib/
-          sparse-checkout-cone-mode: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+          app_id: ${{ vars.RDB_APP_ID }}
+          app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+          pat_token: ${{ secrets.RDB_PAT_TOKEN }}
+          rdb_ref: ${{ inputs.rdb_ref }}
+          target_ref: ${{ steps.resolve_ref.outputs.ref }}
 
       - name: Install dependencies
         run: pip install PyYAML litellm
@@ -3084,7 +2945,7 @@ jobs:
       - name: Determine API key
         id: apikey
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           # Select the correct API key based on the design model's provider prefix.
           # Writing to GITHUB_OUTPUT passes values between steps as step outputs.
@@ -3172,7 +3033,7 @@ jobs:
           echo "$ISSUE_BODY" > /tmp/issue_body.txt
           echo "$COMMENTS" > /tmp/issue_comments.txt
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       - name: Run workshop
         id: workshop
@@ -3185,7 +3046,7 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
           ISSUE_TYPE: ${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}
           GITHUB_REPO: ${{ github.repository }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           MAX_ITERATIONS: ${{ needs.parse.outputs.workshop_max_iterations }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
           EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
@@ -3293,7 +3154,7 @@ jobs:
       - name: Post result comment
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -3320,7 +3181,7 @@ jobs:
       - name: Post cost comment (fallback)
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           if [ -f /tmp/cost_embedded ]; then
             echo "Cost already reported — skipping fallback"
@@ -3340,36 +3201,15 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: Generate app token
-        if: vars.RDB_APP_ID != ''
-        uses: actions/create-github-app-token@v3
-        id: app-token
+      - name: Setup RDB
+        id: setup
+        uses: ./.github/actions/setup-rdb
         with:
-          app-id: ${{ vars.RDB_APP_ID }}
-          private-key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
-
-      - name: Checkout target repository
-        uses: actions/checkout@v5
-        with:
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ needs.parse.outputs.target_branch }}
-
-      - name: Checkout remote-dev-bot config
-        uses: actions/checkout@v5
-        with:
-          repository: gnovak/remote-dev-bot
-          token: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          ref: ${{ inputs.rdb_ref }}
-          path: .remote-dev-bot
-          sparse-checkout: |
-            /remote-dev-bot.yaml
-            /lib/
-          sparse-checkout-cone-mode: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+          app_id: ${{ vars.RDB_APP_ID }}
+          app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
+          pat_token: ${{ secrets.RDB_PAT_TOKEN }}
+          rdb_ref: ${{ inputs.rdb_ref }}
+          target_ref: ${{ needs.parse.outputs.target_branch }}
 
       - name: Install dependencies
         run: pip install PyYAML litellm
@@ -3384,7 +3224,7 @@ jobs:
       - name: Determine API key
         id: apikey
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           MODEL="${{ needs.parse.outputs.model }}"
           ALIAS="${{ needs.parse.outputs.alias }}"
@@ -3463,7 +3303,7 @@ jobs:
           echo "$ISSUE_BODY" > /tmp/issue_body.txt
           echo "$COMMENTS" > /tmp/issue_comments.txt
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
 
       # ===================================================================
       # Stages 1-3: Design + Council Design Review + Design Revision
@@ -3479,7 +3319,7 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
           ISSUE_TYPE: ${{ (github.event.issue.pull_request || github.event.pull_request) && 'pr' || 'issue' }}
           GITHUB_REPO: ${{ github.repository }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           MAX_ITERATIONS: ${{ needs.parse.outputs.delegate_max_iterations }}
           MAX_DESIGN_ITERATIONS: ${{ needs.parse.outputs.delegate_max_design_iterations }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
@@ -3632,8 +3472,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           GITHUB_USERNAME: ${{ github.repository_owner }}
           GIT_USERNAME: ${{ github.repository_owner }}
           E2E_TEST_TOKEN: ${{ secrets.E2E_TEST_TOKEN }}
@@ -3741,7 +3581,7 @@ jobs:
       - name: Safety-net push
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           NO_OP=$(python3 -c "import json,os; d=json.load(open('/tmp/resolve_status.json')) if os.path.exists('/tmp/resolve_status.json') else {}; print('true' if d.get('no_op') else 'false')" 2>/dev/null || echo "false")
           if [[ "$NO_OP" == "true" ]]; then
@@ -3764,7 +3604,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
           GITHUB_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
@@ -3911,8 +3751,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           GITHUB_USERNAME: ${{ github.repository_owner }}
           GIT_USERNAME: ${{ github.repository_owner }}
           E2E_TEST_TOKEN: ${{ secrets.E2E_TEST_TOKEN }}
@@ -4069,7 +3909,7 @@ jobs:
       - name: Post result comment
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           DELEGATE_MAX_ITER: ${{ needs.parse.outputs.delegate_max_iterations }}
         run: |
           ISSUE_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
@@ -4194,7 +4034,7 @@ jobs:
         if: needs.parse.outputs.assign_pr == 'true'
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           PR_URL=$(grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' /tmp/spr_output.log | head -1)
           if [ -z "$PR_URL" ]; then
@@ -4213,7 +4053,7 @@ jobs:
       - name: Post cost comment (fallback)
         if: always()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
           if [ -f /tmp/cost_embedded ]; then
             echo "Cost already reported — skipping fallback"
