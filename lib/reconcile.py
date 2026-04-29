@@ -24,7 +24,11 @@ from litellm import completion
 # reconcile.py runs from a target repo's working directory.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from lib.context import compact_messages, estimate_tokens
+from lib.context import (
+    classify_provider_error,
+    compact_messages,
+    estimate_tokens,
+)
 from lib.tools import (
     validate_path,
     is_dangerous_command,
@@ -454,6 +458,12 @@ def main():
     rate_limit_retries = 0
     MAX_RATE_LIMIT_RETRIES = 3
 
+    # Tracks whether the for-loop ran to completion without `break`. Used by
+    # the post-loop code below to distinguish "agent truly exhausted iterations"
+    # from "the loop broke out early via an exception handler that already
+    # wrote a more specific status".
+    loop_completed_naturally = False
+
     try:
         for iteration in range(MAX_ITERATIONS):
             last_iteration = iteration
@@ -696,6 +706,9 @@ def main():
                         print(f"  [Status log iter {iteration + 1}]: {first_sentence[:100]}")
                 except Exception as e:
                     print(f"  [Status log] failed at iteration {iteration + 1}: {e}")
+        else:
+            # for-else: only runs if the for loop completed without `break`.
+            loop_completed_naturally = True
 
     finally:
         write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1)
@@ -718,7 +731,9 @@ def main():
             print(f"Could not post status log comment: {e}")
 
     if finish_args is None:
-        write_status(False, "Agent exhausted all iterations without calling finish()")
+        if loop_completed_naturally:
+            write_status(False, "Agent exhausted all iterations without calling finish()")
+        # else: a more specific status was written by the exception handler that broke the loop
         print("Agent did not call finish() — treating as failure")
         # Safety: if a mid-rebase state was left, abort it
         try:
@@ -770,7 +785,7 @@ if __name__ == "__main__":
         import traceback
         print(f"Unhandled exception in reconcile.py: {e}")
         traceback.print_exc()
-        write_status(False, f"Agent crashed: {e}")
+        write_status(False, f"Agent crashed: {classify_provider_error(e)}")
         # Safety: abort any in-progress rebase
         try:
             if os.path.exists(".git/rebase-merge") or os.path.exists(".git/rebase-apply"):

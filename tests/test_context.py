@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from lib.context import trim_tool_results, completion_with_retries
+from lib.context import classify_provider_error, trim_tool_results, completion_with_retries
 
 
 # ---------------------------------------------------------------------------
@@ -496,3 +496,49 @@ class TestCompletionWithRetries:
 
         assert result is expected
         assert fn.call_count == 6
+
+
+# ---------------------------------------------------------------------------
+# classify_provider_error
+# ---------------------------------------------------------------------------
+
+class TestClassifyProviderError:
+    def test_extracts_anthropic_message(self):
+        e = (
+            'litellm.BadRequestError: AnthropicException - '
+            '{"type":"error","error":{"type":"invalid_request_error",'
+            '"message":"You have reached your specified API usage limits. '
+            'You will regain access on 2026-05-01 at 00:00 UTC."},"request_id":"req_X"}'
+        )
+        result = classify_provider_error(e)
+        assert result.startswith("Anthropic API error: ")
+        assert "You have reached your specified API usage limits" in result
+        assert "2026-05-01" in result
+        # The noisy LiteLLM/JSON wrapper should not appear in the cleaned form
+        assert "BadRequestError" not in result
+        assert "request_id" not in result
+
+    def test_extracts_openai_message(self):
+        e = (
+            'litellm.RateLimitError: OpenAIException - '
+            '{"error":{"message":"Rate limit exceeded","type":"rate_limit_error"}}'
+        )
+        result = classify_provider_error(e)
+        assert result == "OpenAI API error: Rate limit exceeded"
+
+    def test_unstructured_string_returned_unchanged(self):
+        # Plain ConnectionError or similar with no embedded JSON
+        e = "ConnectionResetError: peer closed the connection"
+        assert classify_provider_error(e) == e
+
+    def test_exception_object_str_used(self):
+        # Should accept exception objects (calling str()) as well as strings
+        try:
+            raise ValueError("plain message")
+        except ValueError as exc:
+            assert classify_provider_error(exc) == "plain message"
+
+    def test_no_message_field_falls_back(self):
+        # An "Exception" pattern but no JSON message → fallback to original
+        e = "Some weird AnthropicException happened with no JSON"
+        assert classify_provider_error(e) == e

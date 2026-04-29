@@ -26,7 +26,12 @@ from litellm import completion
 # resolve.py runs from a target repo's working directory.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from lib.context import compact_messages, completion_with_retries, estimate_tokens
+from lib.context import (
+    classify_provider_error,
+    compact_messages,
+    completion_with_retries,
+    estimate_tokens,
+)
 from lib.tools import (
     validate_path,
     is_dangerous_command,
@@ -1208,6 +1213,12 @@ def main():
     rate_limit_retries = 0
     MAX_RATE_LIMIT_RETRIES = 3
 
+    # Tracks whether the for-loop ran to completion without `break`. Used by
+    # the post-loop code below to distinguish "agent truly exhausted iterations"
+    # from "the loop broke out early via an exception handler that already
+    # wrote a more specific status" (e.g., BadRequestError on spend-limit).
+    loop_completed_naturally = False
+
     try:
         for iteration in range(MAX_ITERATIONS):
             last_iteration = iteration
@@ -1729,6 +1740,10 @@ def main():
                             print(f"  [Status log iter {iteration + 1}]: {first_sentence[:100]}")
                 except Exception as e:
                     print(f"  [Status log] failed at iteration {iteration + 1}: {e}")
+        else:
+            # for-else: only runs if the for loop completed without `break`.
+            # If we reach here, the agent truly exhausted MAX_ITERATIONS.
+            loop_completed_naturally = True
 
     # Write usage data (always, even on exception)
     finally:
@@ -1798,7 +1813,12 @@ def main():
 
     # Handle finish
     if finish_args is None:
-        write_status(False, "Agent exhausted all iterations without calling finish()")
+        # Only claim "exhausted" if the for-loop ran to completion. If it
+        # broke out early via an exception handler (BadRequestError, rate
+        # limit, etc.), that handler already wrote a more specific status
+        # — don't overwrite it with the generic exhaustion message.
+        if loop_completed_naturally:
+            write_status(False, "Agent exhausted all iterations without calling finish()")
         print("Agent did not call finish() — treating as failure")
         # Safety net: push any local commits the agent made but forgot to push.
         # Unpushed commits are lost when the runner shuts down, so we attempt a
@@ -1820,9 +1840,15 @@ def main():
         if ISSUE_TYPE == "issue" and remote_branch_exists and ON_FAILURE == "draft":
             try:
                 last_status = status_log[-1][1] if status_log else "No status recorded."
+                if loop_completed_naturally:
+                    headline = (
+                        f"agent exhausted all {MAX_ITERATIONS} iterations "
+                        "without completing the task."
+                    )
+                else:
+                    headline = "agent did not finish the task \u2014 see status below."
                 draft_body = (
-                    f"\u26a0\ufe0f **Partial work** \u2014 agent exhausted all {MAX_ITERATIONS} iterations "
-                    f"without completing the task.\n\n"
+                    f"\u26a0\ufe0f **Partial work** \u2014 {headline}\n\n"
                     f"This draft PR contains whatever was committed and pushed during the run. "
                     f"To continue, trigger `/agent-resolve` as a comment on this PR and the "
                     f"agent will pick up from this branch.\n\n"
@@ -1957,6 +1983,6 @@ if __name__ == "__main__":
         import traceback
         print(f"Unhandled exception in resolve.py: {e}")
         traceback.print_exc()
-        write_status(False, f"Agent crashed: {e}")
+        write_status(False, f"Agent crashed: {classify_provider_error(e)}")
     finally:
         _cleanup()

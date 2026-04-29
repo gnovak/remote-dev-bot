@@ -9,6 +9,35 @@ import json
 import re
 
 
+def classify_provider_error(e):
+    """Surface provider-side error messages cleanly.
+
+    LiteLLM wraps provider errors and embeds the JSON response body in the
+    string. The actually-useful message (e.g. Anthropic's "You have reached
+    your specified API usage limits...") is buried inside that JSON. This
+    helper extracts it for human-readable reporting.
+
+    Returns a string in the form "{Provider} API error: {message}" when a
+    structured provider error can be parsed, or the unchanged str(e)
+    otherwise.
+
+    Examples:
+        >>> classify_provider_error("litellm.BadRequestError: AnthropicException - "
+        ...     '{"type":"error","error":{"type":"invalid_request_error",'
+        ...     '"message":"You have reached your specified API usage limits."}}')
+        'Anthropic API error: You have reached your specified API usage limits.'
+    """
+    msg = str(e)
+    m = re.search(
+        r'(\w+)Exception\b.*?"message":\s*"([^"]+)"',
+        msg,
+        re.DOTALL,
+    )
+    if m:
+        return f"{m.group(1)} API error: {m.group(2)}"
+    return msg
+
+
 # Patterns that indicate a bash command is a "write" operation.
 # Write operation results are protected from being dropped by trim_tool_results,
 # so context about what was actually changed is preserved longer.
