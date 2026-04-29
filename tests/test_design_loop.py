@@ -92,6 +92,22 @@ class TestExecuteTool:
         result = execute_tool("unknown_tool", {})
         assert "Unknown tool" in result
 
+    def test_gh_dispatches_to_gh(self, monkeypatch):
+        captured = {}
+
+        def fake_run(cmd, *a, **kw):
+            captured["cmd"] = cmd
+            class R:
+                returncode = 0
+                stdout = "issue body"
+                stderr = ""
+            return R()
+
+        monkeypatch.setattr("lib.tools.subprocess.run", fake_run)
+        result = execute_tool("gh", {"args": "issue view 584"})
+        assert result == "issue body"
+        assert captured["cmd"] == ["gh", "issue", "view", "584"]
+
 
 # ---------------------------------------------------------------------------
 # has_agent_command
@@ -123,16 +139,21 @@ class TestHasAgentCommand:
 # ---------------------------------------------------------------------------
 
 class TestToolDefinitions:
-    def test_has_three_tools(self):
-        assert len(TOOLS) == 3
+    def test_has_four_tools(self):
+        assert len(TOOLS) == 4
 
     def test_tool_names(self):
         names = {t["function"]["name"] for t in TOOLS}
-        assert names == {"read_file", "grep", "submit_analysis"}
+        assert names == {"read_file", "grep", "gh", "submit_analysis"}
 
     def test_all_tools_have_descriptions(self):
         for tool in TOOLS:
             assert tool["function"]["description"]
+
+    def test_gh_tool_takes_args(self):
+        gh_tool = next(t for t in TOOLS if t["function"]["name"] == "gh")
+        assert "args" in gh_tool["function"]["parameters"]["properties"]
+        assert gh_tool["function"]["parameters"]["required"] == ["args"]
 
 
 # ---------------------------------------------------------------------------
@@ -148,3 +169,6 @@ class TestSystemPrompt:
 
     def test_prompt_mentions_submit_analysis(self):
         assert "submit_analysis" in DEFAULT_SYSTEM_PROMPT
+
+    def test_prompt_mentions_gh_tool(self):
+        assert "gh" in DEFAULT_SYSTEM_PROMPT
