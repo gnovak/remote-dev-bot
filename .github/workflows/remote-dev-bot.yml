@@ -91,7 +91,7 @@ jobs:
     steps:
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@dev
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -143,7 +143,7 @@ jobs:
     steps:
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@dev
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -676,7 +676,7 @@ jobs:
     steps:
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@dev
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -1332,7 +1332,7 @@ jobs:
     steps:
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@dev
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -1989,7 +1989,7 @@ jobs:
     steps:
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@dev
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -2316,7 +2316,7 @@ jobs:
 
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@dev
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -2962,7 +2962,7 @@ jobs:
 
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@dev
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
@@ -3245,7 +3245,7 @@ jobs:
     steps:
       - name: Setup RDB
         id: setup
-        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@${{ inputs.rdb_ref }}
+        uses: gnovak/remote-dev-bot/.github/actions/setup-rdb@dev
         with:
           app_id: ${{ vars.RDB_APP_ID }}
           app_private_key: ${{ secrets.RDB_APP_PRIVATE_KEY }}
