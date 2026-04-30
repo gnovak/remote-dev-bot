@@ -64,6 +64,12 @@ runs:
         token: ${{ steps.app-token.outputs.token || inputs.pat_token || github.token }}
         ref: ${{ inputs.target_ref }}
         fetch-depth: ${{ inputs.fetch_depth }}
+        # Don't `git clean -ffdx` the workspace before checking out — the
+        # caller pre-fetched this composite action's source into
+        # .rdb-action/ and that subdir must survive so GHA can re-read
+        # action.yml at post-step time. The runner workspace is fresh
+        # per job so leftover-file risk is nil.
+        clean: false
 
     - name: Checkout remote-dev-bot config and lib
       if: ${{ inputs.include_rdb_config == 'true' }}
