@@ -140,6 +140,39 @@ def run(cmd, *, check=True, timeout=60):
     return output
 
 
+def _commit_dirty_wip(label="partial work"):
+    """Commit any dirty working-tree changes as WIP and push to origin.
+
+    Called from the three recovery paths (exhausted iterations,
+    finish(success=False), and the _cleanup atexit handler) before any
+    git ls-remote check, so partial in-progress work is preserved when
+    the agent fails to commit + push on its own.
+
+    Returns True if a commit was made and pushed; False if the tree
+    was already clean OR if any git operation failed (non-fatal — the
+    caller should still attempt PR creation with whatever's already on
+    the remote).
+
+    Uses --no-verify to skip pre-commit hooks, since hook failures here
+    would defeat the safety-net purpose.
+    """
+    try:
+        status = run("git status --porcelain", check=False, timeout=30)
+        if not status.strip():
+            return False
+        run("git add -A", check=False, timeout=30)
+        commit_msg = f"WIP: auto-saved by recovery handler ({label})"
+        # `label` is a hardcoded literal at each call site (no user input),
+        # so single-quote interpolation in the shell command is safe.
+        run(f"git commit --no-verify -m '{commit_msg}'", check=False, timeout=60)
+        run("git push origin HEAD", check=False, timeout=60)
+        print(f"  Auto-committed dirty WIP: {label}")
+        return True
+    except Exception as e:
+        print(f"  Auto-commit-WIP failed (non-fatal): {e}")
+        return False
+
+
 # --- Branch setup ---
 
 def _find_available_branch(issue_number):
@@ -1820,6 +1853,11 @@ def main():
         if loop_completed_naturally:
             write_status(False, "Agent exhausted all iterations without calling finish()")
         print("Agent did not call finish() — treating as failure")
+        # Auto-commit any dirty working-tree changes so partial work isn't
+        # lost. The agent may have made edits without committing — without
+        # this, the safety push below would find no local commits and the
+        # branch on the remote would have nothing of value.
+        _commit_dirty_wip("agent did not finish")
         # Safety net: push any local commits the agent made but forgot to push.
         # Unpushed commits are lost when the runner shuts down, so we attempt a
         # push here regardless of whether the agent followed the push instructions.
@@ -1930,6 +1968,8 @@ def main():
         print(f"Agent reported failure: {explanation}")
         if ON_FAILURE == "draft" and ISSUE_TYPE == "issue":
             print("Creating draft PR (on_failure=draft)...")
+            # Auto-commit dirty changes so create_pr has something on the remote.
+            _commit_dirty_wip("agent reported failure")
             try:
                 _body = pr_body or explanation
                 _fixes = f"Fixes #{ISSUE_NUMBER}"
@@ -1953,6 +1993,10 @@ def _cleanup():
 
     Only runs when on_failure: draft is set."""
     if not _pr_created and _branch_created and ISSUE_TYPE == "issue" and ON_FAILURE == "draft":
+        # Auto-commit dirty changes so the remote branch (if any) has the
+        # agent's partial work. This covers cases where the agent crashed
+        # mid-edit before committing.
+        _commit_dirty_wip("agent terminated unexpectedly")
         try:
             remote_exists = bool(run(
                 f"git ls-remote --heads origin {_branch_created}",
