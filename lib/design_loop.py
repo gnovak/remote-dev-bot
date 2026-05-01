@@ -220,6 +220,23 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 
+def _budget_paragraph(max_iterations):
+    """Build the iteration-budget paragraph for the design loop's system prompt.
+
+    Names the budget explicitly so the model can pace itself, but warns
+    against treating it as a target — without that, "you have N iterations"
+    reads as "spend N iterations." Mirrors resolve.py and reconcile.py.
+    """
+    return (
+        f"\n## Iteration Budget\n\n"
+        f"You have a budget of **{max_iterations} iterations** for this analysis. "
+        f"Aim to finish in significantly fewer if the question allows — the budget is "
+        f"a ceiling, not a target. Don't pad with extra exploration just because the "
+        f"budget is there. A focused design question rarely needs more than 5-8 "
+        f"iterations of reading before submit_analysis is appropriate.\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Core loop
 # ---------------------------------------------------------------------------
@@ -295,6 +312,10 @@ def run_design_loop(
 
     if system_prompt is None:
         system_prompt = DEFAULT_SYSTEM_PROMPT
+
+    # Iteration-budget hint: name the budget so the model can pace itself,
+    # but warn against treating it as a target. Mirrors resolve.py.
+    system_prompt = system_prompt + _budget_paragraph(max_iterations)
 
     if extra_instructions:
         system_prompt += f"\n\n## Additional Instructions\n\n{extra_instructions}"

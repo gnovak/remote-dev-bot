@@ -275,6 +275,14 @@ class TestBuildSystemPrompt:
         assert "ABSOLUTE" in prompt
         assert "NEVER" in prompt
 
+    def test_budget_paragraph_included(self):
+        """Prompt must include the iteration-budget paragraph naming MAX_ITERATIONS
+        and warning against treating the budget as a target."""
+        prompt = self._build(MAX_ITERATIONS=42)
+        assert "## Iteration Budget" in prompt
+        assert "**42 iterations**" in prompt
+        assert "ceiling, not a target" in prompt
+
     # --- BASE_BRANCH substitution ---
 
     def test_base_branch_substituted_main(self):

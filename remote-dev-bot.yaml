@@ -35,7 +35,7 @@ modes:
 
   design:
     default_model: claude-small
-    max_iterations: 10       # Iteration limit for the agentic loop
+    max_iterations: 15       # Iteration limit for the agentic loop
     extra_files:
       - README.md
       - CONTRIBUTING.md

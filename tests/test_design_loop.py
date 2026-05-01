@@ -211,3 +211,28 @@ class TestDistillationFlag:
         doc = run_design_loop.__doc__ or ""
         for key in ("distill_input_tokens", "distill_output_tokens", "distill_cost"):
             assert key in doc, f"return-dict key {key!r} not documented in run_design_loop docstring"
+
+
+# ---------------------------------------------------------------------------
+# Iteration-budget paragraph
+# ---------------------------------------------------------------------------
+
+class TestBudgetParagraph:
+    """Verify the budget paragraph names the budget and warns against treating it as a target."""
+
+    def test_includes_section_header(self):
+        from design_loop import _budget_paragraph
+        assert "## Iteration Budget" in _budget_paragraph(15)
+
+    def test_names_the_budget_value(self):
+        from design_loop import _budget_paragraph
+        assert "**15 iterations**" in _budget_paragraph(15)
+        assert "**30 iterations**" in _budget_paragraph(30)
+
+    def test_warns_against_target_treatment(self):
+        from design_loop import _budget_paragraph
+        text = _budget_paragraph(15)
+        # Must include both a "ceiling, not a target" framing and a
+        # "don't pad" or similar anti-fill-up nudge.
+        assert "ceiling, not a target" in text
+        assert "Don't pad" in text or "don't pad" in text

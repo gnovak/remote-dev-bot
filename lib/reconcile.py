@@ -376,8 +376,19 @@ At that point only {remaining} iteration(s) remain. If the rebase is not complet
 
     workflow = RECONCILE_WORKFLOW.replace("{BASE_BRANCH}", BASE_BRANCH)
 
+    # Iteration-budget hint: name the budget so the model can pace itself,
+    # but warn against treating it as a target. Mirrors resolve.py.
+    budget_paragraph = (
+        f"\n## Iteration Budget\n\n"
+        f"You have a budget of **{MAX_ITERATIONS} iterations** for this reconcile. "
+        f"Aim to finish in significantly fewer if the conflicts are simple — the budget "
+        f"is a ceiling, not a target. Don't pad with unnecessary exploration. A clean "
+        f"rebase with a few small conflicts rarely needs more than 10-15 iterations.\n"
+    )
+
     prompt = (
         AGENT_ROLE
+        + budget_paragraph
         + f"\n# Repository Context\n\n{repo_context}\n\n"
         + f"# PR Information\n\n{pr_info}\n\n"
         + workflow
