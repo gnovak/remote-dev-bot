@@ -93,34 +93,33 @@ def workflow_jobs():
     return load_yaml(REPO_ROOT / ".github/workflows/remote-dev-bot.yml")["jobs"]
 
 
-SETUP_ACTION_PATH = "./.github/actions/setup-rdb"
+def test_all_jobs_generate_app_token(workflow_jobs):
+    """Every job must have an inline 'Generate app token' step.
 
+    The app token (when configured) gives git credentials with
+    `workflows:write` permission. Pushes that touch .github/workflows/
+    will be rejected without this.
 
-def test_all_checkout_target_steps_use_app_token(workflow_jobs):
-    """Every job must use the setup-rdb composite action with app token inputs.
-
-    The composite action generates the app token and uses it for checkout,
-    ensuring git credentials have workflows:write permission. Pushes
-    that touch .github/workflows/ will be rejected without this.
-
-    Regression test for issue #463.
+    Regression test for issue #463. Updated post-#611, which inlined
+    the previous setup-rdb composite action back into each job.
     """
     for job_name, job in workflow_jobs.items():
-        setup_steps = [
+        app_token_steps = [
             s for s in job.get("steps", [])
-            if s.get("uses", "").startswith(SETUP_ACTION_PATH)
+            if s.get("uses", "").startswith("actions/create-github-app-token")
         ]
-        assert setup_steps, (
-            f"Job '{job_name}' must use the composite action '{SETUP_ACTION_PATH}'. "
+        assert app_token_steps, (
+            f"Job '{job_name}' must have a step using "
+            f"'actions/create-github-app-token'. "
             f"Found step uses: {[s.get('uses') for s in job.get('steps', []) if 'uses' in s]}"
         )
-        for step in setup_steps:
+        for step in app_token_steps:
             inputs = step.get("with", {})
-            assert "app_id" in inputs, (
-                f"Job '{job_name}': setup-rdb call must pass app_id input"
+            assert "app-id" in inputs, (
+                f"Job '{job_name}': create-github-app-token must pass app-id input"
             )
-            assert "app_private_key" in inputs, (
-                f"Job '{job_name}': setup-rdb call must pass app_private_key input"
+            assert "private-key" in inputs, (
+                f"Job '{job_name}': create-github-app-token must pass private-key input"
             )
 
 
@@ -130,9 +129,9 @@ def test_branch_aware_jobs_use_target_branch_ref(workflow_jobs):
     Unlike resolve/build/reconcile (which override TARGET_BRANCH and do their own
     git checkout in setup_branch()), and unlike review (which uses gh pr checkout),
     these analysis-mode jobs rely entirely on actions/checkout to land on the
-    right branch. Without `target_ref`, checkout falls back to the repo default branch
-    (typically main), so an inline arg like `branch=dev` is silently ignored and
-    the agent reads the wrong code.
+    right branch. Without an explicit `ref:` on the target checkout, it falls
+    back to the repo default branch (typically main), so an inline arg like
+    `branch=dev` is silently ignored and the agent reads the wrong code.
 
     design and workshop use steps.resolve_ref.outputs.ref, which resolves to the
     PR head for PR triggers (so the agent reads the proposed changes, not the base)
@@ -140,7 +139,9 @@ def test_branch_aware_jobs_use_target_branch_ref(workflow_jobs):
 
     delegate uses needs.parse.outputs.target_branch directly (no PR head override).
 
-    Regression test for issues #491 and #505.
+    Regression test for issues #491 and #505. Updated post-#611 to check the
+    inline 'Checkout target repository' step (previously this checked the
+    composite action's `target_ref` input).
     """
     # Jobs that resolve the checkout ref via the "Resolve checkout ref" step
     # (which uses PR head for PR triggers, target_branch for issue triggers)
@@ -148,10 +149,17 @@ def test_branch_aware_jobs_use_target_branch_ref(workflow_jobs):
     # Jobs that use the configured target_branch directly (no PR head override)
     TARGET_BRANCH_JOBS = {"delegate"}
 
+    def find_target_checkout(job):
+        """Return the first 'Checkout target repository' step in a job."""
+        for step in job.get("steps", []):
+            if step.get("name") == "Checkout target repository":
+                return step
+        return None
+
     for job_name in PR_HEAD_AWARE_JOBS:
         job = workflow_jobs.get(job_name)
         assert job, f"Expected job '{job_name}' in workflow"
-        # Check that the "Resolve checkout ref" step exists (still inline, before composite)
+        # Check that the "Resolve checkout ref" step exists
         resolve_step = next(
             (s for s in job.get("steps", []) if s.get("name") == "Resolve checkout ref"),
             None,
@@ -163,16 +171,16 @@ def test_branch_aware_jobs_use_target_branch_ref(workflow_jobs):
         assert resolve_step.get("id") == "resolve_ref", (
             f"Job '{job_name}': 'Resolve checkout ref' step must have id='resolve_ref'"
         )
-        # Check that the composite action is called with target_ref=steps.resolve_ref.outputs.ref
-        setup_step = next(
-            (s for s in job.get("steps", []) if s.get("uses", "").startswith(SETUP_ACTION_PATH)),
-            None,
+        # Check that the inline 'Checkout target repository' step uses
+        # ref: ${{ steps.resolve_ref.outputs.ref }}
+        target_step = find_target_checkout(job)
+        assert target_step is not None, (
+            f"Job '{job_name}' must have a 'Checkout target repository' step"
         )
-        assert setup_step is not None, f"Job '{job_name}' must use {SETUP_ACTION_PATH}"
-        target_ref = setup_step.get("with", {}).get("target_ref", "")
-        assert "steps.resolve_ref.outputs.ref" in target_ref, (
-            f"Job '{job_name}': setup-rdb composite action must pass "
-            f"target_ref containing 'steps.resolve_ref.outputs.ref' (got: {target_ref!r}). "
+        ref = target_step.get("with", {}).get("ref", "")
+        assert "steps.resolve_ref.outputs.ref" in ref, (
+            f"Job '{job_name}': 'Checkout target repository' must pass "
+            f"ref containing 'steps.resolve_ref.outputs.ref' (got: {ref!r}). "
             f"Without this, PR triggers check out the configured base branch "
             f"instead of the PR head (the proposed changes)."
         )
@@ -180,15 +188,14 @@ def test_branch_aware_jobs_use_target_branch_ref(workflow_jobs):
     for job_name in TARGET_BRANCH_JOBS:
         job = workflow_jobs.get(job_name)
         assert job, f"Expected job '{job_name}' in workflow"
-        setup_step = next(
-            (s for s in job.get("steps", []) if s.get("uses", "").startswith(SETUP_ACTION_PATH)),
-            None,
+        target_step = find_target_checkout(job)
+        assert target_step is not None, (
+            f"Job '{job_name}' must have a 'Checkout target repository' step"
         )
-        assert setup_step is not None, f"Job '{job_name}' must use {SETUP_ACTION_PATH}"
-        target_ref = setup_step.get("with", {}).get("target_ref", "")
-        assert "needs.parse.outputs.target_branch" in target_ref, (
-            f"Job '{job_name}': setup-rdb composite action must pass "
-            f"target_ref containing 'needs.parse.outputs.target_branch' (got: {target_ref!r}). "
+        ref = target_step.get("with", {}).get("ref", "")
+        assert "needs.parse.outputs.target_branch" in ref, (
+            f"Job '{job_name}': 'Checkout target repository' must pass "
+            f"ref containing 'needs.parse.outputs.target_branch' (got: {ref!r}). "
             f"Without this, the agent reads from the default branch "
             f"instead of the configured/inline branch."
         )
