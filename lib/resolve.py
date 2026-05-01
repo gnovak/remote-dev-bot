@@ -474,6 +474,23 @@ Each tool call costs real money. Be targeted and deliberate:
 - **Exploration should be proportional to task complexity.** A one-line fix does not warrant reading 10 files.
 """
 
+
+def _budget_paragraph(max_iterations):
+    """Build the iteration-budget paragraph for the agent's system prompt.
+
+    Names the budget explicitly so the model can pace itself, but explicitly
+    warns against treating the budget as a target — without that nudge,
+    "you have N iterations" reads as "spend N iterations."
+    """
+    return (
+        f"\n## Iteration Budget\n\n"
+        f"You have a budget of **{max_iterations} iterations** for this task. "
+        f"Aim to finish in significantly fewer if the task allows — the budget is a "
+        f"ceiling, not a target. Don't pad with extra exploration just because the "
+        f"budget is there. A simple fix should take 5-10 iterations; a complex "
+        f"multi-file change rarely needs more than 20-30.\n"
+    )
+
 STUCK_RECOVERY = """
 ## If You Are Stuck
 
@@ -594,6 +611,7 @@ is complete before committing — call `finish()` now.
 
     prompt = (
         AGENT_ROLE
+        + _budget_paragraph(MAX_ITERATIONS)
         + f"\n# Repository Context\n\n{repo_context}\n\n"
         + WORKFLOW
         + READING_THE_TASK
