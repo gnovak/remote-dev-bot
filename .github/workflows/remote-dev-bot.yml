@@ -4233,9 +4233,32 @@ jobs:
             cat /tmp/cost_table.txt >> /tmp/delegate_result_comment.md
           fi
 
-          gh issue comment "$ISSUE_NUMBER" \
-            --repo "${{ github.repository }}" \
-            --body-file /tmp/delegate_result_comment.md
+          # Post the full result+cost comment on the PR when one exists (the PR
+          # is the deliverable — that's where reviewers look). The issue gets a
+          # slim "pipeline complete — see PR" link with no cost block, so the
+          # cumulative scanner doesn't see the same cost in two places when it
+          # walks PR → linked issue. (Fixes #527.)
+          if [[ -n "$PR_URL" ]]; then
+            PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+            gh pr comment "$PR_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/delegate_result_comment.md
+            {
+              echo "🤖 **Model:** \`${ALIAS}\` (\`${MODEL}\`)"
+              echo ""
+              echo "### ✅ Delegate pipeline complete"
+              echo ""
+              echo "See the PR for details and cost summary: ${PR_URL}"
+            } | gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file -
+          else
+            # No PR (aborted or no-PR failure) — post the cost comment on the
+            # issue, since that's the only place to post it.
+            gh issue comment "$ISSUE_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/delegate_result_comment.md
+          fi
           echo "cost embedded" > /tmp/cost_embedded
 
       - name: Assign triggerer to PR
@@ -4253,10 +4276,11 @@ jobs:
           gh pr edit "$PR_NUMBER" --repo "${{ github.repository }}" \
             --add-assignee "${{ github.event.comment.user.login }}"
 
-      # NOTE: Delegate's "Append cost to PR" step was removed to prevent
-      # double-counting — delegate already posts cost as an issue comment
-      # (in "Post result comment" above), and the cumulative scanner would
-      # count both if the same cost table appeared on both the issue and PR.
+      # NOTE: Delegate has no "Append cost to PR" step (unlike resolve/build).
+      # Delegate's full pipeline cost is posted as a PR *comment* by the
+      # "Post result comment" step above. Appending the same cost to the PR
+      # body too would double-count when the cumulative scanner walks the
+      # PR's comments + body.
 
       - name: Post cost comment (fallback)
         if: always()
