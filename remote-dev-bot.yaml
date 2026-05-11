@@ -134,8 +134,8 @@ models:
     description: "Most capable — for complex multi-file features"
 
   gpt-small:
-    id: openai/gpt-5.5-mini
-    description: "OpenAI GPT-5.5 Mini — fast, cost-effective coding"
+    id: openai/gpt-5.1-codex-mini
+    description: "OpenAI GPT-5.1 Codex Mini — fast, cost-effective coding"
 
   gpt-large:
     id: openai/gpt-5.5
