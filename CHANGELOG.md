@@ -18,8 +18,6 @@
   `LOC/$`, and `Cumulative cost` rows. Delegate mode posts the full pipeline
   cost summary on the resulting PR rather than the source issue.
 
-**Breaking changes:** None.
-
 ## v0.8.0 — Workshop mode, build mode, and context compaction (Mar 2026)
 
 - **Workshop mode** (`/agent-workshop`): Two-stage multi-model design council.
