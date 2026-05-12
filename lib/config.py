@@ -19,9 +19,8 @@ Argument names are normalized (spaces/dashes/underscores are equivalent).
 Values after = can be single values or space-separated lists.
 
 Config key notes:
-  - 'agent:' is the current config section for agent settings (formerly 'openhands:')
-  - 'branch' is the current key for target branch (formerly 'target_branch')
-  Both old keys are accepted as aliases for backward compatibility.
+  - 'agent:' is the current config section for agent settings
+  - 'branch' is the current key for target branch
   - 'commit_trailer' is removed; instruct the agent via AGENTS.md instead.
 
 Called by remote-dev-bot.yml at runtime and imported directly by unit tests.
@@ -55,28 +54,27 @@ def normalize_config(config):
     rather than being silently ignored when a newer layer defines the
     replacement key.
 
-    Renames performed (all BACKCOMPAT, remove at v1.0):
-      openhands: → agent:          (top-level section rename)
+    Renames performed:
       mode.context_files: → mode.extra_files:
       mode.additional_instructions: → mode.extra_instructions:
-    """
-    # BACKCOMPAT(v0→v1, 2026-03-05): rename top-level openhands: → agent:
-    # Must normalize per-layer before deep_merge; a fallback in resolve_config
-    # only works when agent: is absent from the entire merged config, which
-    # fails as soon as any layer (e.g. the base config) defines agent:.
-    if "openhands" in config:
-        if "agent" not in config:
-            config["agent"] = config.pop("openhands")
-        else:
-            # Both present: merge openhands into agent, agent wins on conflict
-            config["agent"] = deep_merge(config.pop("openhands"), config["agent"])
 
-    # BACKCOMPAT(v0→v1, 2026-03-05): rename mode-level context_files: → extra_files:
-    # and additional_instructions: → extra_instructions:
+    Raises ValueError if deprecated keys (openhands:, context_files:) are used,
+    with a message directing users to the current key name.
+    """
+    # Raise clear errors for removed legacy keys
+    if "openhands" in config:
+        raise ValueError(
+            "Config key 'openhands:' was renamed to 'agent:' in v0.9. "
+            "Please update your remote-dev-bot.yaml."
+        )
+
     for mode_cfg in config.get("modes", {}).values():
         if isinstance(mode_cfg, dict):
-            if "context_files" in mode_cfg and "extra_files" not in mode_cfg:
-                mode_cfg["extra_files"] = mode_cfg.pop("context_files")
+            if "context_files" in mode_cfg:
+                raise ValueError(
+                    "Config key 'context_files:' was renamed to 'extra_files:' in v0.9. "
+                    "Please update your remote-dev-bot.yaml."
+                )
             if "additional_instructions" in mode_cfg and "extra_instructions" not in mode_cfg:
                 mode_cfg["extra_instructions"] = mode_cfg.pop("additional_instructions")
 
@@ -89,12 +87,11 @@ DEFAULT_TIMEOUT_MINUTES = 120
 
 # Arguments that can be overridden via inline args (lines after the command)
 ALLOWED_ARGS = {
-    "max_iterations": int,       # agent.max_iterations
+    "max_iterations": int,       # agent.max_iterations (code-writing stages)
+    "max_design_iterations": int,  # delegate: budget for design/exploration stages
     "timeout_minutes": int,      # agent.timeout_minutes
     "extra_files": list,         # mode's extra_files
     "branch": str,               # agent.branch (target branch for PRs)
-    # BACKCOMPAT(v0→v1, 2026-03-05): target_branch accepted as alias for branch
-    "target_branch": str,
     "status_log_interval": int,       # rolling status log interval (0 = disabled)
     "bash_output_limit": int,          # agent bash output truncation
     "context_keep_tool_results": int,  # how many tool result pairs to keep (resolve)
@@ -103,6 +100,10 @@ ALLOWED_ARGS = {
     "max_context_tokens": int,       # hard cap on context window (0 = model max)
     "compaction_coverage": float,    # fraction of messages to compact (oldest end)
     "compaction_factor": float,      # fraction of selected content to remove
+    "debug_logging": bool,           # enable verbose per-iteration debug tracing to stdout
+    "distill_enabled": bool,         # run distillation pre-pass before agent loop
+    "council": bool,               # run council code review (review mode)
+    "design_rounds": int,          # delegate: 1 = design only, 2 = design + implementation spec
 }
 
 
@@ -172,6 +173,14 @@ def parse_args(lines):
                 result[name] = float(value)
             except ValueError:
                 raise ValueError(f"Argument '{name}' must be a number, got: {value}")
+        elif arg_type == bool:
+            low = value.lower()
+            if low in ("true", "yes", "1"):
+                result[name] = True
+            elif low in ("false", "no", "0"):
+                result[name] = False
+            else:
+                raise ValueError(f"Argument '{name}' must be true/false, got: {value}")
         elif arg_type == list:
             # Split on whitespace for list values
             result[name] = value.split()
@@ -386,16 +395,14 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     model_id = models[alias]["id"]
     model_extra_instructions = models[alias].get("extra_instructions", "")
 
-    # Read agent settings (formerly openhands:)
-    # BACKCOMPAT(v0→v1, 2026-03-05): accept openhands: as alias for agent:
-    oh = config.get("agent", config.get("openhands", {}))
+    # Read agent settings
+    oh = config.get("agent", {})
     # max_iter: mode_config wins over global agent config (per-mode default),
     # and inline arg wins over both (applied below).
     max_iter = oh.get("max_iterations", 50)
     pr_type = oh.get("pr_type", "ready")
     on_failure = oh.get("on_failure", "draft")
-    # BACKCOMPAT(v0→v1, 2026-03-05): accept target_branch as alias for branch
-    target_branch = oh.get("branch", oh.get("target_branch", "main"))
+    target_branch = oh.get("branch", "main")
     assign_issue = oh.get("assign_issue", True)
     assign_pr = oh.get("assign_pr", True)
     if on_failure not in ("comment", "draft"):
@@ -438,10 +445,6 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     if "branch" in args:
         target_branch = args["branch"]
         target_branch_explicit = True
-    # BACKCOMPAT(v0→v1, 2026-03-05): target_branch inline arg accepted as alias for branch
-    elif "target_branch" in args:
-        target_branch = args["target_branch"]
-        target_branch_explicit = True
 
     status_log_interval = args.get("status_log_interval", oh.get("status_log_interval", 5))
     bash_output_limit = args.get("bash_output_limit", oh.get("bash_output_limit", None))
@@ -453,6 +456,11 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     max_context_tokens = args.get("max_context_tokens", oh.get("max_context_tokens", 0))
     compaction_coverage = args.get("compaction_coverage", oh.get("compaction_coverage", 0.5))
     compaction_factor = args.get("compaction_factor", oh.get("compaction_factor", 0.5))
+
+    debug_logging = bool(args.get("debug_logging", oh.get("debug_logging", False)))
+
+    # Context distillation pre-pass
+    distill_enabled = args.get("distill_enabled", oh.get("distill_enabled", True))
 
     # Validate compaction params
     if not (0 < compaction_coverage <= 1):
@@ -499,6 +507,8 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
     result["max_context_tokens"] = max_context_tokens
     result["compaction_coverage"] = compaction_coverage
     result["compaction_factor"] = compaction_factor
+    result["debug_logging"] = debug_logging
+    result["distill_enabled"] = distill_enabled
 
     # Include extra_instructions if the mode defines one (appended to canonical prompt)
     if "extra_instructions" in mode_config:
@@ -532,7 +542,7 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
             print(f"  {key}: {value}")
         print()
 
-    # Include max_iterations for agentic loop modes (design, review, workshop).
+    # Include max_iterations for agentic loop modes (design, review, workshop, reconcile).
     # Use max_iter (already resolved, including any inline arg override) rather than
     # mode_config["max_iterations"] so that e.g. `max_iterations = 20` in the comment
     # body is honoured for design and review modes, not just for resolve.
@@ -542,8 +552,45 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
         result["review_max_iterations"] = max_iter
     if mode == "workshop":
         result["workshop_max_iterations"] = max_iter
+    if mode == "reconcile":
+        result["reconcile_max_iterations"] = max_iter
+    if mode == "delegate":
+        # Delegate has two independent iteration budgets:
+        #   delegate_max_iterations        — code-writing stages (Stage 4 resolve,
+        #                                    Stage 6 agentic code revision)
+        #   delegate_max_design_iterations — design/exploration stages (Stage 1
+        #                                    design, Stage 3a implementation spec)
+        # `delegate_max_iterations` is identical to the already-resolved `max_iter`
+        # (mode.max_iterations with inline arg override). The design budget is a
+        # second independent knob whose fallback chain is:
+        #   inline arg (max_design_iterations) → mode.max_design_iterations
+        #   → agent.max_iterations
+        # Naming rationale: `max_iterations` stays the common/easy name because
+        # users who say "give it more iterations" almost always mean the coding
+        # parts; the design budget gets the explicit name.
+        result["delegate_max_iterations"] = max_iter
+        agent_max_iter = oh.get("max_iterations", 50)
+        result["delegate_max_design_iterations"] = args.get(
+            "max_design_iterations",
+            mode_config.get("max_design_iterations", agent_max_iter),
+        )
+        # Design rounds for delegate: 1 = design only, 2 = design + implementation spec.
+        # Inline arg takes precedence; otherwise fall back to mode config; otherwise 1.
+        # Only 1 and 2 are currently defined; reject anything else loudly rather
+        # than silently clamping to 2 (values >= 3 previously fell through the
+        # `if design_rounds >= 2` branch in run_delegate and behaved identically
+        # to 2, giving users no signal that their request was ignored).
+        default_rounds = int(mode_config.get("design_rounds", 1))
+        design_rounds = int(args.get("design_rounds", default_rounds))
+        if design_rounds not in (1, 2):
+            raise ValueError(
+                f"design_rounds must be 1 or 2, got: {design_rounds}. "
+                f"1 = design only; 2 = design + implementation spec round. "
+                f"Higher values (test plan, risk review, etc.) are not yet defined."
+            )
+        result["design_rounds"] = design_rounds
 
-    if mode in ("workshop", "build"):
+    if mode in ("workshop", "build", "delegate") or (mode == "review" and args.get("council", False)):
         # Council models: explicit list from mode config, or all configured models.
         # Used by workshop (design critique) and build (code review) modes.
         council_config = mode_config.get("council", [])
@@ -676,6 +723,14 @@ def main():
                 f.write(f"review_max_iterations={result['review_max_iterations']}\n")
             if "workshop_max_iterations" in result:
                 f.write(f"workshop_max_iterations={result['workshop_max_iterations']}\n")
+            if "reconcile_max_iterations" in result:
+                f.write(f"reconcile_max_iterations={result['reconcile_max_iterations']}\n")
+            if "delegate_max_iterations" in result:
+                f.write(f"delegate_max_iterations={result['delegate_max_iterations']}\n")
+            if "delegate_max_design_iterations" in result:
+                f.write(f"delegate_max_design_iterations={result['delegate_max_design_iterations']}\n")
+            if "design_rounds" in result:
+                f.write(f"design_rounds={result['design_rounds']}\n")
             if "council_models" in result:
                 f.write(f"council_models={json.dumps(result['council_models'])}\n")
 
@@ -694,6 +749,8 @@ def main():
             f.write(f"max_context_tokens={result['max_context_tokens']}\n")
             f.write(f"compaction_coverage={result['compaction_coverage']}\n")
             f.write(f"compaction_factor={result['compaction_factor']}\n")
+            f.write(f"debug_logging={str(result['debug_logging']).lower()}\n")
+            f.write(f"distill_enabled={str(result['distill_enabled']).lower()}\n")
 
     # Log for visibility
     override_label = "target repo" if result["has_override"] else "none"

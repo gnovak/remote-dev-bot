@@ -23,6 +23,7 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
+  workflows: write
 
 jobs:
   resolve:
@@ -34,6 +35,11 @@ jobs:
     with:
       rdb_ref: dev
       command_prefix: dogfood
+      # Broaden app token scope to all repos under this owner that have the App
+      # installed, so self-debugging dogfood runs in rdb can read issues/PRs/run
+      # logs from other repos (e.g. bridge-analysis) when fixing rdb itself.
+      # NOT set in agent.yml — public users get current-repo-only scope.
+      app_token_owner: ${{ github.repository_owner }}
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

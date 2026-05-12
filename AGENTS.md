@@ -31,13 +31,12 @@ Remote Dev Bot — a GitHub Action that runs an AI coding agent to resolve issue
 - `lib/context.py` — shared context management: `trim_tool_results` (drop old tool call pairs), `compact_messages` (LLM-summarize oldest messages), `estimate_tokens`
 - `lib/config.py` — config parsing: `parse_invocation`, `parse_args`, `resolve_config`, `normalize_config`, `ALLOWED_ARGS`; called by the workflow and unit tests
 - `lib/feedback.py` — install feedback collection: `InstallReport`, `InstallProblem`, `report_problems`; used during runbook execution
-- `scripts/compile.py` — compiles `remote-dev-bot.yml` → `dist/agent-resolve.yml`, `dist/agent-design.yml`, `dist/agent-review.yml`; finds steps by **name** not index
 
 **Tests** (`tests/`):
 - `test_config.py` — unit tests for all `lib/config.py` functions
 - `test_compaction.py` — unit tests for `lib/context.py` compaction functions
-- `test_compile.py` — tests that compiled outputs contain expected steps
 - `test_yaml.py` — structural/validity tests for YAML files (workflow and config)
+- `test_syntax.py` — `py_compile` check for every .py file under `lib/` and `scripts/`; catches SyntaxErrors that wouldn't be caught by import-based tests
 - `test_cost.py` — tests for cost parsing helpers (`parse_cost_from_comment` bash function in `e2e.sh`)
 - `test_feedback.py` — unit tests for `lib/feedback.py`
 - `e2e.sh` — full E2E test runner; creates issues in `remote-dev-bot-test`, triggers runs, checks results
@@ -48,7 +47,7 @@ Remote Dev Bot — a GitHub Action that runs an AI coding agent to resolve issue
 - `remote-dev-bot.local.yaml` — local overrides (gitignored); use for dev without affecting CI
 - `install.md` — setup instructions designed to be followed by humans or AI assistants
 
-**Note on config layering:** The config system loads three layers: base (`remote-dev-bot.yaml` in this repo) → target repo override → local (`.local.yaml`). `normalize_config()` in `lib/config.py` runs on each layer before merging to handle renamed keys (e.g. `openhands:` → `agent:`). Do NOT document the `.local.yaml` mechanism in user-facing docs (README.md, how-it-works.md, install.md) — it belongs only in CONTRIBUTING.md. User-facing docs describe only the two-layer system: base + target repo override.
+**Note on config layering:** The config system loads three layers: base (`remote-dev-bot.yaml` in this repo) → target repo override → local (`.local.yaml`). `normalize_config()` in `lib/config.py` runs on each layer before merging to handle renamed keys. Do NOT document the `.local.yaml` mechanism in user-facing docs (README.md, how-it-works.md, install.md) — it belongs only in CONTRIBUTING.md. User-facing docs describe only the two-layer system: base + target repo override.
 
 ### Running Tests
 
@@ -58,11 +57,58 @@ pytest tests/ -q
 
 # Specific test file
 pytest tests/test_config.py -v
-pytest tests/test_compile.py -v    # Run after any workflow or compile.py changes
 
 # With doctests
 pytest --doctest-modules lib/config.py
 ```
+
+## Codebase Index
+
+### Agent loop internals (`lib/resolve.py`)
+
+Each iteration: call `completion(model, messages, tools, max_tokens=16384)` → extract tool calls → execute each (bash / read_file / grep / finish) → append role=`tool` results → repeat. A single assistant message may have multiple tool_calls; `trim_tool_results()` drops the oldest **pairs** (assistant + all its tool results), not individual messages.
+
+**Wrapup:** At `WRAPUP_ITERATION` (default 80% of `MAX_ITERATIONS`), a user message is injected instructing the agent to commit and call `finish()` immediately. The loop still runs but the agent should stop exploring and wrap up.
+
+**Context compaction:** When estimated tokens exceed 85% of `MAX_CONTEXT_TOKENS`, `compact_messages()` in `lib/context.py` summarizes the oldest `compaction_coverage` fraction of messages via a one-shot LLM call and replaces them with the summary. Disabled by default (`max_context_tokens=0`).
+
+**`finish()` tool args:** `success` (bool), `explanation`, `pr_title`, `pr_body`, `conversation_summary`. After finish, resolve.py calls `gh pr create` and writes `/tmp/llm_usage.json` (cost/tokens) and `/tmp/resolve_status.json`.
+
+**Bash truncation:** If output > `BASH_OUTPUT_LIMIT` chars, the context gets first-half + last-half only (agent is told). Full output still appears in workflow logs.
+
+### Config → env var data flow
+
+`parse` job runs `lib/config.py`, writes outputs via `$GITHUB_OUTPUT`. Downstream jobs consume them via `${{ needs.parse.outputs.name }}` and export to Python via the job's `env:` block. Key mappings:
+
+| Config field | GITHUB_OUTPUT | resolve.py env var |
+|---|---|---|
+| model id | `model` | `LLM_MODEL` |
+| model alias | `alias` | `ALIAS` |
+| max_iterations | `max_iterations` | `MAX_ITERATIONS` |
+| extra_files | `extra_files` | `EXTRA_FILES` |
+| extra_instructions | `extra_instructions` | `EXTRA_INSTRUCTIONS` |
+| model extra_instructions | `model_extra_instructions` | `MODEL_EXTRA_INSTRUCTIONS` |
+| bash_output_limit | `bash_output_limit` | `BASH_OUTPUT_LIMIT` |
+| max_context_tokens | `max_context_tokens` | `MAX_CONTEXT_TOKENS` |
+| graceful_wrapup.threshold | `wrapup_iteration` | `WRAPUP_ITERATION` |
+| council (JSON) | `council_models` | `COUNCIL_MODELS` |
+
+### Workshop / build mechanics
+
+**Workshop Stage 1** = design mode agentic loop (`lib/design_loop.py`), reads the codebase, calls `submit_analysis()` tool, posts result as issue comment.
+
+**Workshop Stage 2** (`lib/workshop.py`): each council model gets a single non-agentic LLM call with the Stage 1 analysis as input. No codebase access. Cheap (~7K tokens each). Results posted as individual issue comments. Human checkpoint before Stage 2 — user can steer.
+
+**Build Stage 1** = resolve mode (opens a PR). **Build Stage 2** = council code review on the PR diff (same non-agentic pattern as workshop Stage 2).
+
+**`extra_instructions` composition:** mode-level `extra_instructions` + model-level `extra_instructions` are both appended to the system prompt. Council reviewers get the same composition but per their own model entry.
+
+### Key patterns
+
+- `normalize_config()` must run on each YAML layer before merging to handle legacy key renames.
+- Adding a per-invocation arg: `ALLOWED_ARGS` in `config.py` → `resolve_config()` → `main()` GITHUB_OUTPUT write → workflow `env:` block → `os.environ.get()` in `resolve.py`.
+- Adding a provider: update `KNOWN_PROVIDERS` in `config.py`; add API key check to **all five** "Determine API key" steps in the workflow (resolve, design, review, workshop, build).
+- Mode names must be single words — the command parser splits `/agent-<verb>-<model>` on the first hyphen.
 
 ## Common Tasks — Where to Look
 
@@ -78,9 +124,7 @@ pytest --doctest-modules lib/config.py
 ### Adding or modifying a workflow step
 
 1. Edit the step in `.github/workflows/remote-dev-bot.yml`
-2. Update `scripts/compile.py` if the step needs to appear in compiled output (compile.py finds steps by name)
-3. Update expected step lists in `tests/test_compile.py` — the step-count tripwire tests will fail if the compiled output doesn't match
-4. Run `pytest tests/test_compile.py -v` to verify
+2. If the step affects branch-aware jobs (design/workshop/delegate) or token plumbing, the assertions in `tests/test_yaml.py` may need updating
 
 ### Adding a new mode
 
@@ -125,12 +169,6 @@ target branch = design/gemini
 - `resolve_config(..., args=...)` applies parsed args on top of YAML config
 - `extra_files` **appends** to the mode's existing list (does not replace)
 
-## compile.py: Three-File Output
-
-`scripts/compile.py` inlines config parsing and selected steps from `remote-dev-bot.yml` into three standalone files: `dist/agent-resolve.yml`, `dist/agent-design.yml`, and `dist/agent-review.yml`. It finds steps by **name** (not index), so reordering steps is safe as long as step names don't change.
-
-**Rule: if you add, remove, or rename a step in remote-dev-bot.yml, update compile.py to match**, then run `pytest tests/test_compile.py -v`. The step-count tripwire tests will catch mismatches.
-
 ## Branch Model
 
 | Branch     | Purpose                                                         | Who points here            |
@@ -139,22 +177,22 @@ target branch = design/gemini
 | `dev`      | Long-lived integration branch, accumulates work ahead of `main` | Owner's own repo shims     |
 | `e2e-test` | Ephemeral pointer, reset by e2e scripts before each test run    | `remote-dev-bot-test` shim |
 
-**PRs go to `dev`, not `main`**, unless the change is a bug fix or doc/config-only.
+**All development goes on `dev`. Every PR branches from `origin/dev` and targets `dev`. No exceptions — bug fixes, doc changes, config-only tweaks, one-line typos, all of it.**
 
-**Feature workflow:** `git checkout -b my-feature origin/dev` → PR → merge to `dev`
+**Why no "bug-fix → main" shortcut:** in the past, landing a fix on `main` and then independently "re-fixing" the same bug on `dev` produced two divergent fixes in the same files, creating a landmine for the eventual `dev → main` merge. That actually happened (see PRs #488 / #503 / #512 / #513 on this repo) and cost real cleanup work. The cost of keeping everything on `dev` is much lower than the cost of one bad merge.
 
-**Bug-fix workflow:** `git checkout -b my-fix origin/main` → PR → merge to `main` → rebase `dev` onto new `main`
+**Standard workflow:** `git checkout -b my-change origin/dev` → PR → merge to `dev`
 
 **CRITICAL — always branch from the remote ref, not the local ref:**
 
 ```bash
-git checkout -b my-feature origin/dev   # CORRECT
-git checkout -b my-feature dev          # WRONG — local ref may be stale
-git checkout -b my-fix origin/main      # CORRECT
-git checkout -b my-fix main             # WRONG — local ref may be stale
+git checkout -b my-change origin/dev   # CORRECT
+git checkout -b my-change dev          # WRONG — local ref may be stale
 ```
 
-`git fetch` updates `origin/dev` and `origin/main` but does NOT move local `dev` or `main`. Using the local ref silently branches from a stale commit.
+`git fetch` updates `origin/dev` but does NOT move local `dev`. Using the local ref silently branches from a stale commit.
+
+**Base-branch confirmation rule (for AI agents):** if for any reason you are about to open a PR whose base branch is **not** `dev` (e.g., you believe a revert on `main` is required), STOP before running `gh pr create` and explicitly ask the user to confirm the base branch. Do not assume the exception is warranted — make the user say "yes, base=main" in words. The common failure mode is opening a main-targeting PR on autopilot when dev was the right target.
 
 ### Dev Cycle (detailed)
 
@@ -205,6 +243,7 @@ gh run view RUN_ID --repo gnovak/remote-dev-bot-test --log | tail -40
 
 - **All changes go through a PR. Never commit or push directly to `main` or `dev`.** Open a PR and let the user merge it.
 - For small changes, a single-commit PR self-merged immediately is fine — the point is the artifact, not the review ceremony.
+- **Issue references in PR bodies: `Fixes #NNN` only.** Do not casually mention issue numbers (e.g., "related to #NNN", "follow-up to #NNN", "see #NNN for context"). Every `#NNN` reference in a PR body creates a "mentioned this issue" entry in the issue timeline. Since PRs target `dev` (not `main`), GitHub won't auto-close issues on merge — we close them manually. Stray mentions make it hard to scan the timeline and tell which PRs actually resolve which issues. If a PR doesn't close an issue, don't reference the issue number in the PR body at all.
 
 ## Commit Attribution
 

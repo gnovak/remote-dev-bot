@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .pytest_cache/
 dist/
+.remote-dev-bot
+remote_dev_bot.egg-info/

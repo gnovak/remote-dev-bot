@@ -162,6 +162,14 @@ else
         '/agent-build' \
         "claude" "build"
 
+    # Delegate mode smoke test: full design-to-implementation cycle.
+    # Stages: 1) design exploration, 2) council design review, 3) design revision,
+    # 4) implementation (resolve), 5) council code review.
+    add_test "delegate" "Test: delegate mode full pipeline" \
+        "Create a file delegate_test.py with a function multiply(a, b) that returns a * b" \
+        '/agent-delegate-claude-small' \
+        "claude" "delegate"
+
     # Inline args smoke test: pass max_iterations as inline arg
     add_test "inline-args" "Test: inline max_iterations" \
         "Create a file inline_test.py with a stub function stub() that returns None." \
@@ -174,6 +182,13 @@ else
         "Create a file compaction_test.py with five functions named f1() through f5() that each return their function number as an integer (f1 returns 1, f2 returns 2, etc.)." \
         $'/agent-resolve\nmax_context_tokens = 12000' \
         "all" "resolve"
+
+    # Reconcile smoke test: create a PR branch with an artificial conflict,
+    # trigger /agent-reconcile-claude-small, verify conflict is resolved and
+    # PR is force-pushed with a new HEAD SHA.
+    # NOTE: reconcile is handled separately below (it creates a PR, not an issue).
+    # We register it here only so it appears in the test list / filter.
+    add_test "reconcile" "" "" "" "claude" "reconcile"
 fi
 
 # --- Helpers ---
@@ -392,6 +407,79 @@ post_issue_comment "$wrapup_issue_num" "$TEST_REPO" $'/agent-resolve\nmax_iterat
 WRAPUP_RUN_ID=""
 WRAPUP_RESULT=""
 
+# --- Trigger reconcile test ---
+# Reconcile is triggered by a PR comment, not an issue comment, so we need to
+# create branches and a PR with an artificial conflict before starting.
+RECONCILE_RUN_ID=""
+RECONCILE_RESULT=""
+RECONCILE_PR_NUM=""
+RECONCILE_BASE_BRANCH=""
+RECONCILE_PR_BRANCH=""
+RECONCILE_INITIAL_SHA=""
+RECONCILE_SKIP=true  # set to false when successfully set up
+
+# Only run reconcile if the "reconcile" test is active
+reconcile_active=false
+for idx in "${active_indices[@]}"; do
+    if [[ "${all_names[$idx]}" == "reconcile" ]]; then
+        reconcile_active=true
+        break
+    fi
+done
+
+if $reconcile_active; then
+    reconcile_ts=$(date +%s)
+    RECONCILE_BASE_BRANCH="e2e-reconcile-base-$reconcile_ts"
+    RECONCILE_PR_BRANCH="e2e-reconcile-pr-$reconcile_ts"
+    cleanup_branches+=("$RECONCILE_BASE_BRANCH" "$RECONCILE_PR_BRANCH")
+
+    log "Setting up reconcile test branches..."
+
+    # Get the current HEAD of main (or default branch) to use as common ancestor
+    main_sha=$(gh api "repos/$TEST_REPO/git/ref/heads/main" --jq '.object.sha' 2>/dev/null || echo "")
+    if [[ -z "$main_sha" ]]; then
+        log "  WARNING: could not get main SHA — skipping reconcile test"
+    else
+        # Create base branch from main
+        gh api "repos/$TEST_REPO/git/refs" -X POST             -f ref="refs/heads/$RECONCILE_BASE_BRANCH"             -f sha="$main_sha" >/dev/null
+        log "  Created base branch: $RECONCILE_BASE_BRANCH"
+
+        # Create PR branch from same commit (common ancestor)
+        gh api "repos/$TEST_REPO/git/refs" -X POST             -f ref="refs/heads/$RECONCILE_PR_BRANCH"             -f sha="$main_sha" >/dev/null
+        log "  Created PR branch: $RECONCILE_PR_BRANCH"
+
+        # Add a commit to base branch (simulates upstream progress)
+        base_content=$(printf 'BASE VERSION\nline modified on base\n' | base64 -w 0)
+        gh api "repos/$TEST_REPO/contents/reconcile_conflict_test.txt"             -X PUT             -f message="chore: base branch update for reconcile e2e"             -f content="$base_content"             -f branch="$RECONCILE_BASE_BRANCH" >/dev/null
+        log "  Added commit to base branch"
+
+        # Add a conflicting commit to PR branch (same file, different content)
+        pr_content=$(printf 'PR VERSION\nline modified on pr branch\n' | base64 -w 0)
+        gh api "repos/$TEST_REPO/contents/reconcile_conflict_test.txt"             -X PUT             -f message="feat: pr branch change for reconcile e2e"             -f content="$pr_content"             -f branch="$RECONCILE_PR_BRANCH" >/dev/null
+        log "  Added conflicting commit to PR branch"
+
+        # Capture the PR branch HEAD SHA before reconcile (to detect force-push)
+        RECONCILE_INITIAL_SHA=$(gh api "repos/$TEST_REPO/git/ref/heads/$RECONCILE_PR_BRANCH"             --jq '.object.sha' 2>/dev/null || echo "")
+        log "  PR branch initial SHA: ${RECONCILE_INITIAL_SHA:0:12}..."
+
+        # Create the PR (PR branch → base branch)
+        reconcile_pr_url=$(gh pr create             --repo "$TEST_REPO"             --title "Test: reconcile conflict resolution (e2e-reconcile-$reconcile_ts)"             --body "E2E test PR for /agent-reconcile smoke test. This PR has an artificial conflict against its base branch."             --head "$RECONCILE_PR_BRANCH"             --base "$RECONCILE_BASE_BRANCH" 2>/dev/null || echo "")
+        if [[ -z "$reconcile_pr_url" ]]; then
+            log "  WARNING: could not create reconcile PR — skipping reconcile test"
+        else
+            RECONCILE_PR_NUM="${reconcile_pr_url##*/}"
+            log "  Created reconcile PR #$RECONCILE_PR_NUM"
+            log "  Posting /agent-reconcile-claude-small on PR #$RECONCILE_PR_NUM..."
+            gh pr comment "$RECONCILE_PR_NUM" --repo "$TEST_REPO"                 --body "/agent-reconcile-claude-small"
+            RECONCILE_SKIP=false
+        fi
+    fi
+
+    if $RECONCILE_SKIP; then
+        log "  Reconcile test setup failed — test will be skipped"
+    fi
+fi
+
 # Give all workflows a moment to start before polling
 log "Waiting 15s for all workflows to start..."
 sleep 15
@@ -552,6 +640,33 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
                     log "  wrapup-test: $conclusion (run $run_id)"
                 else
                     log "  wrapup-test: $status (run $run_id)"
+                fi
+                break
+            fi
+        done <<< "$(echo "$run_json" | jq -c '.[]')"
+    fi
+
+    # --- Poll reconcile test ---
+    if $reconcile_active && ! $RECONCILE_SKIP && [[ -z "$RECONCILE_RESULT" ]]; then
+        all_done=false
+
+        while IFS= read -r row; do
+            [[ -z "$row" ]] && continue
+            display_title=$(echo "$row" | jq -r '.displayTitle')
+            status=$(echo "$row" | jq -r '.status')
+            conclusion=$(echo "$row" | jq -r '.conclusion')
+            run_id=$(echo "$row" | jq -r '.databaseId')
+
+            [[ "$conclusion" == "skipped" ]] && continue
+            is_baseline_id "$run_id" && continue
+
+            if [[ "$display_title" == *"e2e-reconcile-$reconcile_ts"* ]]; then
+                RECONCILE_RUN_ID="$run_id"
+                if [[ "$status" == "completed" ]]; then
+                    RECONCILE_RESULT="$conclusion"
+                    log "  reconcile-test: $conclusion (run $run_id)"
+                else
+                    log "  reconcile-test: $status (run $run_id)"
                 fi
                 break
             fi
@@ -739,6 +854,44 @@ for pos in "${!issue_nums[@]}"; do
                 fi
                 ((pass++)) || true
             fi
+        elif [[ "$test_type" == "delegate" ]]; then
+            # Delegate mode: Stages 1-3 post design/council/revision comments on issue;
+            # Stage 4 creates a PR; Stage 5 posts council code review on the PR;
+            # final summary comment is posted on the issue.
+            pr_num=$(gh pr list --repo "$TEST_REPO" \
+                --search "head:rdb-fix-issue-$issue_num" \
+                --json number --jq '.[0].number // empty' 2>/dev/null || echo "")
+
+            if [[ -z "$pr_num" ]]; then
+                # Check if the pipeline at least started (design comment or abort comment)
+                pipeline_comment=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
+                    --jq '[.[] | select(.body | contains("Delegate pipeline"))] | length' \
+                    2>/dev/null || echo "0")
+                if [[ "$pipeline_comment" -gt 0 ]]; then
+                    status="FAIL (design ran but no PR created — Stage 4 failed)"
+                else
+                    status="FAIL (no PR created — delegate pipeline failed)"
+                fi
+                ((fail++)) || true
+            else
+                cleanup_branches+=("rdb-fix-issue-$issue_num")
+                # Check for council code review comment on the PR (Stage 5)
+                council_comment_count=$(gh api "repos/$TEST_REPO/issues/$pr_num/comments" \
+                    --jq '[.[] | select(.body | contains("Code Review by") or contains("council") or contains("Council"))] | length' \
+                    2>/dev/null || echo "0")
+                # Check for final pipeline summary comment on the issue
+                pipeline_comment=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
+                    --jq '[.[] | select(.body | contains("Delegate pipeline complete"))] | length' \
+                    2>/dev/null || echo "0")
+                if [[ "$pipeline_comment" -gt 0 ]] && [[ "$council_comment_count" -gt 0 ]]; then
+                    status="PASS (PR #$pr_num + council review + pipeline complete)"
+                elif [[ "$pipeline_comment" -gt 0 ]]; then
+                    status="PASS (PR #$pr_num created, pipeline complete, no council comment found)"
+                else
+                    status="PASS (PR #$pr_num created, no pipeline complete comment found)"
+                fi
+                ((pass++)) || true
+            fi
         else
             # Resolve mode: check if a PR was created
             pr_count=$(gh pr list --repo "$TEST_REPO" \
@@ -749,6 +902,19 @@ for pos in "${!issue_nums[@]}"; do
                 status="PASS"
                 ((pass++)) || true
                 cleanup_branches+=("rdb-fix-issue-$issue_num")
+
+                # Compaction test: additionally verify that compaction actually fired
+                # by checking the workflow run logs for the [Compaction] marker.
+                if [[ "$name" == "compaction" && -n "$run_id" ]]; then
+                    compaction_log=$(gh run view "$run_id" --repo "$TEST_REPO" --log 2>/dev/null || echo "")
+                    if echo "$compaction_log" | grep -q "\[Compaction\]"; then
+                        status="PASS (compaction fired)"
+                    else
+                        status="FAIL (no [Compaction] marker in logs — compaction did not fire)"
+                        ((pass--)) || true
+                        ((fail++)) || true
+                    fi
+                fi
             else
                 status="FAIL (no PR created)"
                 ((fail++)) || true
@@ -770,6 +936,51 @@ for pos in "${!issue_nums[@]}"; do
 
     printf "  %-25s %-30s issue #%-5s %s\n" "$name" "$status" "$issue_num" "$log_url"
 done
+
+# --- Reconcile test results ---
+log ""
+log "--- Reconcile Test ---"
+RECONCILE_PASS=0
+RECONCILE_FAIL=0
+reconcile_url=""
+[[ -n "$RECONCILE_RUN_ID" ]] && reconcile_url="https://github.com/$TEST_REPO/actions/runs/$RECONCILE_RUN_ID"
+
+if ! $reconcile_active; then
+    log "  (reconcile test not active — skipped)"
+elif $RECONCILE_SKIP; then
+    log "  reconcile-setup: SKIP (branch/PR setup failed)"
+    ((RECONCILE_FAIL++)) || true
+elif [[ -z "$RECONCILE_RESULT" ]]; then
+    log "  reconcile-test: TIMEOUT  $reconcile_url"
+    ((RECONCILE_FAIL++)) || true
+elif [[ "$RECONCILE_RESULT" != "success" ]]; then
+    log "  reconcile-test: FAIL ($RECONCILE_RESULT)  $reconcile_url"
+    ((RECONCILE_FAIL++)) || true
+else
+    # Workflow reported success — verify force-push happened (HEAD SHA changed)
+    new_sha=$(gh api "repos/$TEST_REPO/git/ref/heads/$RECONCILE_PR_BRANCH"         --jq '.object.sha' 2>/dev/null || echo "")
+    if [[ -z "$new_sha" ]]; then
+        log "  reconcile-test: FAIL (could not get new branch SHA)  $reconcile_url"
+        ((RECONCILE_FAIL++)) || true
+    elif [[ "$new_sha" == "$RECONCILE_INITIAL_SHA" ]]; then
+        log "  reconcile-test: FAIL (branch SHA unchanged — no force-push detected)  $reconcile_url"
+        ((RECONCILE_FAIL++)) || true
+    else
+        # Check for "Reconcile complete" comment on the PR
+        reconcile_comment=$(gh api "repos/$TEST_REPO/issues/$RECONCILE_PR_NUM/comments"             --jq '[.[] | select(.body | test("Reconcile complete|reconcile complete"; "i"))] | length'             2>/dev/null || echo "0")
+        if [[ "$reconcile_comment" -gt 0 ]]; then
+            log "  reconcile-test: PASS (force-pushed new SHA ${new_sha:0:7}, Reconcile complete comment found)  $reconcile_url"
+        else
+            log "  reconcile-test: PASS (force-pushed new SHA ${new_sha:0:7}, no Reconcile complete comment found)  $reconcile_url"
+        fi
+        ((RECONCILE_PASS++)) || true
+    fi
+fi
+
+if $reconcile_active; then
+    printf "  %-25s %-30s PR #%-6s %s
+" "reconcile"         "$([[ $RECONCILE_PASS -gt 0 ]] && echo 'PASS' || echo 'FAIL/SKIP')"         "${RECONCILE_PR_NUM:-N/A}" "$reconcile_url"
+fi
 
 # --- Review + Feedback results ---
 log ""
@@ -1036,6 +1247,13 @@ for pos in "${!issue_nums[@]}"; do
             2>/dev/null || echo "")
         cost="0.00"
         [[ -n "$cost_body" ]] && cost=$(parse_cost_from_comment "$cost_body")
+    elif [[ "$test_type" == "delegate" ]]; then
+        # Delegate mode: cost is embedded in the final pipeline summary comment on the issue
+        cost_body=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
+            --jq '[.[] | select(.body | contains("Delegate pipeline") or contains("💰 Cost"))] | last | .body' \
+            2>/dev/null || echo "")
+        cost="0.00"
+        [[ -n "$cost_body" ]] && cost=$(parse_cost_from_comment "$cost_body")
     else
         # Resolve / design: PR body (if PR created) or issue comment fallback
         cost=$(fetch_cost_for_issue "$issue_num" "$TEST_REPO")
@@ -1087,7 +1305,7 @@ log "  Total cost: \$$total_cost ($cost_count tests with cost data)"
 # --- Summary ---
 log ""
 log "========================================="
-log "  Resolve/Design: Pass: $pass  Fail: $fail  Timeout: $timeout_count"
+log "  Smoke tests:    Pass: $pass  Fail: $fail  Timeout: $timeout_count"
 log "  Review+Feedback:  Pass: $RF_PASS  Fail: $RF_FAIL"
 log "  Timeout test:   Pass: $TIMEOUT_PHASE_PASS  Fail: $TIMEOUT_PHASE_FAIL"
 log "  Wrapup test:    Pass: $WRAPUP_PHASE_PASS  Fail: $WRAPUP_PHASE_FAIL"

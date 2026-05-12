@@ -85,6 +85,135 @@ def test_agent_has_max_iterations(bot_config):
     assert isinstance(bot_config["agent"]["max_iterations"], int)
 
 
+# --- Checkout token checks ---
+
+
+@pytest.fixture
+def workflow_jobs():
+    return load_yaml(REPO_ROOT / ".github/workflows/remote-dev-bot.yml")["jobs"]
+
+
+def test_all_jobs_generate_app_token(workflow_jobs):
+    """Every job must have an inline 'Generate app token' step.
+
+    The app token (when configured) gives git credentials with
+    `workflows:write` permission. Pushes that touch .github/workflows/
+    will be rejected without this.
+
+    Regression test for issue #463. Updated post-#611, which inlined
+    the previous setup-rdb composite action back into each job.
+    """
+    for job_name, job in workflow_jobs.items():
+        app_token_steps = [
+            s for s in job.get("steps", [])
+            if s.get("uses", "").startswith("actions/create-github-app-token")
+        ]
+        assert app_token_steps, (
+            f"Job '{job_name}' must have a step using "
+            f"'actions/create-github-app-token'. "
+            f"Found step uses: {[s.get('uses') for s in job.get('steps', []) if 'uses' in s]}"
+        )
+        for step in app_token_steps:
+            inputs = step.get("with", {})
+            assert "app-id" in inputs, (
+                f"Job '{job_name}': create-github-app-token must pass app-id input"
+            )
+            assert "private-key" in inputs, (
+                f"Job '{job_name}': create-github-app-token must pass private-key input"
+            )
+
+
+def test_branch_aware_jobs_use_target_branch_ref(workflow_jobs):
+    """design, workshop, and delegate jobs must check out the correct branch.
+
+    Unlike resolve/build/reconcile (which override TARGET_BRANCH and do their own
+    git checkout in setup_branch()), and unlike review (which uses gh pr checkout),
+    these analysis-mode jobs rely entirely on actions/checkout to land on the
+    right branch. Without an explicit `ref:` on the target checkout, it falls
+    back to the repo default branch (typically main), so an inline arg like
+    `branch=dev` is silently ignored and the agent reads the wrong code.
+
+    design and workshop use steps.resolve_ref.outputs.ref, which resolves to the
+    PR head for PR triggers (so the agent reads the proposed changes, not the base)
+    or to needs.parse.outputs.target_branch for issue triggers.
+
+    delegate uses needs.parse.outputs.target_branch directly (no PR head override).
+
+    Regression test for issues #491 and #505. Updated post-#611 to check the
+    inline 'Checkout target repository' step (previously this checked the
+    composite action's `target_ref` input).
+    """
+    # Jobs that resolve the checkout ref via the "Resolve checkout ref" step
+    # (which uses PR head for PR triggers, target_branch for issue triggers)
+    PR_HEAD_AWARE_JOBS = {"design", "workshop"}
+    # Jobs that use the configured target_branch directly (no PR head override)
+    TARGET_BRANCH_JOBS = {"delegate"}
+
+    def find_target_checkout(job):
+        """Return the first 'Checkout target repository' step in a job."""
+        for step in job.get("steps", []):
+            if step.get("name") == "Checkout target repository":
+                return step
+        return None
+
+    for job_name in PR_HEAD_AWARE_JOBS:
+        job = workflow_jobs.get(job_name)
+        assert job, f"Expected job '{job_name}' in workflow"
+        # Check that the "Resolve checkout ref" step exists
+        resolve_step = next(
+            (s for s in job.get("steps", []) if s.get("name") == "Resolve checkout ref"),
+            None,
+        )
+        assert resolve_step is not None, (
+            f"Job '{job_name}' must have a 'Resolve checkout ref' step that picks "
+            f"the PR head branch for PR triggers and target_branch for issue triggers."
+        )
+        assert resolve_step.get("id") == "resolve_ref", (
+            f"Job '{job_name}': 'Resolve checkout ref' step must have id='resolve_ref'"
+        )
+        # Check that the inline 'Checkout target repository' step uses
+        # ref: ${{ steps.resolve_ref.outputs.ref }}
+        target_step = find_target_checkout(job)
+        assert target_step is not None, (
+            f"Job '{job_name}' must have a 'Checkout target repository' step"
+        )
+        ref = target_step.get("with", {}).get("ref", "")
+        assert "steps.resolve_ref.outputs.ref" in ref, (
+            f"Job '{job_name}': 'Checkout target repository' must pass "
+            f"ref containing 'steps.resolve_ref.outputs.ref' (got: {ref!r}). "
+            f"Without this, PR triggers check out the configured base branch "
+            f"instead of the PR head (the proposed changes)."
+        )
+
+    for job_name in TARGET_BRANCH_JOBS:
+        job = workflow_jobs.get(job_name)
+        assert job, f"Expected job '{job_name}' in workflow"
+        target_step = find_target_checkout(job)
+        assert target_step is not None, (
+            f"Job '{job_name}' must have a 'Checkout target repository' step"
+        )
+        ref = target_step.get("with", {}).get("ref", "")
+        assert "needs.parse.outputs.target_branch" in ref, (
+            f"Job '{job_name}': 'Checkout target repository' must pass "
+            f"ref containing 'needs.parse.outputs.target_branch' (got: {ref!r}). "
+            f"Without this, the agent reads from the default branch "
+            f"instead of the configured/inline branch."
+        )
+
+
+def test_dogfood_has_workflows_write_permission():
+    """dogfood.yml must include workflows:write so the fallback github.token
+    can push workflow file changes when no app token is configured.
+
+    Regression test for issue #463.
+    """
+    dogfood = load_yaml(REPO_ROOT / ".github/workflows/dogfood.yml")
+    permissions = dogfood.get("permissions", {})
+    assert permissions.get("workflows") == "write", (
+        "dogfood.yml must have 'workflows: write' in permissions"
+    )
+
+
 # --- Security checks ---
 
 
@@ -208,6 +337,38 @@ def test_agent_yml_has_author_association_gate():
         # Ensure it's a restrictive check, not just a comment
         assert 'fromJson(' in content
         assert 'github.event.comment.author_association' in content
+
+
+def test_agent_yml_has_dogfood_gate():
+    """agent.yml must hard-block /agent-* inside gnovak/remote-dev-bot.
+
+    Regression test for issue #499. Inside the rdb repo itself, `/agent-*`
+    runs against released `@main` code — almost always a mistake during
+    active development (you meant `/dogfood-*` which runs `@dev`). The gate
+    prevents wasting tokens investigating dev-only bugs on stale code.
+
+    For all other repos the gate short-circuits to proceed=true and is a no-op.
+    """
+    agent_yml_path = REPO_ROOT / ".github/workflows/agent.yml"
+    agent_yml = load_yaml(agent_yml_path)
+    jobs = agent_yml["jobs"]
+
+    assert "gate" in jobs, "agent.yml must have a 'gate' job (issue #499)"
+
+    content = agent_yml_path.read_text()
+    # Gate must key off the rdb repo specifically
+    assert "gnovak/remote-dev-bot" in content
+    assert "proceed=false" in content
+    assert "proceed=true" in content
+
+    # resolve job must depend on the gate and block on its output
+    needs = jobs["resolve"].get("needs")
+    assert needs == "gate" or (isinstance(needs, list) and "gate" in needs), (
+        "resolve job must have `needs: [gate]`"
+    )
+    assert "needs.gate.outputs.proceed" in str(jobs["resolve"].get("if", "")), (
+        "resolve job's `if` must check needs.gate.outputs.proceed"
+    )
 
 
 # --- Loop prevention checks ---

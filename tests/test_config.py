@@ -207,16 +207,17 @@ def test_parse_args_max_iterations():
     assert parse_args(["max_iterations=50"]) == {"max_iterations": 50}
 
 
+def test_parse_args_design_rounds():
+    """design_rounds should be parsed as int."""
+    assert parse_args(["design_rounds = 2"]) == {"design_rounds": 2}
+    assert parse_args(["design rounds = 1"]) == {"design_rounds": 1}
+    assert parse_args(["design-rounds=2"]) == {"design_rounds": 2}
+
+
 def test_parse_args_branch():
     """branch should be parsed as str."""
     assert parse_args(["branch = design/gemini"]) == {"branch": "design/gemini"}
     assert parse_args(["branch = my-feature"]) == {"branch": "my-feature"}
-
-
-def test_parse_args_target_branch_backcompat():
-    """target_branch is still accepted as a BACKCOMPAT alias for branch."""
-    assert parse_args(["target_branch = design/gemini"]) == {"target_branch": "design/gemini"}
-    assert parse_args(["target branch = my-feature"]) == {"target_branch": "my-feature"}
 
 
 def test_parse_args_extra_files():
@@ -648,8 +649,15 @@ def test_resolve_config_agent_defaults():
         os.unlink(path)
 
 
-def test_resolve_config_openhands_key_backcompat():
-    """Config using openhands: key (old name) still works — BACKCOMPAT."""
+def test_resolve_config_on_failure_default(config_dir):
+    """on_failure defaults to 'draft'."""
+    tmp_path, base_path = config_dir
+    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+    assert result["on_failure"] == "draft"
+
+
+def test_resolve_config_openhands_key_raises():
+    """Config using openhands: key (removed in v0.9) raises ValueError with helpful message."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         yaml.dump(
             {
@@ -662,18 +670,35 @@ def test_resolve_config_openhands_key_backcompat():
         )
         path = f.name
     try:
-        result = resolve_config(path, "nonexistent.yaml", "resolve")
-        assert result["max_iterations"] == 42
-        assert result["pr_type"] == "draft"
+        with pytest.raises(ValueError, match="agent:"):
+            resolve_config(path, "nonexistent.yaml", "resolve")
     finally:
         os.unlink(path)
 
 
-def test_resolve_config_on_failure_default(config_dir):
-    """on_failure defaults to 'draft'."""
-    tmp_path, base_path = config_dir
-    result = resolve_config(base_path, "nonexistent.yaml", "resolve")
-    assert result["on_failure"] == "draft"
+def test_resolve_config_context_files_raises():
+    """Mode config using context_files: (removed in v0.9) raises ValueError with helpful message."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(
+            {
+                "default_model": "m",
+                "models": {"m": {"id": "anthropic/test"}},
+                "modes": {"design": {"context_files": ["README.md"]}},
+            },
+            f,
+        )
+        path = f.name
+    try:
+        with pytest.raises(ValueError, match="extra_files"):
+            resolve_config(path, "nonexistent.yaml", "design")
+    finally:
+        os.unlink(path)
+
+
+def test_parse_args_target_branch_unknown():
+    """target_branch (removed in v0.9) is no longer accepted as an alias for branch."""
+    with pytest.raises(ValueError, match="Unknown argument"):
+        parse_args(["target_branch = design/gemini"])
 
 
 def test_resolve_config_on_failure_draft(config_dir):
@@ -725,16 +750,6 @@ def test_resolve_config_branch_key(config_dir):
         yaml.dump({"agent": {"branch": "dev"}}, f)
     result = resolve_config(base_path, override_path, "resolve")
     assert result["target_branch"] == "dev"
-
-
-def test_resolve_config_target_branch_override_backcompat(config_dir):
-    """target_branch key in agent: still works — BACKCOMPAT."""
-    tmp_path, base_path = config_dir
-    override_path = str(tmp_path / "override.yaml")
-    with open(override_path, "w") as f:
-        yaml.dump({"agent": {"target_branch": "master"}}, f)
-    result = resolve_config(base_path, override_path, "resolve")
-    assert result["target_branch"] == "master"
 
 
 def test_resolve_config_assign_issue_default(config_dir):
@@ -976,14 +991,6 @@ def test_resolve_config_args_branch(config_dir):
     """args can override branch (target branch)."""
     tmp_path, base_path = config_dir
     result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={"branch": "design/gemini"})
-    assert result["target_branch"] == "design/gemini"
-    assert result["target_branch_explicit"] is True
-
-
-def test_resolve_config_args_target_branch_backcompat(config_dir):
-    """args target_branch is accepted as BACKCOMPAT alias for branch."""
-    tmp_path, base_path = config_dir
-    result = resolve_config(base_path, "nonexistent.yaml", "resolve", args={"target_branch": "design/gemini"})
     assert result["target_branch"] == "design/gemini"
     assert result["target_branch_explicit"] is True
 
@@ -1453,6 +1460,124 @@ class TestWorkshopConfig:
             assert m["id"]  # not empty
 
 
+# --- review mode council ---
+
+
+class TestReviewCouncil:
+    """Tests for council = true inline arg on review mode."""
+
+    @pytest.fixture
+    def review_council_config_dir(self, tmp_path):
+        """Create a temp dir with config that includes review mode with council list."""
+        config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "gpt-small": {"id": "openai/gpt-4o-mini"},
+                "gemini-small": {"id": "gemini/gemini-2.5-flash"},
+            },
+            "modes": {
+                "resolve": {},
+                "review": {
+                    "max_iterations": 10,
+                    "council": ["claude-small", "gpt-small", "gemini-small"],
+                },
+            },
+            "agent": {
+                "max_iterations": 50,
+                "pr_type": "ready",
+            },
+        }
+        base_path = str(tmp_path / "base.yaml")
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        return tmp_path, base_path
+
+    def test_review_without_council_has_no_council_models(self, review_council_config_dir):
+        """Without council=true, review mode does not emit council_models."""
+        tmp_path, base_path = review_council_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "review")
+        assert "council_models" not in result
+
+    def test_review_with_council_true_emits_council_models(self, review_council_config_dir):
+        """With council=true, review mode emits council_models."""
+        tmp_path, base_path = review_council_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "review",
+            args={"council": True},
+        )
+        assert "council_models" in result
+
+    def test_review_council_uses_explicit_list(self, review_council_config_dir):
+        """With council=true, the explicit council list from config is used."""
+        tmp_path, base_path = review_council_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "review",
+            args={"council": True},
+        )
+        aliases = [m["alias"] for m in result["council_models"]]
+        assert aliases == ["claude-small", "gpt-small", "gemini-small"]
+
+    def test_review_council_defaults_to_all_models_when_no_explicit_list(self, tmp_path):
+        """When council=true but no council list in config, falls back to all models."""
+        config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "gpt-small": {"id": "openai/gpt-4o-mini"},
+            },
+            "modes": {
+                "resolve": {},
+                "review": {"max_iterations": 10},
+            },
+            "agent": {"max_iterations": 50, "pr_type": "ready"},
+        }
+        base_path = str(tmp_path / "base.yaml")
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "review",
+            args={"council": True},
+        )
+        aliases = [m["alias"] for m in result["council_models"]]
+        assert "claude-small" in aliases
+        assert "gpt-small" in aliases
+
+    def test_review_council_models_have_id(self, review_council_config_dir):
+        """Each council model entry has both alias and id."""
+        tmp_path, base_path = review_council_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "review",
+            args={"council": True},
+        )
+        for m in result["council_models"]:
+            assert "alias" in m
+            assert "id" in m
+            assert m["id"]
+
+    def test_review_council_false_does_not_emit_council_models(self, review_council_config_dir):
+        """Explicitly setting council=false does not emit council_models."""
+        tmp_path, base_path = review_council_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "review",
+            args={"council": False},
+        )
+        assert "council_models" not in result
+
+    def test_council_inline_arg_parsed_from_string(self):
+        """council = true is parseable as a bool inline arg."""
+        lines = ["council = true"]
+        args = parse_args(lines)
+        assert args.get("council") is True
+
+    def test_council_inline_arg_false_parsed(self):
+        """council = false is parseable as bool False."""
+        lines = ["council = false"]
+        args = parse_args(lines)
+        assert args.get("council") is False
+
+
+
 # --- model-level extra_instructions ---
 
 
@@ -1579,3 +1704,740 @@ class TestModelExtraInstructions:
 
         content = output_file.read_text()
         assert "model_extra_instructions=" not in content
+
+
+# --- resolve_config: delegate mode ---
+
+
+class TestDelegateConfig:
+    """Tests for delegate mode configuration."""
+
+    @pytest.fixture
+    def delegate_config_dir(self, tmp_path):
+        """Create a temp dir with config that includes delegate mode."""
+        config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "claude-large": {"id": "anthropic/claude-opus-4-6"},
+                "gpt-small": {"id": "openai/gpt-4o-mini"},
+                "gemini-small": {"id": "gemini/gemini-2.5-flash"},
+            },
+            "modes": {
+                "resolve": {},
+                "delegate": {
+                    "default_model": "claude-small",
+                    "max_iterations": 15,
+                    "council": ["claude-small", "gpt-small", "gemini-small"],
+                },
+            },
+            "agent": {
+                "max_iterations": 50,
+                "pr_type": "ready",
+            },
+        }
+        base_path = str(tmp_path / "base.yaml")
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        return tmp_path, base_path
+
+    def test_delegate_mode_basic(self, delegate_config_dir):
+        """Delegate mode is recognized with correct defaults."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert result["mode"] == "delegate"
+        assert result["alias"] == "claude-small"
+        assert result["model"] == "anthropic/claude-sonnet-4-20250514"
+
+    def test_delegate_mode_with_model(self, delegate_config_dir):
+        """Delegate mode accepts explicit model alias."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate-claude-large")
+        assert result["mode"] == "delegate"
+        assert result["alias"] == "claude-large"
+        assert result["model"] == "anthropic/claude-opus-4-6"
+
+    def test_delegate_max_iterations(self, delegate_config_dir):
+        """Delegate mode outputs delegate_max_iterations."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert result["delegate_max_iterations"] == 15
+
+    def test_delegate_max_iterations_override_via_args(self, delegate_config_dir):
+        """Inline args override delegate max_iterations."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "delegate",
+            args={"max_iterations": 25},
+        )
+        assert result["delegate_max_iterations"] == 25
+
+    def test_delegate_design_rounds_default(self, delegate_config_dir):
+        """Delegate mode defaults design_rounds to 1."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert result["design_rounds"] == 1
+
+    def test_delegate_design_rounds_from_mode_config(self, delegate_config_dir):
+        """Delegate mode respects design_rounds set in mode config."""
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["delegate"]["design_rounds"] = 2
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert result["design_rounds"] == 2
+
+    def test_delegate_design_rounds_override_via_args(self, delegate_config_dir):
+        """Inline args override delegate design_rounds."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "delegate",
+            args={"design_rounds": 2},
+        )
+        assert result["design_rounds"] == 2
+
+    def test_delegate_design_rounds_arg_beats_mode_config(self, delegate_config_dir):
+        """Inline args take precedence over mode config for design_rounds."""
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["delegate"]["design_rounds"] = 2
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "delegate",
+            args={"design_rounds": 1},
+        )
+        assert result["design_rounds"] == 1
+
+    def test_design_rounds_not_emitted_for_non_delegate(self, delegate_config_dir):
+        """design_rounds is only emitted in delegate mode."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+        assert "design_rounds" not in result
+
+    # --- design_rounds validation ---
+    #
+    # Only 1 and 2 are defined. Values outside that range must raise
+    # ValueError rather than silently getting clamped or ignored:
+    # run_delegate's branch is `if design_rounds >= 2`, so a user who
+    # types `design_rounds = 3` used to get the same behavior as 2 with
+    # no signal that the extra round they asked for doesn't exist.
+
+    def test_delegate_design_rounds_3_rejected(self, delegate_config_dir):
+        """design_rounds=3 raises ValueError — no third round is defined."""
+        tmp_path, base_path = delegate_config_dir
+        with pytest.raises(ValueError, match="design_rounds must be 1 or 2"):
+            resolve_config(
+                base_path, "nonexistent.yaml", "delegate",
+                args={"design_rounds": 3},
+            )
+
+    def test_delegate_design_rounds_0_rejected(self, delegate_config_dir):
+        """design_rounds=0 raises ValueError — not a valid round count."""
+        tmp_path, base_path = delegate_config_dir
+        with pytest.raises(ValueError, match="design_rounds must be 1 or 2"):
+            resolve_config(
+                base_path, "nonexistent.yaml", "delegate",
+                args={"design_rounds": 0},
+            )
+
+    def test_delegate_design_rounds_negative_rejected(self, delegate_config_dir):
+        """Negative design_rounds raises ValueError."""
+        tmp_path, base_path = delegate_config_dir
+        with pytest.raises(ValueError, match="design_rounds must be 1 or 2"):
+            resolve_config(
+                base_path, "nonexistent.yaml", "delegate",
+                args={"design_rounds": -1},
+            )
+
+    def test_delegate_design_rounds_invalid_mode_config_rejected(self, delegate_config_dir):
+        """An invalid mode-level design_rounds in YAML also raises ValueError.
+
+        Validation applies to the resolved value regardless of whether it
+        came from an inline arg or the merged config — otherwise users
+        could silently ship a bad default.
+        """
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["delegate"]["design_rounds"] = 5
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        with pytest.raises(ValueError, match="design_rounds must be 1 or 2"):
+            resolve_config(base_path, "nonexistent.yaml", "delegate")
+
+    def test_delegate_council_models(self, delegate_config_dir):
+        """Delegate mode resolves council models from explicit list."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        council = result["council_models"]
+        aliases = [m["alias"] for m in council]
+        assert "claude-small" in aliases
+        assert "gpt-small" in aliases
+        assert "gemini-small" in aliases
+
+    def test_delegate_default_council_all_models(self, delegate_config_dir):
+        """Without explicit council, delegate mode defaults to all models."""
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        del config["modes"]["delegate"]["council"]
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        council = result["council_models"]
+        aliases = [m["alias"] for m in council]
+        assert len(aliases) == 4  # all four models
+        assert "claude-small" in aliases
+        assert "claude-large" in aliases
+        assert "gpt-small" in aliases
+        assert "gemini-small" in aliases
+
+    def test_delegate_council_models_have_id(self, delegate_config_dir):
+        """Each delegate council model entry has both alias and id."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        for m in result["council_models"]:
+            assert "alias" in m
+            assert "id" in m
+            assert m["id"]  # not empty
+
+    def test_delegate_no_workshop_max_iterations(self, delegate_config_dir):
+        """Delegate mode does NOT set workshop_max_iterations."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert "workshop_max_iterations" not in result
+
+    # --- delegate max_design_iterations (design/exploration budget) ---
+    #
+    # Delegate mode has two independent iteration budgets:
+    #   - delegate_max_iterations        — code-writing stages (Stage 4, 6)
+    #   - delegate_max_design_iterations — design/exploration stages (1, 3a)
+    # The design budget falls back to agent.max_iterations when not set
+    # at the mode level. Inline arg `max_design_iterations` overrides both.
+
+    def test_delegate_max_design_iterations_falls_back_to_agent(self, delegate_config_dir):
+        """Without a mode-level default, design budget falls back to agent.max_iterations."""
+        tmp_path, base_path = delegate_config_dir
+        # Fixture has agent.max_iterations = 50 and no
+        # modes.delegate.max_design_iterations — so the design budget
+        # should inherit 50 from the agent section.
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert result["delegate_max_design_iterations"] == 50
+
+    def test_delegate_max_design_iterations_from_mode_config(self, delegate_config_dir):
+        """Mode-level max_design_iterations wins over agent.max_iterations."""
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["delegate"]["max_design_iterations"] = 12
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(base_path, "nonexistent.yaml", "delegate")
+        assert result["delegate_max_design_iterations"] == 12
+
+    def test_delegate_max_design_iterations_inline_arg_override(self, delegate_config_dir):
+        """Inline arg max_design_iterations overrides both mode and agent config."""
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["delegate"]["max_design_iterations"] = 12
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "delegate",
+            args={"max_design_iterations": 30},
+        )
+        assert result["delegate_max_design_iterations"] == 30
+
+    def test_delegate_max_iterations_and_design_iterations_are_independent(self, delegate_config_dir):
+        """Bumping max_iterations via inline arg does NOT change max_design_iterations."""
+        tmp_path, base_path = delegate_config_dir
+        with open(base_path) as f:
+            config = yaml.safe_load(f)
+        config["modes"]["delegate"]["max_design_iterations"] = 12
+        with open(base_path, "w") as f:
+            yaml.dump(config, f)
+        # User says "give it more iterations" — the common expectation is
+        # that this bumps the coding loops, not the design loops.
+        result = resolve_config(
+            base_path, "nonexistent.yaml", "delegate",
+            args={"max_iterations": 100},
+        )
+        assert result["delegate_max_iterations"] == 100
+        assert result["delegate_max_design_iterations"] == 12
+
+    def test_delegate_max_design_iterations_not_emitted_for_non_delegate(self, delegate_config_dir):
+        """delegate_max_design_iterations is only emitted in delegate mode."""
+        tmp_path, base_path = delegate_config_dir
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+        assert "delegate_max_design_iterations" not in result
+
+
+def test_parse_args_max_design_iterations():
+    """max_design_iterations should be parsed as int and normalize dashes/spaces."""
+    assert parse_args(["max_design_iterations = 20"]) == {"max_design_iterations": 20}
+    assert parse_args(["max design iterations = 15"]) == {"max_design_iterations": 15}
+    assert parse_args(["max-design-iterations=8"]) == {"max_design_iterations": 8}
+
+
+# --- resolve_config comprehensive tests ---
+
+
+class TestResolveConfig:
+    """Tests for resolve_config() covering layer ordering, type coercion,
+    mode resolution, list merging, and edge cases."""
+
+    def _make_config(self, **overrides):
+        """Return a minimal valid config dict, with optional overrides merged in."""
+        base = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "claude-large": {"id": "anthropic/claude-opus-4-6"},
+            },
+            "modes": {
+                "resolve": {
+                    "default_model": "claude-small",
+                    "max_iterations": 30,
+                    "extra_files": ["AGENTS.md"],
+                },
+                "design": {
+                    "default_model": "claude-small",
+                    "max_iterations": 20,
+                    "extra_files": ["CONTRIBUTING.md"],
+                },
+            },
+            "agent": {
+                "max_iterations": 50,
+                "pr_type": "ready",
+            },
+        }
+        base.update(overrides)
+        return base
+
+    @pytest.fixture
+    def base_config_path(self, tmp_path):
+        """Write a minimal base config to a temp file and return its path."""
+        config = self._make_config()
+        path = str(tmp_path / "remote-dev-bot.yaml")
+        with open(path, "w") as f:
+            yaml.dump(config, f)
+        return path
+
+    @pytest.fixture
+    def rdb_base_path(self, tmp_path):
+        """Copy the real remote-dev-bot.yaml to a temp dir and return its path."""
+        import shutil
+        dest = tmp_path / "remote-dev-bot.yaml"
+        shutil.copy("remote-dev-bot.yaml", dest)
+        return str(dest)
+
+    # ------------------------------------------------------------------ #
+    # Layer ordering                                                       #
+    # ------------------------------------------------------------------ #
+
+    def test_base_config_loaded(self, base_config_path):
+        """When only base config exists, values come from it."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert result["mode"] == "resolve"
+        assert result["max_iterations"] == 30
+        assert result["alias"] == "claude-small"
+
+    def test_override_shadows_base(self, tmp_path, base_config_path):
+        """Override config (target repo) wins over base config."""
+        override_config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+                "claude-large": {"id": "anthropic/claude-opus-4-6"},
+            },
+            "modes": {
+                "resolve": {
+                    "max_iterations": 99,
+                },
+            },
+            "agent": {
+                "max_iterations": 50,
+                "pr_type": "draft",
+            },
+        }
+        override_path = str(tmp_path / "override.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        result = resolve_config(base_config_path, override_path, "resolve")
+        assert result["max_iterations"] == 99
+        assert result["pr_type"] == "draft"
+
+    def test_local_config_shadows_override(self, tmp_path, base_config_path):
+        """Local config (third layer) wins over both base and override."""
+        override_config = {
+            "modes": {
+                "resolve": {"max_iterations": 40},
+            },
+            "agent": {"max_iterations": 40},
+        }
+        local_config = {
+            "modes": {
+                "resolve": {"max_iterations": 77},
+            },
+            "agent": {"max_iterations": 40},
+        }
+        override_path = str(tmp_path / "override.yaml")
+        local_path = str(tmp_path / "local.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        with open(local_path, "w") as f:
+            yaml.dump(local_config, f)
+        result = resolve_config(
+            base_config_path, override_path, "resolve", local_path=local_path
+        )
+        assert result["max_iterations"] == 77
+
+    def test_inline_args_win_over_all_layers(self, tmp_path, base_config_path):
+        """Inline args beat base, override, and local configs."""
+        override_config = {
+            "modes": {"resolve": {"max_iterations": 40}},
+            "agent": {"max_iterations": 40},
+        }
+        override_path = str(tmp_path / "override.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        result = resolve_config(
+            base_config_path, override_path, "resolve",
+            args={"max_iterations": 999},
+        )
+        assert result["max_iterations"] == 999
+
+    def test_has_override_false_when_no_override(self, base_config_path):
+        """has_override is False when no override file exists."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert result["has_override"] is False
+
+    def test_has_override_true_when_override_exists(self, tmp_path, base_config_path):
+        """has_override is True when override file is present (even if mostly empty)."""
+        override_config = {"agent": {"pr_type": "ready"}}
+        override_path = str(tmp_path / "override.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        result = resolve_config(base_config_path, override_path, "resolve")
+        assert result["has_override"] is True
+
+    # ------------------------------------------------------------------ #
+    # Mode resolution                                                      #
+    # ------------------------------------------------------------------ #
+
+    def test_resolve_mode(self, base_config_path):
+        """'resolve' command string is recognized."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert result["mode"] == "resolve"
+
+    def test_design_mode(self, base_config_path):
+        """'design' command string is recognized."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "design")
+        assert result["mode"] == "design"
+
+    def test_mode_with_model_alias_in_command(self, base_config_path):
+        """Model alias appended to command string is parsed correctly."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve-claude-large"
+        )
+        assert result["mode"] == "resolve"
+        assert result["alias"] == "claude-large"
+        assert result["model"] == "anthropic/claude-opus-4-6"
+
+    def test_unknown_mode_raises_value_error(self, base_config_path):
+        """An unknown mode name raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown mode"):
+            resolve_config(base_config_path, "nonexistent.yaml", "frobnicate")
+
+    def test_mode_picks_up_mode_config(self, base_config_path):
+        """Mode-specific max_iterations overrides global agent.max_iterations."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        # Base config sets modes.resolve.max_iterations=30 vs agent.max_iterations=50
+        assert result["max_iterations"] == 30
+
+    def test_default_model_from_mode(self, base_config_path):
+        """Mode's default_model is used when no alias is specified."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert result["alias"] == "claude-small"
+
+    def test_default_model_from_global_when_not_in_mode(self, tmp_path):
+        """Global default_model is used when mode has no default_model set."""
+        config = self._make_config()
+        del config["modes"]["resolve"]["default_model"]
+        path = str(tmp_path / "base.yaml")
+        with open(path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(path, "nonexistent.yaml", "resolve")
+        assert result["alias"] == "claude-small"
+
+    # ------------------------------------------------------------------ #
+    # Inline-arg type coercion                                             #
+    # ------------------------------------------------------------------ #
+
+    def test_inline_arg_max_iterations_is_int(self, base_config_path):
+        """max_iterations inline arg is stored as int (already coerced by parse_args)."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"max_iterations": 75},
+        )
+        assert result["max_iterations"] == 75
+        assert isinstance(result["max_iterations"], int)
+
+    def test_inline_arg_timeout_minutes_is_int(self, base_config_path):
+        """timeout_minutes inline arg is stored as int."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"timeout_minutes": 60},
+        )
+        assert result["timeout_minutes"] == 60
+        assert isinstance(result["timeout_minutes"], int)
+
+    def test_inline_arg_status_log_interval(self, base_config_path):
+        """status_log_interval inline arg is stored as int."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"status_log_interval": 10},
+        )
+        assert result["status_log_interval"] == 10
+        assert isinstance(result["status_log_interval"], int)
+
+    def test_inline_arg_branch_is_str(self, base_config_path):
+        """branch inline arg is stored as a string."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"branch": "my-feature"},
+        )
+        assert result["target_branch"] == "my-feature"
+        assert isinstance(result["target_branch"], str)
+
+    def test_inline_arg_debug_logging_bool(self, base_config_path):
+        """debug_logging inline arg is coerced to bool."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"debug_logging": True},
+        )
+        assert result.get("debug_logging") is True
+
+    # ------------------------------------------------------------------ #
+    # List-vs-scalar (extra_files) additive merge                         #
+    # ------------------------------------------------------------------ #
+
+    def test_extra_files_base_only(self, base_config_path):
+        """extra_files from base config are included in result."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert "AGENTS.md" in result.get("extra_files", [])
+
+    def test_extra_files_additive_with_override(self, tmp_path, base_config_path):
+        """Override extra_files appends to base extra_files rather than replacing."""
+        override_config = {
+            "modes": {
+                "resolve": {
+                    "extra_files": ["CONTRIBUTING.md"],
+                },
+            },
+        }
+        override_path = str(tmp_path / "override.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        result = resolve_config(base_config_path, override_path, "resolve")
+        extra = result.get("extra_files", [])
+        # Both base and override files should be present
+        assert "AGENTS.md" in extra
+        assert "CONTRIBUTING.md" in extra
+
+    def test_extra_files_additive_with_local(self, tmp_path, base_config_path):
+        """Local config extra_files appends after base and override layers."""
+        override_config = {
+            "modes": {"resolve": {"extra_files": ["CONTRIBUTING.md"]}},
+        }
+        local_config = {
+            "modes": {"resolve": {"extra_files": ["LOCAL.md"]}},
+        }
+        override_path = str(tmp_path / "override.yaml")
+        local_path = str(tmp_path / "local.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        with open(local_path, "w") as f:
+            yaml.dump(local_config, f)
+        result = resolve_config(
+            base_config_path, override_path, "resolve", local_path=local_path
+        )
+        extra = result.get("extra_files", [])
+        assert "AGENTS.md" in extra
+        assert "CONTRIBUTING.md" in extra
+        assert "LOCAL.md" in extra
+
+    def test_extra_files_additive_with_inline_args(self, base_config_path):
+        """Inline extra_files arg appends on top of all config-layer files."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"extra_files": ["README.md"]},
+        )
+        extra = result.get("extra_files", [])
+        assert "AGENTS.md" in extra
+        assert "README.md" in extra
+
+    def test_extra_files_deduplication(self, tmp_path, base_config_path):
+        """Duplicate file names across layers appear only once."""
+        override_config = {
+            "modes": {"resolve": {"extra_files": ["AGENTS.md"]}},  # same as base
+        }
+        override_path = str(tmp_path / "override.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        result = resolve_config(base_config_path, override_path, "resolve")
+        extra = result.get("extra_files", [])
+        assert extra.count("AGENTS.md") == 1
+
+    def test_extra_files_order_preserved(self, tmp_path, base_config_path):
+        """extra_files order: base → override → local → inline args."""
+        override_config = {
+            "modes": {"resolve": {"extra_files": ["OVERRIDE.md"]}},
+        }
+        local_config = {
+            "modes": {"resolve": {"extra_files": ["LOCAL.md"]}},
+        }
+        override_path = str(tmp_path / "override.yaml")
+        local_path = str(tmp_path / "local.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        with open(local_path, "w") as f:
+            yaml.dump(local_config, f)
+        result = resolve_config(
+            base_config_path, override_path, "resolve",
+            local_path=local_path,
+            args={"extra_files": ["INLINE.md"]},
+        )
+        extra = result.get("extra_files", [])
+        # Verify relative ordering
+        assert extra.index("AGENTS.md") < extra.index("OVERRIDE.md")
+        assert extra.index("OVERRIDE.md") < extra.index("LOCAL.md")
+        assert extra.index("LOCAL.md") < extra.index("INLINE.md")
+
+    # ------------------------------------------------------------------ #
+    # Timeout defaults                                                     #
+    # ------------------------------------------------------------------ #
+
+    def test_timeout_defaults_to_120(self, base_config_path):
+        """Default timeout is 120 minutes when not set anywhere."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert result["timeout_minutes"] == 120
+
+    def test_timeout_from_yaml(self, tmp_path):
+        """Timeout from YAML agent config is used when no inline arg given."""
+        config = self._make_config()
+        config["agent"]["timeout_minutes"] = 90
+        path = str(tmp_path / "base.yaml")
+        with open(path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(path, "nonexistent.yaml", "resolve")
+        assert result["timeout_minutes"] == 90
+
+    def test_timeout_inline_arg_beats_yaml(self, tmp_path):
+        """Inline timeout_minutes arg wins over YAML agent.timeout_minutes."""
+        config = self._make_config()
+        config["agent"]["timeout_minutes"] = 90
+        path = str(tmp_path / "base.yaml")
+        with open(path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(
+            path, "nonexistent.yaml", "resolve",
+            args={"timeout_minutes": 45},
+        )
+        assert result["timeout_minutes"] == 45
+
+    def test_timeout_flag_beats_yaml(self, tmp_path):
+        """timeout_minutes parameter (from --timeout-minutes flag) wins over YAML."""
+        config = self._make_config()
+        config["agent"]["timeout_minutes"] = 90
+        path = str(tmp_path / "base.yaml")
+        with open(path, "w") as f:
+            yaml.dump(config, f)
+        result = resolve_config(path, "nonexistent.yaml", "resolve", timeout_minutes=30)
+        assert result["timeout_minutes"] == 30
+
+    # ------------------------------------------------------------------ #
+    # Edge cases                                                           #
+    # ------------------------------------------------------------------ #
+
+    def test_missing_base_config_uses_override_only(self, tmp_path):
+        """When base config is missing, override config is used on its own."""
+        override_config = {
+            "default_model": "claude-small",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-20250514"},
+            },
+            "modes": {
+                "resolve": {"max_iterations": 25},
+            },
+            "agent": {"max_iterations": 25},
+        }
+        override_path = str(tmp_path / "override.yaml")
+        with open(override_path, "w") as f:
+            yaml.dump(override_config, f)
+        result = resolve_config(
+            str(tmp_path / "nonexistent-base.yaml"), override_path, "resolve"
+        )
+        assert result["mode"] == "resolve"
+        assert result["max_iterations"] == 25
+
+    def test_empty_args_dict(self, base_config_path):
+        """Passing an empty args dict is equivalent to passing no args."""
+        result_none = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        result_empty = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve", args={}
+        )
+        assert result_none["max_iterations"] == result_empty["max_iterations"]
+        assert result_none["timeout_minutes"] == result_empty["timeout_minutes"]
+
+    def test_none_args_treated_as_empty(self, base_config_path):
+        """args=None (the default) is treated as an empty dict."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve", args=None
+        )
+        assert result["mode"] == "resolve"
+
+    def test_unknown_inline_arg_rejected_by_parse_args(self):
+        """parse_args raises ValueError for unknown argument names."""
+        with pytest.raises(ValueError, match="Unknown"):
+            parse_args(["totally_unknown_arg = 42"])
+
+    def test_result_has_required_keys(self, base_config_path):
+        """Result dict always includes the standard set of keys."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        for key in ("mode", "model", "alias", "max_iterations", "pr_type",
+                    "has_override", "timeout_minutes"):
+            assert key in result, f"Key '{key}' missing from resolve_config result"
+
+    def test_real_base_config_resolve_mode(self, rdb_base_path):
+        """resolve_config works end-to-end with the real remote-dev-bot.yaml."""
+        result = resolve_config(rdb_base_path, "nonexistent.yaml", "resolve")
+        assert result["mode"] == "resolve"
+        assert result["model"]  # non-empty model ID
+        assert result["timeout_minutes"] > 0
+
+    def test_real_base_config_design_mode(self, rdb_base_path):
+        """resolve_config works end-to-end with the real remote-dev-bot.yaml in design mode."""
+        result = resolve_config(rdb_base_path, "nonexistent.yaml", "design")
+        assert result["mode"] == "design"
+        assert result["model"]
+
+    def test_target_branch_explicit_false_by_default(self, base_config_path):
+        """target_branch_explicit is False when branch is not set via inline arg."""
+        result = resolve_config(base_config_path, "nonexistent.yaml", "resolve")
+        assert result["target_branch_explicit"] is False
+
+    def test_target_branch_explicit_true_via_args(self, base_config_path):
+        """target_branch_explicit is True when branch is set via inline arg."""
+        result = resolve_config(
+            base_config_path, "nonexistent.yaml", "resolve",
+            args={"branch": "my-feature"},
+        )
+        assert result["target_branch_explicit"] is True
+        assert result["target_branch"] == "my-feature"

@@ -5,12 +5,159 @@ resolve, design, and review modes.
 """
 
 
+import json
+import re
+
+
+def classify_provider_error(e):
+    """Surface provider-side error messages cleanly.
+
+    LiteLLM wraps provider errors and embeds the JSON response body in the
+    string. The actually-useful message (e.g. Anthropic's "You have reached
+    your specified API usage limits...") is buried inside that JSON. This
+    helper extracts it for human-readable reporting.
+
+    Returns a string in the form "{Provider} API error: {message}" when a
+    structured provider error can be parsed, or the unchanged str(e)
+    otherwise.
+
+    Examples:
+        >>> classify_provider_error("litellm.BadRequestError: AnthropicException - "
+        ...     '{"type":"error","error":{"type":"invalid_request_error",'
+        ...     '"message":"You have reached your specified API usage limits."}}')
+        'Anthropic API error: You have reached your specified API usage limits.'
+    """
+    msg = str(e)
+    m = re.search(
+        r'(\w+)Exception\b.*?"message":\s*"([^"]+)"',
+        msg,
+        re.DOTALL,
+    )
+    if m:
+        return f"{m.group(1)} API error: {m.group(2)}"
+    return msg
+
+
+# Patterns that indicate a bash command is a "write" operation.
+# Write operation results are protected from being dropped by trim_tool_results,
+# so context about what was actually changed is preserved longer.
+_WRITE_BASH_PATTERNS = [
+    r"\bgit\s+commit\b",           # git commit
+    r"\bgit\s+push\b",             # git push
+    r"\bgit\s+add\b",              # git add
+    r"\bgit\s+merge\b",            # git merge
+    r"\bgit\s+rebase\b",           # git rebase
+    r"\bgit\s+reset\b",            # git reset
+    r"\bgit\s+checkout\s+-b\b",   # git checkout -b (branch creation)
+    r"\bgit\s+branch\s+",          # git branch operations
+    r"\bgit\s+tag\b",              # git tag
+    r"\bgit\s+rm\b",               # git rm
+    r"\bgit\s+mv\b",               # git mv
+    r">>?\s*[\w/]",                 # output redirection (>, >>)
+    r"\bsed\s+-i\b",               # sed -i (in-place edit)
+    r"\bpatch\b",                   # patch command
+    r"\btouch\b",                   # touch (create file)
+    r"\bcp\b",                      # cp (copy file)
+    r"\bmv\b",                      # mv (move file)
+    r"\brm\b",                      # rm (delete file)
+    r"\bmkdir\b",                   # mkdir
+    r"\bcat\s+>",                   # cat > (write to file)
+    r"\btee\b",                     # tee (write to file)
+    r"\bpip\s+install\b",          # pip install
+    r"\bnpm\s+install\b",          # npm install
+    r"\bapt\s+install\b",          # apt install
+    r"\bchmod\b",                   # chmod
+    r"\bchown\b",                   # chown
+]
+
+_WRITE_PATTERN_RE = re.compile("|".join(_WRITE_BASH_PATTERNS), re.IGNORECASE)
+
+
+def _is_write_bash_command(command):
+    """Return True if a bash command appears to be a write/modification operation.
+
+    Write operations (file edits, git commits, git push) are more valuable to
+    keep in context because they represent changes that were actually made.
+    Read operations (cat, ls, grep) can be dropped more aggressively.
+    """
+    return bool(_WRITE_PATTERN_RE.search(command))
+
+
+def _build_tool_call_map(messages):
+    """Build a mapping from tool_call_id to {name, arguments}.
+
+    Scans all assistant messages with tool_calls and returns a dict mapping
+    each tool_call_id to the function name and arguments string.
+    """
+    call_map = {}
+    for msg in messages:
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            for tc in msg["tool_calls"]:
+                if isinstance(tc, dict):
+                    tc_id = tc.get("id")
+                    fn = tc.get("function", {})
+                    if tc_id:
+                        call_map[tc_id] = {
+                            "name": fn.get("name", ""),
+                            "arguments": fn.get("arguments", ""),
+                        }
+    return call_map
+
+
+def _is_write_tool_result(tool_call_id, call_map):
+    """Return True if the tool call with this ID was a write/modification operation,
+    OR if it is a read_file/grep result that should be protected from early dropping.
+
+    Drop priority (lowest = dropped first):
+      1. Bash read-only commands (ls, cat, git log, etc.) — dropped first
+      2. read_file / grep results — dropped second (kept longer as reference material)
+      3. Bash write operations (git commit/push, file edits) — dropped last
+      4. finish() calls — droppable (they only appear at end of run)
+
+    In trim_tool_results, "write" means "protected / drop later".
+    read_file and grep are treated as protected so they survive longer in context,
+    since they are the primary reference material the agent uses to understand
+    the codebase and should not be discarded before write-operation records.
+    """
+    info = call_map.get(tool_call_id, {})
+    tool_name = info.get("name", "")
+
+    # finish() calls are always droppable
+    if tool_name == "finish":
+        return False
+
+    # read_file and grep are reference material — protect them like write ops
+    # so they are dropped AFTER plain bash read commands
+    if tool_name in ("read_file", "grep"):
+        return True
+
+    # bash calls may be reads or writes — check the command
+    if tool_name == "bash":
+        args_str = info.get("arguments", "")
+        try:
+            args = json.loads(args_str)
+            command = args.get("command", args_str)
+        except (json.JSONDecodeError, AttributeError):
+            command = args_str
+        return _is_write_bash_command(command)
+
+    # Unknown tool — conservatively treat as write to avoid dropping
+    return True
+
+
 def trim_tool_results(messages, keep_n):
     """Remove oldest tool call/result pairs, keeping the last keep_n pairs.
 
     Preserves all assistant text content and the system prompt.
     Operates on OpenAI-format messages where tool calls are in assistant messages
     (role="assistant", tool_calls=[...]) and results are role="tool" messages.
+
+    Drop policy (smart ordering):
+    - Bash read-only results (ls, cat, git log, etc.) are dropped first.
+    - read_file and grep results are dropped second — they are reference material
+      that the agent needs to understand the codebase, so they are protected longer.
+    - Bash write results (git commit/push, file edits) are dropped last.
+    - This preserves context about file contents and what was actually changed.
     """
     if keep_n <= 0:
         return messages
@@ -23,11 +170,38 @@ def trim_tool_results(messages, keep_n):
 
     # Number of pairs to drop
     n_drop = len(tool_result_indices) - keep_n
-    indices_to_drop = set(tool_result_indices[:n_drop])
 
-    # Also find the assistant messages that contain tool_calls for the pairs we're dropping.
-    # Each assistant message with tool_calls is immediately followed by one or more tool messages.
-    # We scan backwards from each tool_result index to find its owning assistant message.
+    # Build tool call map to classify each result as read vs write
+    call_map = _build_tool_call_map(messages)
+
+    # Classify tool results: separate read-only from write results
+    # (preserving chronological order within each group)
+    read_indices = []
+    write_indices = []
+    for idx in tool_result_indices:
+        tool_call_id = messages[idx].get("tool_call_id")
+        if _is_write_tool_result(tool_call_id, call_map):
+            write_indices.append(idx)
+        else:
+            read_indices.append(idx)
+
+    # Build the set of indices to drop:
+    # Drop oldest read-only results first, then oldest write results if needed.
+    indices_to_drop = set()
+
+    # Drop from read-only pool first (oldest first)
+    for idx in read_indices:
+        if len(indices_to_drop) >= n_drop:
+            break
+        indices_to_drop.add(idx)
+
+    # If we still need to drop more, drop from write pool (oldest first)
+    for idx in write_indices:
+        if len(indices_to_drop) >= n_drop:
+            break
+        indices_to_drop.add(idx)
+
+    # Now remove the selected tool results and update their assistant messages
     dropped_tool_call_ids = set()
     for idx in indices_to_drop:
         dropped_tool_call_ids.add(messages[idx].get("tool_call_id"))
@@ -234,3 +408,56 @@ def compact_messages(messages, compaction_coverage, compaction_factor, llm_call_
     }
 
     return new_messages, stats
+
+
+def completion_with_retries(completion_fn, *args, transient_error_counter=None, **kwargs):
+    """Call a litellm completion function with retry logic for transient errors.
+
+    Retries on ServiceUnavailableError and InternalServerError (e.g., Anthropic
+    "overloaded" errors) with exponential backoff. These errors are typically
+    transient and resolve within seconds to minutes.
+
+    Args:
+        completion_fn: The litellm completion callable to wrap.
+        *args, **kwargs: Passed directly to completion_fn.
+        transient_error_counter: Optional mutable list of one int. If provided,
+            its first element is incremented each time a transient error occurs
+            (including retries and the final exhausted-retries failure).
+
+    Returns:
+        The completion response on success.
+
+    Raises:
+        The last exception if all retries are exhausted.
+        Any non-retryable exception immediately.
+    """
+    import time
+    import litellm
+
+    RETRYABLE_ERRORS = (
+        litellm.exceptions.ServiceUnavailableError,
+        litellm.exceptions.InternalServerError,
+    )
+    MAX_RETRIES = 5
+    BASE_DELAY_SECS = 10
+    MAX_DELAY_SECS = 120
+
+    last_exc = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            return completion_fn(*args, **kwargs)
+        except RETRYABLE_ERRORS as exc:
+            last_exc = exc
+            if attempt >= MAX_RETRIES:
+                if transient_error_counter is not None:
+                    transient_error_counter[0] += 1
+                print(f"  [Retry] Transient error — exhausted {MAX_RETRIES} retries: {exc}")
+                raise
+            delay = min(BASE_DELAY_SECS * (2 ** attempt), MAX_DELAY_SECS)
+            if transient_error_counter is not None:
+                transient_error_counter[0] += 1
+            print(
+                f"  [Retry] Transient error (attempt {attempt + 1}/{MAX_RETRIES}), "
+                f"retrying in {delay}s: {exc}"
+            )
+            time.sleep(delay)

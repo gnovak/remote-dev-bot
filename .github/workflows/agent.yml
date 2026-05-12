@@ -32,7 +32,58 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Dogfood gate (rdb repo only; no-op elsewhere).
+  #
+  # Inside gnovak/remote-dev-bot itself, `/agent-*` runs against @main
+  # (released code), which is almost always a mistake during development —
+  # you meant /dogfood-* which runs @dev. This gate hard-blocks /agent-* in
+  # the rdb repo and posts a redirect comment.
+  #
+  # For all other repos the gate short-circuits to proceed=true and is
+  # invisible — it adds ~5s to the overall run but no functional change.
+  #
+  # Break-glass: if dev is broken and you need to run @main from inside
+  # the rdb repo, temporarily revert the gate commit on main, invoke
+  # /agent-*, then revert the revert.
+  gate:
+    if: >
+      (github.event.issue || github.event.pull_request) &&
+      (startsWith(github.event.comment.body, '/agent-') || startsWith(github.event.comment.body, '/agent ')) &&
+      contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    steps:
+      - name: Check dogfood gate
+        id: check
+        run: |
+          if [[ "${{ github.repository }}" == "gnovak/remote-dev-bot" ]]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post redirect comment
+        if: steps.check.outputs.proceed == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.RDB_PAT_TOKEN || github.token }}
+        run: |
+          ISSUE_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
+          # 👀 reaction on the triggering comment — signals "seen, not acting".
+          # The 🚀 reaction normally added by remote-dev-bot.yml's parse job
+          # won't run here because we never call the reusable workflow.
+          gh api "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            --method POST --field content=eyes || true
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --body "⚠️ **This is the rdb dev repo.** \`/agent-*\` commands target released \`@main\` code — almost always a mistake during active development.
+
+          Use \`/dogfood-resolve\` (or \`/dogfood-design\`, \`/dogfood-review\`, etc.) to run against \`@dev\` instead.
+
+          <sub>If \`@dev\` is genuinely broken and you need to run \`@main\`, temporarily revert the gate commit on \`main\`. No inline arg exists by design — \`/agent-*\` stays clean of developer-facing flags since users copy this file.</sub>"
+
   resolve:
+    needs: [gate]
     # Security gate: only allow trusted users to trigger agent runs.
     # OWNER = repo owner, COLLABORATOR = explicitly invited, MEMBER = org member.
     # This prevents arbitrary users from triggering runs that consume API credits.
@@ -40,6 +91,7 @@ jobs:
     # Supports both "/agent-resolve" (dash) and "/agent resolve" (space) syntax.
     # Available modes: resolve (fix issue + open PR), design (analysis comment), review (review a PR)
     if: >
+      needs.gate.outputs.proceed == 'true' &&
       (github.event.issue || github.event.pull_request) &&
       (startsWith(github.event.comment.body, '/agent-') || startsWith(github.event.comment.body, '/agent ')) &&
       contains(fromJson('["OWNER","COLLABORATOR","MEMBER"]'), github.event.comment.author_association)

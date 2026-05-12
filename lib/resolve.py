@@ -26,11 +26,23 @@ from litellm import completion
 # resolve.py runs from a target repo's working directory.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from lib.context import compact_messages, estimate_tokens
+from lib.context import (
+    classify_provider_error,
+    compact_messages,
+    completion_with_retries,
+    estimate_tokens,
+)
+from lib.tools import (
+    validate_path,
+    is_dangerous_command,
+    execute_bash as _execute_bash,
+    execute_read_file,
+    execute_grep,
+)
 
 # --- Environment ---
 
-ISSUE_NUMBER = os.environ["ISSUE_NUMBER"]
+ISSUE_NUMBER = os.environ.get("ISSUE_NUMBER", "")
 ISSUE_TYPE = os.environ.get("ISSUE_TYPE", "issue")   # "issue" | "pr"
 TARGET_BRANCH = os.environ.get("TARGET_BRANCH", "main")
 PR_TYPE = os.environ.get("PR_TYPE", "ready")          # "ready" | "draft"
@@ -45,13 +57,59 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "")
 EXTRA_FILES = json.loads(os.environ.get("EXTRA_FILES", "[]") or "[]")
 EXTRA_INSTRUCTIONS = os.environ.get("EXTRA_INSTRUCTIONS", "")
 MODEL_EXTRA_INSTRUCTIONS = os.environ.get("MODEL_EXTRA_INSTRUCTIONS", "")
-BASH_OUTPUT_LIMIT = int(os.environ.get("BASH_OUTPUT_LIMIT", "8000") or "8000")
-CONTEXT_KEEP_TOOL_RESULTS = int(os.environ.get("CONTEXT_KEEP_TOOL_RESULTS", "10") or "10")
-MAX_CONTEXT_TOKENS = int(os.environ.get("MAX_CONTEXT_TOKENS", "0") or "0")
-COMPACTION_COVERAGE = float(os.environ.get("COMPACTION_COVERAGE", "0.5") or "0.5")
-COMPACTION_FACTOR = float(os.environ.get("COMPACTION_FACTOR", "0.5") or "0.5")
+def _require_env(name: str) -> str:
+    """Return env var value or die. These are internal plumbing, not user input."""
+    val = os.environ.get(name)
+    if val is None or val == "":
+        raise RuntimeError(
+            f"Required env var {name} is not set. "
+            f"This is a wiring bug — the workflow must pass it."
+        )
+    return val
+
+BASH_OUTPUT_LIMIT = int(_require_env("BASH_OUTPUT_LIMIT"))
+CONTEXT_KEEP_TOOL_RESULTS = int(_require_env("CONTEXT_KEEP_TOOL_RESULTS"))
+MAX_CONTEXT_TOKENS = int(_require_env("MAX_CONTEXT_TOKENS"))
+COMPACTION_COVERAGE = float(_require_env("COMPACTION_COVERAGE"))
+COMPACTION_FACTOR = float(_require_env("COMPACTION_FACTOR"))
 # Hardcoded: fire at 85% of max to leave headroom for the summary to land
 _COMPACTION_THRESHOLD = 0.85
+# Safety net threshold: at this fraction of the model's actual context window,
+# force-trim even when MAX_CONTEXT_TOKENS == 0 (compaction disabled).
+_PREEMPTIVE_TRIM_THRESHOLD = 0.90
+
+# Error substrings (case-insensitive) that indicate the *input* prompt was too long.
+# "max_output_tokens" is the OUTPUT limit — a different, non-context-overflow error.
+_CONTEXT_OVERFLOW_SUBSTRINGS = (
+    "prompt is too long",
+    "context_length_exceeded",
+    "maximum context length",
+    "too many tokens",
+    "request payload size exceeds",
+    "input is too long",
+    "context window",
+    "reduce your prompt",
+    "tokens in the input",
+)
+
+
+def _is_context_overflow_error(exc) -> bool:
+    """Return True if the exception indicates the input context was too long."""
+    err_msg = str(exc).lower()
+    return any(sub in err_msg for sub in _CONTEXT_OVERFLOW_SUBSTRINGS)
+
+
+def _get_model_max_input_tokens(model: str) -> int:
+    """Return the model's max_input_tokens from LiteLLM, or 0 if unknown."""
+    try:
+        info = litellm.get_model_info(model)
+        return int(info.get("max_input_tokens") or 0)
+    except Exception:
+        return 0
+
+
+DEBUG_LOGGING = os.environ.get("DEBUG_LOGGING", "false").lower() == "true"
+DISTILL_ENABLED = os.environ.get("DISTILL_ENABLED", "true").lower() == "true"
 
 GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY", "")
@@ -65,6 +123,7 @@ GIT_USERNAME = (
 # Sentinels for top-level cleanup handler
 _branch_created: str | None = None  # set as soon as branch is known
 _pr_created: bool = False            # set when any PR (draft or real) is successfully created
+_issue_title: str = ""               # set after issue/PR context is fetched
 
 # --- Utilities ---
 
@@ -79,6 +138,39 @@ def run(cmd, *, check=True, timeout=60):
             f"Command failed (exit {result.returncode}):\n{cmd}\n{output}"
         )
     return output
+
+
+def _commit_dirty_wip(label="partial work"):
+    """Commit any dirty working-tree changes as WIP and push to origin.
+
+    Called from the three recovery paths (exhausted iterations,
+    finish(success=False), and the _cleanup atexit handler) before any
+    git ls-remote check, so partial in-progress work is preserved when
+    the agent fails to commit + push on its own.
+
+    Returns True if a commit was made and pushed; False if the tree
+    was already clean OR if any git operation failed (non-fatal — the
+    caller should still attempt PR creation with whatever's already on
+    the remote).
+
+    Uses --no-verify to skip pre-commit hooks, since hook failures here
+    would defeat the safety-net purpose.
+    """
+    try:
+        status = run("git status --porcelain", check=False, timeout=30)
+        if not status.strip():
+            return False
+        run("git add -A", check=False, timeout=30)
+        commit_msg = f"WIP: auto-saved by recovery handler ({label})"
+        # `label` is a hardcoded literal at each call site (no user input),
+        # so single-quote interpolation in the shell command is safe.
+        run(f"git commit --no-verify -m '{commit_msg}'", check=False, timeout=60)
+        run("git push origin HEAD", check=False, timeout=60)
+        print(f"  Auto-committed dirty WIP: {label}")
+        return True
+    except Exception as e:
+        print(f"  Auto-commit-WIP failed (non-fatal): {e}")
+        return False
 
 
 # --- Branch setup ---
@@ -126,116 +218,45 @@ def setup_branch():
         branch = _find_available_branch(ISSUE_NUMBER)
         run(f"git checkout -b {branch}")
 
+    # Exclude .remote-dev-bot from git tracking so the agent doesn't
+    # accidentally commit the checkout directory as a submodule reference.
+    # Uses .git/info/exclude (local-only, not committed to the repo).
+    exclude_file = os.path.join(".git", "info", "exclude")
+    os.makedirs(os.path.dirname(exclude_file), exist_ok=True)
+    exclude_entry = ".remote-dev-bot"
+    existing = ""
+    if os.path.exists(exclude_file):
+        with open(exclude_file, "r") as ef:
+            existing = ef.read()
+    if exclude_entry not in existing.splitlines():
+        with open(exclude_file, "a") as ef:
+            if existing and not existing.endswith("\n"):
+                ef.write("\n")
+            ef.write(exclude_entry + "\n")
+
+    # Record the current HEAD as the diff base for post-run cost metrics.
+    # This must happen after branch setup: for issue triggers the workflow's
+    # initial checkout lands on the default branch (main), but the agent
+    # branches from TARGET_BRANCH (e.g. dev), so capturing HEAD here — after
+    # `git checkout -b` — gives the correct base. For PR triggers the PR
+    # branch is checked out directly, so HEAD is also correct here.
+    import subprocess as _subprocess
+    sha = _subprocess.run(
+        ["git", "rev-parse", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    with open("/tmp/agent_start_sha", "w") as _f:
+        _f.write(sha)
+
     return branch
 
 
-# --- Path validation ---
-
-def validate_path(path):
-    """Validate that a path is safe (no directory traversal, within repo)."""
-    normalized = os.path.normpath(path)
-    if normalized.startswith("..") or normalized.startswith("/"):
-        return False, "Path must be relative to repository root and cannot use '..'"
-    abs_path = os.path.abspath(normalized)
-    repo_root = os.path.abspath(".")
-    if not abs_path.startswith(repo_root):
-        return False, "Path must be within the repository"
-    return True, normalized
-
-
-# --- Tool implementations ---
-
-def is_dangerous_command(command):
-    """Return (True, reason) if a command matches a blocked pattern."""
-    dangerous_patterns = [
-        (r"\brm\s+-rf\s+/", "rm -rf / is not allowed"),
-        (r"\bdd\s+if=", "dd if= is not allowed"),
-        (r":\(\)\s*\{.*\}", "fork bomb pattern is not allowed"),
-        (r">\s*/dev/sd[a-z]", "direct disk write is not allowed"),
-    ]
-    for pattern, reason in dangerous_patterns:
-        if re.search(pattern, command):
-            return True, reason
-    return False, ""
+# --- Tool wrappers ---
 
 
 def execute_bash(command):
-    """Execute a bash command in the repository root."""
-    dangerous, reason = is_dangerous_command(command)
-    if dangerous:
-        return f"Error: {reason}"
-    try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=os.path.abspath("."),
-        )
-        output = (result.stdout or "") + (result.stderr or "")
-        if result.returncode != 0:
-            output = f"(exit code {result.returncode})\n" + output
-        output = output or "(no output)"
-        if BASH_OUTPUT_LIMIT > 0 and len(output) > BASH_OUTPUT_LIMIT:
-            half = BASH_OUTPUT_LIMIT // 2
-            output = (
-                output[:half]
-                + f"\n\n... [output truncated: {len(output)} chars total, showing first and last {half} chars] ...\n\n"
-                + output[-half:]
-            )
-        return output
-    except subprocess.TimeoutExpired:
-        return "Error: Command timed out after 30 seconds"
-    except Exception as e:
-        return f"Error executing command: {e}"
+    """Execute a bash command; uses module-level BASH_OUTPUT_LIMIT."""
+    return _execute_bash(command, timeout=30, bash_output_limit=BASH_OUTPUT_LIMIT)
 
-
-def execute_read_file(path):
-    """Read a file from the repository."""
-    valid, result = validate_path(path)
-    if not valid:
-        return f"Error: {result}"
-    if not os.path.exists(result):
-        return f"Error: File not found: {path}"
-    if os.path.isdir(result):
-        return f"Error: Path is a directory, not a file: {path}"
-    try:
-        with open(result) as f:
-            content = f.read()
-        if len(content) > 50000:
-            content = (
-                content[:50000]
-                + "\n\n... (file truncated, showing first 50000 characters)"
-            )
-        return content
-    except Exception as e:
-        return f"Error reading file: {e}"
-
-
-def execute_grep(pattern, path=None):
-    """Search for a pattern in repository files using git grep."""
-    try:
-        cmd = ["git", "grep", "-n", "--no-color", pattern]
-        if path:
-            valid, validated_path = validate_path(path)
-            if not valid:
-                return f"Error: {validated_path}"
-            cmd.extend(["--", validated_path])
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=30
-        )
-        output = result.stdout.strip()
-        if not output:
-            return "No matches found."
-        lines = output.split("\n")
-        if len(lines) > 100:
-            output = "\n".join(lines[:100]) + f"\n\n... ({len(lines) - 100} more matches truncated)"
-        return output
-    except subprocess.TimeoutExpired:
-        return "Error: Search timed out"
-    except Exception as e:
-        return f"Error executing grep: {e}"
 
 
 # --- Context gathering ---
@@ -361,6 +382,62 @@ def get_pr_context():
     return title, body, f"{head} -> {base}", comments, diff
 
 
+
+
+def parse_linked_issues(pr_body):
+    """Parse linked issue numbers from PR body.
+
+    Looks for patterns like 'Fixes #N', 'Closes #N', 'Resolves #N'
+    (case-insensitive, with optional 'owner/repo#N' syntax).
+    Returns a list of issue number strings (just the numbers, no '#').
+    """
+    if not pr_body:
+        return []
+    # Match: Fixes #123, Closes #123, Resolves #123
+    # Also handles: Fix #123, Close #123, Resolve #123
+    # And: Fixes owner/repo#123
+    pattern = r'(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s+(?:[\w.-]+/[\w.-]+)?#(\d+)'
+    matches = re.findall(pattern, pr_body, re.IGNORECASE)
+    # Deduplicate while preserving order
+    seen = set()
+    result = []
+    for m in matches:
+        if m not in seen:
+            seen.add(m)
+            result.append(m)
+    return result
+
+
+def fetch_linked_issue(issue_number):
+    """Fetch a linked issue's title, body, and comments from GitHub API.
+
+    Returns (title, body, comments_text) or None on failure.
+    """
+    try:
+        issue_json = run(
+            f"gh api repos/{GITHUB_REPO}/issues/{issue_number}", timeout=30
+        )
+        data = json.loads(issue_json)
+        title = data.get("title", "")
+        body = data.get("body", "") or ""
+
+        comments_json = run(
+            f"gh api 'repos/{GITHUB_REPO}/issues/{issue_number}/comments?per_page=100'",
+            timeout=30,
+        )
+        comments_data = json.loads(comments_json)
+        comments = ""
+        for c in comments_data:
+            user = c["user"]["login"]
+            comment_body = c.get("body", "")
+            comments += f"--- @{user} ---\n{comment_body}\n\n"
+
+        return title, body, comments
+    except Exception as e:
+        print(f"Failed to fetch linked issue #{issue_number}: {e}")
+        return None
+
+
 # --- Build system prompt ---
 
 SECURITY_RULES = """
@@ -409,7 +486,7 @@ WORKFLOW = """
 
 Follow this process:
 
-1. **Explore first**: Before writing any code, read the relevant files. Use grep/bash to find where the relevant logic lives. Understand the structure before changing anything.
+1. **Read only what you need**: Read only the files you are about to change — no speculative exploration. If the issue already identifies the relevant files, go straight to them. You should be writing or modifying a file by iteration 5 for a simple fix, or iteration 10 for a complex multi-file change. If you are still only reading files past iteration 10, stop and start implementing.
 2. **Plan**: Identify the minimal set of changes needed.
 3. **Implement**: Make focused, minimal changes. Modify existing files rather than creating new ones. Never create multiple versions of the same file (e.g., fix.py alongside fix_v2.py).
 4. **Verify**: Run tests if they exist. Check that the code is syntactically valid. If tests require dependencies that aren't installed, install them first (`pip install pytest`, `npm install`, etc.) — you are allowed to install packages freely.
@@ -429,6 +506,23 @@ Each tool call costs real money. Be targeted and deliberate:
 - **Call finish() as soon as the task is done.** Don't do unnecessary verification passes after a successful test run.
 - **Exploration should be proportional to task complexity.** A one-line fix does not warrant reading 10 files.
 """
+
+
+def _budget_paragraph(max_iterations):
+    """Build the iteration-budget paragraph for the agent's system prompt.
+
+    Names the budget explicitly so the model can pace itself, but explicitly
+    warns against treating the budget as a target — without that nudge,
+    "you have N iterations" reads as "spend N iterations."
+    """
+    return (
+        f"\n## Iteration Budget\n\n"
+        f"You have a budget of **{max_iterations} iterations** for this task. "
+        f"Aim to finish in significantly fewer if the task allows — the budget is a "
+        f"ceiling, not a target. Don't pad with extra exploration just because the "
+        f"budget is there. A simple fix should take 5-10 iterations; a complex "
+        f"multi-file change rarely needs more than 20-30.\n"
+    )
 
 STUCK_RECOVERY = """
 ## If You Are Stuck
@@ -482,6 +576,7 @@ Each commit message should describe what that unit of work does — treat them a
   - For issue triggers: the workflow creates a PR from your branch to the target branch
   - For PR triggers: the workflow records the PR URL; no new PR is created
 - If you cannot complete: call `finish(success=False, explanation="...")` describing what you tried and why it failed
+- **If investigation shows no change is needed**: call `no_op(reason="...")` instead of finish(). Use this when the code is already correct, the reported bug does not exist, or the requested change should deliberately not be made. The workflow will post your explanation as a comment and mark the run as success without creating a PR. Do NOT call finish(success=True) with empty commits in this case.
 - Before calling finish: verify your changes work (run tests if they exist, check the code compiles)
 
 **PR title**: Use imperative mood describing the change, not the issue number.
@@ -520,7 +615,7 @@ description.
 """
 
 
-def build_system_prompt(repo_context, issue_context_str):
+def build_system_prompt(repo_context, issue_context_str, distillation_ran=False):
     """Build the system prompt for the resolve agent."""
     wrapup_hint = ""
     if WRAPUP_ENABLED and WRAPUP_ITERATION > 0:
@@ -549,6 +644,7 @@ is complete before committing — call `finish()` now.
 
     prompt = (
         AGENT_ROLE
+        + _budget_paragraph(MAX_ITERATIONS)
         + f"\n# Repository Context\n\n{repo_context}\n\n"
         + WORKFLOW
         + READING_THE_TASK
@@ -560,6 +656,22 @@ is complete before committing — call `finish()` now.
     )
     if wrapup_hint:
         prompt += wrapup_hint
+
+    if distillation_ran:
+        prompt += """
+
+## Pre-Distilled Context
+
+A context distillation step has pre-selected the most relevant files for this task. \
+The '## Distilled Context' section in Repository Context contains:
+- Full content of files you'll likely need to modify
+- Key function signatures and interfaces you'll need to work with
+- Exploration boundaries — what you do NOT need to read
+
+**Prioritize the distilled context.** Start from what's provided rather than \
+exploring the codebase from scratch. Only read additional files if the distilled \
+context is missing something you specifically need.
+"""
 
     # Append mode-level and model-level extra_instructions (project/model-specific guidance)
     extra_parts = [p for p in [EXTRA_INSTRUCTIONS, MODEL_EXTRA_INSTRUCTIONS] if p]
@@ -579,6 +691,10 @@ TOOLS = [
             "description": (
                 "Execute a bash command in the repository root. "
                 "Use this to read files, make edits, run tests, git add/commit/push, etc. "
+                "The `gh` CLI is available with a working GH_TOKEN, so you can also run "
+                "`gh issue view N`, `gh pr view N`, `gh run view RUN_ID --log`, "
+                "`gh api repos/<owner>/<repo>/...`, etc. to inspect issues, PRs, "
+                "comments, and Actions run logs when that helps you debug. "
                 "Commands have a 30-second timeout."
             ),
             "parameters": {
@@ -689,6 +805,33 @@ TOOLS = [
                     },
                 },
                 "required": ["success", "explanation", "conversation_summary"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "no_op",
+            "description": (
+                "Signal that the investigation is complete and no code change is needed. "
+                "Use this when you have investigated the issue and determined that the code "
+                "is already correct, the reported problem does not exist, or the requested "
+                "change should not be made. "
+                "The workflow will post an explanatory comment on the issue and mark the "
+                "run as success without creating a PR."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": (
+                            "Clear explanation of what was investigated and why no change "
+                            "is needed. This will be posted as a comment on the issue."
+                        ),
+                    },
+                },
+                "required": ["reason"],
             },
         },
     },
@@ -819,13 +962,131 @@ def write_pr_url(pr_url):
         f.write(pr_url + "\n")
 
 
-def write_status(success, explanation):
+def build_cost_table():
+    """Build a markdown cost table from /tmp/llm_usage.json and /tmp/start_time.
+
+    Returns a markdown string (starting with a blank line + heading), or ''
+    if usage data is unavailable.
+    """
+    import math, subprocess as _sp, re as _re
+    from lib.formatting import _fmt_tok, _fmt_ela, _fmt_bpd, _fmt_loc, _fmt_info, TABLE_HEADER
+
+    try:
+        with open("/tmp/llm_usage.json") as f:
+            d = json.load(f)
+    except Exception:
+        return ""
+
+    input_toks = int(d.get("input_tokens", 0))
+    output_toks = int(d.get("output_tokens", 0))
+    cost_val = float(d.get("cost") or 0)
+    iterations = int(d.get("iterations", 0))
+
+    try:
+        elapsed = int(time.time()) - int(open("/tmp/start_time").read().strip())
+    except Exception:
+        elapsed = 0
+
+    rounded = math.ceil(cost_val * 100) / 100
+
+    # Compute git diff metrics (LOC and compressed diff size)
+    shortstat = ""
+    diff_text = ""
+    try:
+        _base = open("/tmp/agent_start_sha").read().strip() if os.path.exists("/tmp/agent_start_sha") else None
+        _base_ref = _base or "$(git merge-base HEAD origin/main)"
+        _dp = _sp.run(
+            f"git diff {_base_ref} HEAD 2>/dev/null || echo \"\"",
+            shell=True, capture_output=True, text=True, timeout=30,
+        )
+        diff_text = _dp.stdout or ""
+        _ss = _sp.run(
+            f"git diff --shortstat {_base_ref} HEAD 2>/dev/null || echo \"\"",
+            shell=True, capture_output=True, text=True, timeout=30,
+        )
+        shortstat = _ss.stdout.strip()
+    except Exception:
+        pass
+
+    loc_changed = 0
+    _m = _re.search(r"(\d+) insertion", shortstat)
+    if _m:
+        loc_changed += int(_m.group(1))
+    _m = _re.search(r"(\d+) deletion", shortstat)
+    if _m:
+        loc_changed += int(_m.group(1))
+
+    rows = [
+        ("Time", _fmt_ela(elapsed)),
+        ("Iterations", str(iterations)),
+    ]
+    if shortstat:
+        rows.append(("Diff", shortstat))
+    _info = _fmt_info(diff_text)
+    if _info:
+        rows.append(("Info", _info))
+    rows.append(("Input", f"{_fmt_tok(input_toks)} tokens"))
+    rows.append(("Output", f"{_fmt_tok(output_toks)} tokens"))
+    if cost_val > 0 and loc_changed > 0:
+        rows.append(("LOC/$", f"{_fmt_loc(int(loc_changed / cost_val))} loc/$"))
+    if cost_val > 0 and diff_text:
+        rows.append(("Info/$", _fmt_bpd(diff_text, cost_val)))
+    rows.append(("**Cost**", f"**${rounded:.2f}**"))
+    lines = TABLE_HEADER[:]
+    lines += [f"| {k} | {v} |" for k, v in rows]
+    return "\n".join(lines)
+def build_cache_savings_summary():
+    """Build a cache savings summary string for the agent status log.
+
+    Returns a non-empty string if cache was used, or '' otherwise.
+    """
+    import math
+
+    try:
+        with open("/tmp/llm_usage.json") as f:
+            d = json.load(f)
+    except Exception:
+        return ""
+
+    input_toks = int(d.get("input_tokens", 0))
+    output_toks = int(d.get("output_tokens", 0))
+    cost_val = float(d.get("cost") or 0)
+    cache_read_toks = int(d.get("cache_read_tokens", 0))
+    cache_creation_toks = int(d.get("cache_creation_tokens", 0))
+
+    if cache_read_toks == 0 and cache_creation_toks == 0:
+        return ""
+
+    from lib.formatting import _fmt_tok
+
+    parts = []
+    if cache_read_toks > 0:
+        parts.append(f"{_fmt_tok(cache_read_toks)} tokens read from cache")
+    if cache_creation_toks > 0:
+        parts.append(f"{_fmt_tok(cache_creation_toks)} tokens written to cache")
+
+    # Estimate savings
+    uncached_input = input_toks - cache_read_toks
+    if cache_read_toks > 0 and uncached_input > 0 and (input_toks + output_toks) > 0:
+        avg_input_price = cost_val / (input_toks + output_toks)
+        cache_savings = cache_read_toks * avg_input_price * 0.9
+        rounded_savings = math.ceil(cache_savings * 100) / 100
+        parts.append(f"~${rounded_savings:.2f} saved")
+
+    return f"**Cache:** {', '.join(parts)}"
+
+
+def write_status(success, explanation, no_op=False):
     """Write resolve status to /tmp/resolve_status.json."""
+    payload = {"success": success, "explanation": explanation}
+    if no_op:
+        payload["no_op"] = True
     with open("/tmp/resolve_status.json", "w") as f:
-        json.dump({"success": success, "explanation": explanation}, f)
+        json.dump(payload, f)
 
 
-def write_usage(input_tokens, output_tokens, cost, iterations):
+def write_usage(input_tokens, output_tokens, cost, iterations,
+                cache_read_tokens=0, cache_creation_tokens=0):
     """Write token usage to /tmp/llm_usage.json."""
     with open("/tmp/llm_usage.json", "w") as f:
         json.dump(
@@ -834,6 +1095,8 @@ def write_usage(input_tokens, output_tokens, cost, iterations):
                 "output_tokens": output_tokens,
                 "cost": cost,
                 "iterations": iterations,
+                "cache_read_tokens": cache_read_tokens,
+                "cache_creation_tokens": cache_creation_tokens,
             },
             f,
         )
@@ -842,30 +1105,29 @@ def write_usage(input_tokens, output_tokens, cost, iterations):
 # --- Main agent loop ---
 
 def main():
-    global _branch_created, _pr_created
+    global _branch_created, _pr_created, _issue_title
     # Set up branch
     print(f"Setting up branch for {ISSUE_TYPE} #{ISSUE_NUMBER}...")
     branch = setup_branch()
     _branch_created = branch
     print(f"Working on branch: {branch}")
 
-    # Gather repository context
-    file_listing_result = subprocess.run(
-        ["git", "ls-files"], capture_output=True, text=True
-    )
-    file_listing = file_listing_result.stdout.strip()
-    repo_context = f"## Repository File Listing\n\n```\n{file_listing}\n```"
-
+    # Gather repository context (EXTRA_FILES only — the structural extract
+    # from distillation replaces the old git ls-files listing).
+    repo_context = ""
     for filepath in EXTRA_FILES:
         if os.path.exists(filepath):
             with open(filepath) as f:
                 content = f.read().strip()
             if content:
-                repo_context += f"\n\n## File: {filepath}\n\n{content}"
+                if repo_context:
+                    repo_context += "\n\n"
+                repo_context += f"## File: {filepath}\n\n{content}"
 
     # Gather issue/PR context
     if ISSUE_TYPE == "pr":
         title, body, branches, comments, diff = get_pr_context()
+        _issue_title = title
         issue_context = (
             f"## Pull Request #{ISSUE_NUMBER}: {title}\n\n"
             f"**Branches:** {branches}\n\n"
@@ -875,36 +1137,142 @@ def main():
         )
     else:
         title, body, comments = get_issue_context()
+        _issue_title = title
         issue_context = (
             f"## Issue #{ISSUE_NUMBER}: {title}\n\n"
             f"{body}\n\n"
             f"## Discussion:\n\n{comments}\n"
         )
 
-    system_prompt = build_system_prompt(repo_context, issue_context)
+    # Fetch and compress linked issue context (PR triggers only)
+    linked_issue_context = ""
+    linked_issue_tokens = 0
+    linked_issue_output_tokens = 0
+    linked_issue_cost = 0.0
+    if ISSUE_TYPE == "pr" and DISTILL_ENABLED:
+        linked_numbers = parse_linked_issues(body)
+        if linked_numbers:
+            print(f"Found linked issue(s): {', '.join('#' + n for n in linked_numbers)}")
+            for linked_num in linked_numbers:
+                result = fetch_linked_issue(linked_num)
+                if result is None:
+                    continue
+                ltitle, lbody, lcomments = result
+                try:
+                    from lib.distill import compress_linked_issue
+                    print(f"  Compressing linked issue #{linked_num} context...")
+                    compressed, inp, out, cost = compress_linked_issue(
+                        ltitle, lbody, lcomments, body, diff, LLM_MODEL
+                    )
+                    linked_issue_tokens += inp
+                    linked_issue_output_tokens += out
+                    linked_issue_cost += cost
+                    if compressed and compressed.strip():
+                        linked_issue_context += (
+                            f"## Linked Issue #{linked_num}: {ltitle}\n\n"
+                            f"{compressed}\n\n"
+                        )
+                        print(f"  Compressed issue #{linked_num}: {inp} input tokens, "
+                              f"{out} output tokens, ${cost:.4f}")
+                    else:
+                        print(f"  Compression returned empty for issue #{linked_num}")
+                except Exception as e:
+                    print(f"  Failed to compress linked issue #{linked_num}: {e}")
+        else:
+            print("No linked issues found in PR body")
+
+    # Context distillation pre-step
+    distillation_ran = False
+    distill_input_tokens = 0
+    distill_output_tokens = 0
+    distill_cost = 0.0
+    pre_distill_tokens = 0  # token estimate before distillation
+    post_distill_tokens = 0  # token estimate after distillation (0 = distillation did not run)
+    distillation_summary = ""
+    if DISTILL_ENABLED:
+        try:
+            from lib.distill import maybe_distill
+            pre_distill_tokens = len(repo_context) // 4
+            print("Running context distillation pre-step...")
+            # Estimate tokens before distillation so we can measure savings
+            undistilled_tokens = estimate_tokens([{"content": repo_context}])
+            distilled, distill_input_tokens, distill_output_tokens, distill_cost, structural_extract = maybe_distill(
+                repo_context, issue_context, LLM_MODEL
+            )
+            if distilled != repo_context:
+                agent_context = f"## Distilled Context\n\n{distilled}"
+                # Append the structural extract (with line numbers) so the
+                # agent has a complete index of every function/class and can
+                # jump directly to definitions without exploratory reads.
+                if structural_extract:
+                    agent_context += f"\n\n## Codebase Index\n\n{structural_extract}"
+                distillation_ran = True
+                post_distill_tokens = len(distilled) // 4
+                print(f"Distillation complete: {distill_input_tokens} input tokens, {distill_output_tokens} output tokens, ${distill_cost:.4f}")
+                print(f"  [Distillation] {pre_distill_tokens} tokens -> {post_distill_tokens} tokens")
+            else:
+                agent_context = repo_context
+                print("Distillation skipped or returned original context")
+        except Exception as e:
+            print(f"Distillation failed: {e} — proceeding with full repo context")
+            agent_context = repo_context
+    else:
+        agent_context = repo_context
+
+    # Prepend linked issue context to the issue context if available
+    if linked_issue_context:
+        issue_context = linked_issue_context + issue_context
+
+    system_prompt = build_system_prompt(agent_context, issue_context, distillation_ran=distillation_ran)
 
     # Initialize conversation
     trigger_type = "PR" if ISSUE_TYPE == "pr" else "issue"
+    initial_user_text = f"Please resolve {trigger_type} #{ISSUE_NUMBER} as described above."
+
+    # Cache strategy: place a moving-tail cache_control marker on the LAST
+    # message before each API call. Anthropic caches the entire prefix up to
+    # the marker, so as the conversation grows iteration by iteration, almost
+    # all of each request hits the cache. The 5-min TTL refreshes on each
+    # hit, so the cache stays warm across the whole run as long as iterations
+    # are <5 min apart (always the case for our agent loops).
+    #
+    # The simpler "top-level cache_control" form (LiteLLM PR #22442) only
+    # caches the system prompt and was a regression: cache hit rate on long
+    # runs dropped from ~80% (moving tail) to ~5-10% (system-only). See #606.
+    _use_cache_markers = LLM_MODEL.startswith(("anthropic/", "claude", "gemini/", "vertex_ai/"))
+    # Gemini's cache semantics differ from Anthropic; explicit TTL is required.
+    _cache_ttl = "3600s" if LLM_MODEL.startswith(("gemini/", "vertex_ai/")) else None
+
     messages = [
         {"role": "system", "content": system_prompt},
         {
             "role": "user",
-            "content": (
-                f"Please resolve {trigger_type} #{ISSUE_NUMBER} as described above."
-            ),
+            "content": initial_user_text,
         },
     ]
 
-    total_input_tokens = 0
-    total_output_tokens = 0
-    total_cost = 0.0
+    total_input_tokens = distill_input_tokens + linked_issue_tokens
+    total_output_tokens = distill_output_tokens + linked_issue_output_tokens
+    total_cost = distill_cost + linked_issue_cost
+    total_cache_read_tokens = 0
+    total_cache_creation_tokens = 0
     finish_args = None
     last_iteration = 0
     no_tool_call_count = 0
     status_log = []  # list of (iteration, status_text) tuples
+    # Add distillation summary as first status log entry if distillation ran
+    if distillation_summary:
+        status_log.append((0, f"**Distillation summary:** {distillation_summary}"))
+    transient_error_counter = [0]  # mutable counter for transient API errors
 
     rate_limit_retries = 0
     MAX_RATE_LIMIT_RETRIES = 3
+
+    # Tracks whether the for-loop ran to completion without `break`. Used by
+    # the post-loop code below to distinguish "agent truly exhausted iterations"
+    # from "the loop broke out early via an exception handler that already
+    # wrote a more specific status" (e.g., BadRequestError on spend-limit).
+    loop_completed_naturally = False
 
     try:
         for iteration in range(MAX_ITERATIONS):
@@ -914,12 +1282,25 @@ def main():
             # Inject live wrapup message when the threshold is reached.
             # This is more effective than the system prompt hint alone — the agent
             # is deep in context by this point and needs a fresh, visible reminder.
-            if WRAPUP_ENABLED and WRAPUP_ITERATION > 0 and iteration + 1 == WRAPUP_ITERATION:
-                remaining = MAX_ITERATIONS - WRAPUP_ITERATION
-                print(f"  [Wrapup] Injecting wrapup message at iteration {iteration + 1}")
-                messages.append({
-                    "role": "user",
-                    "content": (
+            if WRAPUP_ENABLED and WRAPUP_ITERATION > 0 and iteration + 1 >= WRAPUP_ITERATION:
+                remaining = MAX_ITERATIONS - (iteration + 1)
+                is_final = (iteration + 1 == MAX_ITERATIONS)
+                print(f"  [Wrapup] Injecting {'FINAL' if is_final else 'wrapup'} message at iteration {iteration + 1}")
+                if DEBUG_LOGGING:
+                    print(f"  [DEBUG] Wrapup injected at iteration {iteration + 1}")
+                if is_final:
+                    wrapup_content = (
+                        f"🚨 FINAL ITERATION — {iteration + 1} of {MAX_ITERATIONS}. "
+                        "THIS IS YOUR LAST TOOL CALL. There are NO more iterations after this.\n\n"
+                        "You MUST do exactly these two things and nothing else:\n"
+                        "1. `git add -A && git commit -m \"WIP: partial implementation\" && git push origin HEAD`\n"
+                        "2. Call `finish(success=False, explanation=\"...\")` — this is mandatory.\n\n"
+                        "If you do not call finish(), the run is marked as failure and ALL unpushed "
+                        "work is permanently lost when this runner shuts down. "
+                        "Do not read files. Do not make changes. Commit, push, finish."
+                    )
+                else:
+                    wrapup_content = (
                         f"⚠️ WRAP UP NOW — iteration {iteration + 1} of {MAX_ITERATIONS}. "
                         f"Only {remaining} iteration(s) remain after this one.\n\n"
                         "**First, right now, before anything else: push whatever you have.**\n"
@@ -930,16 +1311,101 @@ def main():
                         "3. Call `finish(success=False, explanation=\"...\")` describing "
                         "what was done and what remains.\n\n"
                         "Do NOT start any new work. Push and finish now."
-                    ),
-                })
+                    )
+                messages.append({"role": "user", "content": wrapup_content})
 
+            # Debug logging: per-iteration context stats
+            if DEBUG_LOGGING:
+                ctx_tokens = estimate_tokens(messages)
+                print(f"  [DEBUG] Iteration {iteration + 1}: context ~{ctx_tokens} tokens, "
+                      f"messages={len(messages)}, "
+                      f"cumulative input={total_input_tokens}, output={total_output_tokens}")
+
+            # Pre-emptive safety net: check context size against the model's actual
+            # context window limit (independent of MAX_CONTEXT_TOKENS / compaction config).
+            # At 90% of the model limit, force-trim so we don't crash mid-iteration.
+            _model_max_ctx = _get_model_max_input_tokens(LLM_MODEL)
+            if _model_max_ctx > 0:
+                _cur_tokens = estimate_tokens(messages)
+                _ctx_limit = int(_model_max_ctx * _PREEMPTIVE_TRIM_THRESHOLD)
+                if _cur_tokens > _ctx_limit:
+                    print(
+                        f"  [Context safety] ~{_cur_tokens:,} tokens exceeds "
+                        f"{_PREEMPTIVE_TRIM_THRESHOLD:.0%} of model limit "
+                        f"({_model_max_ctx:,}) — force-trimming to 3 tool results"
+                    )
+                    write_status(
+                        False,
+                        f"Context approaching model limit at iteration {iteration + 1} "
+                        f"(~{_cur_tokens:,} / {_model_max_ctx:,} tokens) — "
+                        "emergency trim applied, wrapping up",
+                    )
+                    messages = trim_tool_results(messages, 3)
+                    # Inject wrapup to encourage the agent to finish cleanly
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "⚠️ CONTEXT LIMIT WARNING: The conversation has grown very large "
+                            "and is approaching the model's context window. "
+                            "You MUST wrap up immediately: "
+                            "1. Commit and push any pending changes: "
+                            "`git add -A && git commit -m 'WIP' && git push origin HEAD`  "
+                            "2. Call finish() now — do not start any new work."
+                        ),
+                    })
+
+            # Guard: Claude 4.6+ rejects conversations ending with an
+            # assistant message ("does not support assistant message prefill").
+            # Normally messages end with a tool result, but edge cases in
+            # LiteLLM's Anthropic message translation can produce a trailing
+            # assistant turn. Append a nudge-user message to fix the sequence.
+            if messages and messages[-1].get("role") == "assistant":
+                print(f"  [Prefill guard] Messages end with assistant role — injecting user message")
+                messages.append({
+                    "role": "user",
+                    "content": "Continue working on the task. Use the tools available to proceed.",
+                })
+            # Place the moving-tail cache_control marker on the last message.
+            # Strip every existing marker first to avoid accumulation past
+            # Anthropic's 4-marker limit.
+            if _use_cache_markers and messages:
+                for _msg in messages:
+                    _c = _msg.get("content")
+                    if isinstance(_c, list):
+                        for _blk in _c:
+                            if isinstance(_blk, dict):
+                                _blk.pop("cache_control", None)
+                _tail = messages[-1]
+                _tail_content = _tail.get("content")
+                _cc: dict = {"type": "ephemeral"}
+                if _cache_ttl:
+                    _cc["ttl"] = _cache_ttl
+                if isinstance(_tail_content, str):
+                    _tail["content"] = [
+                        {"type": "text", "text": _tail_content, "cache_control": _cc}
+                    ]
+                elif isinstance(_tail_content, list) and _tail_content:
+                    # Apply the marker to the last block of the list.
+                    _last_blk = _tail_content[-1]
+                    if isinstance(_last_blk, dict):
+                        _last_blk["cache_control"] = _cc
             try:
-                response = completion(
+                response = completion_with_retries(
+                    completion,
                     model=LLM_MODEL,
                     messages=messages,
                     tools=TOOLS,
                     max_tokens=16384,
+                    transient_error_counter=transient_error_counter,
                 )
+            except litellm.exceptions.BadRequestError as exc:
+                err_msg = str(exc)
+                if "prefill" in err_msg.lower():
+                    roles = [m.get("role") for m in messages[-5:]]
+                    print(f"Prefill error at iteration {iteration + 1}. "
+                          f"Last 5 roles: {roles}. Error: {exc}")
+                write_status(False, f"Bad request at iteration {iteration + 1}: {exc}")
+                break
             except litellm.exceptions.RateLimitError as exc:
                 rate_limit_retries += 1
                 if rate_limit_retries <= MAX_RATE_LIMIT_RETRIES:
@@ -953,14 +1419,47 @@ def main():
                     write_status(False, f"Rate limit error after {MAX_RATE_LIMIT_RETRIES} retries "
                                  f"at iteration {iteration + 1}: {exc}")
                     break
+            except litellm.exceptions.ContextWindowExceededError as exc:
+                # Input prompt is too long for the model's context window.
+                # Attempt emergency recovery: force-trim and inject a wrap-up message,
+                # then continue so the agent can commit/push before we exit.
+                print(f"LiteLLM ContextWindowExceededError at iteration {iteration + 1}: {exc}")
+                write_status(
+                    False,
+                    f"Context window exceeded at iteration {iteration + 1} — "
+                    "emergency trim applied, attempting graceful wrap-up",
+                )
+                # Force-trim to minimum tool results to recover headroom
+                messages = trim_tool_results(messages, 2)
+                # Inject a wrapup message so the agent commits and exits cleanly
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "🚨 CONTEXT WINDOW EXCEEDED: The conversation is too long for the model. "
+                        "You MUST wrap up immediately — do not make any further changes to files. "
+                        "1. Commit and push everything pending: "
+                        "`git add -A && git commit -m 'WIP: context limit reached' && git push origin HEAD`  "
+                        "2. Call finish() now."
+                    ),
+                })
+                continue
             except litellm.exceptions.APIConnectionError as exc:
                 err_msg = str(exc)
-                if "max_output_tokens" in err_msg:
-                    print(f"LiteLLM APIConnectionError (max_output_tokens): {exc}")
+                if _is_context_overflow_error(exc):
+                    print(f"LiteLLM APIConnectionError (context overflow): {exc}")
                     write_status(
                         False,
-                        f"Model hit output token limit at iteration {iteration + 1} — context too large",
+                        f"Context overflow at iteration {iteration + 1}: {exc}",
                     )
+                    messages = trim_tool_results(messages, 2)
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "🚨 CONTEXT WINDOW EXCEEDED: The conversation is too long. "
+                            "Commit and push pending work, then call finish() immediately."
+                        ),
+                    })
+                    continue
                 else:
                     print(f"LiteLLM APIConnectionError: {exc}")
                     write_status(
@@ -970,12 +1469,21 @@ def main():
                 break
             except litellm.exceptions.APIError as exc:
                 err_msg = str(exc)
-                if "max_output_tokens" in err_msg:
-                    print(f"LiteLLM APIError (max_output_tokens): {exc}")
+                if _is_context_overflow_error(exc):
+                    print(f"LiteLLM APIError (context overflow): {exc}")
                     write_status(
                         False,
-                        f"Model hit output token limit at iteration {iteration + 1} — context too large",
+                        f"Context overflow at iteration {iteration + 1}: {exc}",
                     )
+                    messages = trim_tool_results(messages, 2)
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "🚨 CONTEXT WINDOW EXCEEDED: The conversation is too long. "
+                            "Commit and push pending work, then call finish() immediately."
+                        ),
+                    })
+                    continue
                 else:
                     print(f"LiteLLM APIError: {exc}")
                     write_status(
@@ -986,13 +1494,61 @@ def main():
 
             # Track token usage
             usage = getattr(response, "usage", None)
+            iter_prompt_toks = 0
+            iter_completion_toks = 0
+            iter_cache_read_toks = 0
             if usage:
-                total_input_tokens += getattr(usage, "prompt_tokens", 0)
-                total_output_tokens += getattr(usage, "completion_tokens", 0)
+                iter_prompt_toks = getattr(usage, "prompt_tokens", 0) or 0
+                iter_completion_toks = getattr(usage, "completion_tokens", 0) or 0
+                total_input_tokens += iter_prompt_toks
+                total_output_tokens += iter_completion_toks
+                # Prompt caching token details (normalized by LiteLLM across providers)
+                prompt_details = getattr(usage, "prompt_tokens_details", None)
+                if prompt_details:
+                    iter_cache_read_toks = getattr(prompt_details, "cached_tokens", 0) or 0
+                    total_cache_read_tokens += iter_cache_read_toks
+                    total_cache_creation_tokens += getattr(prompt_details, "cache_creation_input_tokens", 0) or 0
             cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
             if cost:
                 total_cost += cost
             rate_limit_retries = 0
+
+            # Always-on per-iter token log: input/output and cache hit ratio.
+            # The cache hit ratio is the single most useful diagnostic for spotting
+            # when prefix caching breaks (see #478, #496).
+            if iter_prompt_toks:
+                cache_pct = (
+                    f" cache={iter_cache_read_toks:,}/{iter_prompt_toks:,} "
+                    f"({100 * iter_cache_read_toks / iter_prompt_toks:.0f}%)"
+                    if iter_cache_read_toks
+                    else ""
+                )
+                print(f"  [tokens] in={iter_prompt_toks:,} out={iter_completion_toks:,}{cache_pct}")
+
+            # Gemini (and possibly other providers) can return an empty choices
+            # list when a safety filter or streaming anomaly occurs.  Treat it
+            # the same as a response with no tool calls so the recovery loop
+            # handles it gracefully instead of crashing with IndexError.
+            if not response.choices:
+                print("LLM returned empty choices list — treating as no tool call")
+                no_tool_call_count += 1
+                if no_tool_call_count >= 3:
+                    print("No tool calls for 3 consecutive iterations — breaking")
+                    break
+                print(f"No tool calls (attempt {no_tool_call_count}/3) — injecting recovery message")
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Please continue working on the task using the tools available to you. "
+                            "You MUST call a tool in every response — do not describe what you would do, do it. "
+                            "If you believe the task is complete, call finish(). "
+                            "If you cannot proceed, call finish(success=False, explanation='...'). "
+                            "IMPORTANT: NEVER ask for human help. Use the tools to make progress or call finish() to stop."
+                        ),
+                    }
+                )
+                continue
 
             message = response.choices[0].message
             tool_calls = getattr(message, "tool_calls", None)
@@ -1037,15 +1593,28 @@ def main():
                 except json.JSONDecodeError:
                     arguments = {}
 
-                print(f"  Tool: {tool_name}({list(arguments.keys())})")
+                if tool_name == "bash":
+                    call_summary = f"bash({arguments.get('command', '')[:80]!r})"
+                elif tool_name in ("read_file", "grep", "finish"):
+                    call_summary = f"{tool_name}({arguments})"
+                else:
+                    call_summary = f"{tool_name}({list(arguments.keys())})"
 
                 if tool_name == "finish":
                     finish_args = arguments
                     done = True
                     tool_result = "finish() received. Task loop ending."
+                elif tool_name == "no_op":
+                    finish_args = {"_no_op": True, "reason": arguments.get("reason", "")}
+                    done = True
+                    tool_result = "no_op() received. Task loop ending."
                 else:
                     tool_result = execute_tool(tool_name, arguments)
 
+                # Always-on per-tool log: name, args summary, and result size.
+                # Result size is the single most useful number for tracking down
+                # token spend (see #478) — large grep/read results dominate context.
+                print(f"  Tool: {call_summary} → {len(tool_result):,} chars")
                 messages.append(
                     {
                         "role": "tool",
@@ -1056,7 +1625,15 @@ def main():
 
             # Trim old tool result pairs to manage context size
             if CONTEXT_KEEP_TOOL_RESULTS > 0:
+                pre_trim_count = len(messages)
+                pre_trim_tokens = estimate_tokens(messages)
                 messages = trim_tool_results(messages, CONTEXT_KEEP_TOOL_RESULTS)
+                if len(messages) != pre_trim_count:
+                    post_trim_tokens = estimate_tokens(messages)
+                    print(
+                        f"  [trim] dropped {pre_trim_count - len(messages)} message(s), "
+                        f"~{pre_trim_tokens:,} → ~{post_trim_tokens:,} tokens"
+                    )
 
             # Context window compaction — summarize oldest messages when context grows large
             if MAX_CONTEXT_TOKENS > 0 and not done:
@@ -1068,7 +1645,8 @@ def main():
 
                     def _compaction_llm_call(prompt_messages, max_tokens):
                         """Side-channel LLM call for summarization."""
-                        resp = completion(
+                        resp = completion_with_retries(
+                            completion,
                             model=LLM_MODEL,
                             messages=prompt_messages,
                             max_tokens=max_tokens,
@@ -1095,31 +1673,45 @@ def main():
                             f"tokens {total_tokens:,} → {new_total:,} ({ratio:.1f}% reduction)",
                         ))
 
+
             if done:
                 break
 
             # Rolling status log: every STATUS_LOG_INTERVAL iterations, make a side-channel
             # API call to ask the agent for a brief status update.
+            # At iteration 1, immediately record "Exploring" so the status shows Iter 1,
+            # not the first STATUS_LOG_INTERVAL iteration.
+            if STATUS_LOG_INTERVAL > 0 and iteration == 0:
+                already_exploring = any("Exploring" in entry[1] for entry in status_log)
+                if not already_exploring:
+                    status_log.append((1, "Exploring codebase — no changes yet"))
+                    print("  [Status log iter 1]: Exploring codebase — no changes yet")
             if STATUS_LOG_INTERVAL > 0 and (iteration + 1) % STATUS_LOG_INTERVAL == 0:
                 try:
                     # Get git diff --stat for ground-truth file changes.
-                    # Diff against the merge-base with the target branch so we
-                    # capture ALL changes on the branch (committed + uncommitted)
-                    # rather than only uncommitted working-tree changes.
+                    # Diff merge-base against the feature branch ref (not HEAD or
+                    # working tree) so the result is stable regardless of what the
+                    # agent has checked out or left uncommitted.  This means:
+                    #   - Shows only committed changes on the feature branch (honest)
+                    #   - Never flips to "(none)" because the agent temporarily
+                    #     checked out another branch or reset the working tree
+                    # A separate dirty-state check appends "[+dirty]" when the
+                    # working tree / index has uncommitted changes.
+                    branch_ref = _branch_created or "HEAD"
                     merge_base_result = subprocess.run(
-                        ["git", "merge-base", "HEAD", f"origin/{TARGET_BRANCH}"],
+                        ["git", "merge-base", branch_ref, f"origin/{TARGET_BRANCH}"],
                         capture_output=True, text=True, timeout=10,
                     )
                     if merge_base_result.returncode == 0:
                         merge_base = merge_base_result.stdout.strip()
                         diff_result = subprocess.run(
-                            ["git", "diff", "--stat", merge_base],
+                            ["git", "diff", "--stat", merge_base, branch_ref],
                             capture_output=True, text=True, timeout=10,
                         )
                     else:
                         # Fallback: no origin or no common ancestor
                         diff_result = subprocess.run(
-                            ["git", "diff", "--stat", "HEAD"],
+                            ["git", "diff", "--stat", branch_ref],
                             capture_output=True, text=True, timeout=10,
                         )
                     diff_lines = diff_result.stdout.strip().splitlines()
@@ -1128,59 +1720,165 @@ def main():
                     for line in diff_lines:
                         m = re.match(r"\s*(\S+)\s*\|\s*\d+\s*([+-]+)", line)
                         if m:
-                            fname = m.group(1)
+                            fname = os.path.basename(m.group(1))
                             plusminus = m.group(2)
                             ins = plusminus.count("+")
                             dels = plusminus.count("-")
                             file_changes.append(f"{fname} +{ins}/-{dels}")
-                    changes_str = "  ".join(file_changes) if file_changes else "(none)"
-
-                    # Strip tool-call messages — the status check call omits
-                    # tools=TOOLS, so Anthropic rejects history containing
-                    # tool_calls/tool roles. Keep only text turns.
-                    text_messages = [
-                        m for m in messages
-                        if m.get("role") in ("system", "user")
-                        or (m.get("role") == "assistant" and not m.get("tool_calls"))
-                    ]
-                    status_messages = text_messages + [
-                        {
-                            "role": "user",
-                            "content": (
-                                f"Changes: {changes_str}\n\n"
-                                "STATUS CHECK: One sentence only — what are you currently doing? "
-                                "Be concrete (name files/functions). No preamble."
-                            ),
-                        }
-                    ]
-                    status_response = completion(
-                        model=LLM_MODEL,
-                        messages=status_messages,
-                        max_tokens=128,
+                    # Detect dirty working tree (uncommitted staged or unstaged changes)
+                    dirty_result = subprocess.run(
+                        ["git", "status", "--short"],
+                        capture_output=True, text=True, timeout=10,
                     )
-                    status_text = ""
-                    if status_response.choices:
-                        sc = status_response.choices[0].message
-                        if hasattr(sc, "content") and sc.content:
-                            # Keep only the first sentence to prevent tool-call XML sprawl
-                            raw = sc.content.strip()
-                            first_sentence = re.split(r"(?<=[.!?])\s|\n", raw)[0]
-                            status_text = f"{first_sentence}  \n\u00a0\u00a0\u00a0\u00a0[Changes: {changes_str}]"
-                    if status_text:
-                        status_log.append((iteration + 1, status_text))
-                        print(f"  [Status log iter {iteration + 1}]: {first_sentence[:100]}")
+                    dirty = bool(dirty_result.stdout.strip())
+                    changes_str = "  ".join(file_changes) if file_changes else "(none)"
+                    if dirty:
+                        changes_str += "  [+dirty]"
+
+                    # Determine whether any changes exist (committed or dirty)
+                    has_changes = bool(file_changes or dirty)
+
+                    if not has_changes:
+                        # Exploration phase: record a single "Exploring" entry,
+                        # then suppress further status calls until changes appear.
+                        already_exploring = any(
+                            "Exploring" in entry[1] for entry in status_log
+                        )
+                        if not already_exploring:
+                            status_log.append((iteration + 1, "Exploring codebase — no changes yet"))
+                            print(f"  [Status log iter {iteration + 1}]: Exploring codebase — no changes yet")
+                        # else: suppress — no new information to report
+                    else:
+                        # Extract the last ~5 tool calls from the message history
+                        # to give the status model concrete ground-truth context.
+                        recent_calls = []
+                        for msg in reversed(messages):
+                            if msg.get("role") == "assistant":
+                                # litellm / OpenAI format: tool_calls list
+                                for tc in msg.get("tool_calls") or []:
+                                    name = tc.get("function", {}).get("name", "?")
+                                    raw_args = tc.get("function", {}).get("arguments", "{}")
+                                    try:
+                                        args = json.loads(raw_args)
+                                    except Exception:
+                                        args = {}
+                                    arg_repr = str(list(args.values())[0])[:60] if args else ""
+                                    recent_calls.append(f"{name}({arg_repr!r})")
+                                # Anthropic native format: content list with type=tool_use
+                                msg_content = msg.get("content", [])
+                                if isinstance(msg_content, list):
+                                    for block in msg_content:
+                                        if isinstance(block, dict) and block.get("type") == "tool_use":
+                                            name = block.get("name", "?")
+                                            inp = block.get("input", {})
+                                            arg_repr = str(list(inp.values())[0])[:60] if inp else ""
+                                            recent_calls.append(f"{name}({arg_repr!r})")
+                            if len(recent_calls) >= 5:
+                                break
+                        recent_calls_str = ", ".join(reversed(recent_calls)) or "(none)"
+
+                        # Strip tool-call messages — the status check call omits
+                        # tools=TOOLS, so Anthropic rejects history containing
+                        # tool_calls/tool roles. Keep only text turns.
+                        text_messages = [
+                            m for m in messages
+                            if m.get("role") in ("system", "user")
+                            or (m.get("role") == "assistant" and not m.get("tool_calls"))
+                        ]
+                        status_messages = text_messages + [
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"Recent tool calls: {recent_calls_str}\n"
+                                    f"Files changed: {changes_str}\n\n"
+                                    "STATUS CHECK: One sentence — what specific work are you doing right now? "
+                                    "Name the file or function. No preamble."
+                                ),
+                            }
+                        ]
+                        status_response = completion(
+                            model=LLM_MODEL,
+                            messages=status_messages,
+                            max_tokens=128,
+                        )
+                        status_text = ""
+                        if status_response.choices:
+                            sc = status_response.choices[0].message
+                            if hasattr(sc, "content") and sc.content:
+                                # Keep only the first sentence to prevent tool-call XML sprawl
+                                raw = sc.content.strip()
+                                first_sentence = re.split(r"(?<=[.!?])\s|\n", raw)[0]
+                                transient_note = (
+                                    f" | ⚠️ {transient_error_counter[0]} transient API error(s)"
+                                    if transient_error_counter[0] > 0 else ""
+                                )
+                                status_text = f"{first_sentence}  \n\u00a0\u00a0\u00a0\u00a0[Changes: {changes_str}{transient_note}]"
+                        if status_text:
+                            status_log.append((iteration + 1, status_text))
+                            print(f"  [Status log iter {iteration + 1}]: {first_sentence[:100]}")
                 except Exception as e:
                     print(f"  [Status log] failed at iteration {iteration + 1}: {e}")
+        else:
+            # for-else: only runs if the for loop completed without `break`.
+            # If we reach here, the agent truly exhausted MAX_ITERATIONS.
+            loop_completed_naturally = True
 
     # Write usage data (always, even on exception)
     finally:
-        write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1)
+        write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1,
+                    cache_read_tokens=total_cache_read_tokens,
+                    cache_creation_tokens=total_cache_creation_tokens)
+
+    def _fmt_tokens(n):
+        """Format a token count as a human-readable string: '1.3 M', '73 K', '850'."""
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f} M"
+        if n >= 1_000:
+            return f"{n / 1_000:.0f} K"
+        return str(n)
+
+    # Compute distillation savings summary (if distillation ran)
+    distillation_summary = ""
+    if distillation_ran and pre_distill_tokens > 0 and post_distill_tokens > 0:
+        try:
+            actual_iterations = last_iteration + 1
+            tokens_saved_per_iter = pre_distill_tokens - post_distill_tokens
+            total_tokens_saved = tokens_saved_per_iter * actual_iterations
+            # Estimate cost saved using LiteLLM model pricing
+            cost_saved_str = ""
+            try:
+                model_info = litellm.get_model_info(LLM_MODEL)
+                input_cost_per_token = model_info.get("input_cost_per_token", 0)
+                if input_cost_per_token:
+                    cost_saved = total_tokens_saved * input_cost_per_token
+                    cost_saved_str = f", ~${cost_saved:.2f} saved"
+            except Exception:
+                pass  # cost estimate is optional; skip if unavailable
+            distillation_summary = (
+                f"**Distillation:** {_fmt_tokens(pre_distill_tokens)} tokens → {_fmt_tokens(post_distill_tokens)} tokens "
+                f"({_fmt_tokens(tokens_saved_per_iter)} saved/iter × {actual_iterations} iters = "
+                f"{_fmt_tokens(total_tokens_saved)} tokens saved{cost_saved_str})"
+            )
+            print(f"Distillation savings: {distillation_summary}")
+        except Exception as e:
+            print(f"Could not compute distillation savings: {e}")
 
     # Post rolling status log as issue comment (if any entries were collected)
     if status_log and ISSUE_NUMBER and GITHUB_REPO:
         try:
             log_text = "\n\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
-            comment_body = f"## Agent Status Log\n\n{log_text}"
+            model_header = f"\U0001f916 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n" if ALIAS else ""
+            cache_summary = build_cache_savings_summary()
+            header_parts = []
+            if distillation_summary:
+                header_parts.append(distillation_summary)
+            if cache_summary:
+                header_parts.append(cache_summary)
+            header_block = "\n\n".join(header_parts)
+            if header_block:
+                comment_body = f"## Agent Status Log\n\n{model_header}{header_block}\n\n{log_text}"
+            else:
+                comment_body = f"## Agent Status Log\n\n{model_header}{log_text}"
             comment_file = "/tmp/rdb_status_log_comment.txt"
             with open(comment_file, "w") as f:
                 f.write(comment_body)
@@ -1193,8 +1891,18 @@ def main():
 
     # Handle finish
     if finish_args is None:
-        write_status(False, "Agent exhausted all iterations without calling finish()")
+        # Only claim "exhausted" if the for-loop ran to completion. If it
+        # broke out early via an exception handler (BadRequestError, rate
+        # limit, etc.), that handler already wrote a more specific status
+        # — don't overwrite it with the generic exhaustion message.
+        if loop_completed_naturally:
+            write_status(False, "Agent exhausted all iterations without calling finish()")
         print("Agent did not call finish() — treating as failure")
+        # Auto-commit any dirty working-tree changes so partial work isn't
+        # lost. The agent may have made edits without committing — without
+        # this, the safety push below would find no local commits and the
+        # branch on the remote would have nothing of value.
+        _commit_dirty_wip("agent did not finish")
         # Safety net: push any local commits the agent made but forgot to push.
         # Unpushed commits are lost when the runner shuts down, so we attempt a
         # push here regardless of whether the agent followed the push instructions.
@@ -1215,21 +1923,34 @@ def main():
         if ISSUE_TYPE == "issue" and remote_branch_exists and ON_FAILURE == "draft":
             try:
                 last_status = status_log[-1][1] if status_log else "No status recorded."
+                if loop_completed_naturally:
+                    headline = (
+                        f"agent exhausted all {MAX_ITERATIONS} iterations "
+                        "without completing the task."
+                    )
+                else:
+                    headline = "agent did not finish the task \u2014 see status below."
                 draft_body = (
-                    f"\u26a0\ufe0f **Partial work** \u2014 agent exhausted all {MAX_ITERATIONS} iterations "
-                    f"without completing the task.\n\n"
+                    f"\u26a0\ufe0f **Partial work** \u2014 {headline}\n\n"
                     f"This draft PR contains whatever was committed and pushed during the run. "
                     f"To continue, trigger `/agent-resolve` as a comment on this PR and the "
                     f"agent will pick up from this branch.\n\n"
                     f"**Agent's last status:** {last_status}\n\n"
                     f"Fixes #{ISSUE_NUMBER}"
                 )
-                pr_url = create_pr(branch, f"WIP: partial work on #{ISSUE_NUMBER}", draft_body, draft=True)
+                pr_url = create_pr(branch, _issue_title or f"WIP on issue #{ISSUE_NUMBER}", draft_body, draft=True)
                 write_pr_url(pr_url)
                 print(f"Created draft PR for partial work: {pr_url}")
                 _pr_created = True
             except Exception as e:
                 print(f"Could not create draft PR: {e}")
+        return
+
+    # Handle no_op: agent investigated and determined no change is needed
+    if finish_args.get("_no_op"):
+        reason = finish_args.get("reason", "")
+        write_status(True, reason, no_op=True)
+        print(f"Agent signaled no_op: {reason}")
         return
 
     success = finish_args.get("success", False)
@@ -1267,7 +1988,16 @@ def main():
             except Exception as e:
                 print(f"Could not convert PR to ready: {e}")
             try:
-                comment_body = f"🤖 **Agent completed successfully.**\n\n{explanation}"
+                model_header = f"🤖 **Model:** `{ALIAS}` (`{LLM_MODEL}`)" if ALIAS else ""
+                cost_section = build_cost_table()
+                parts = []
+                if model_header:
+                    parts.append(model_header)
+                    parts.append("")
+                parts.append(f"**Agent completed successfully.**\n\n{explanation}")
+                if cost_section:
+                    parts.append(cost_section)
+                comment_body = "\n".join(parts)
                 comment_file = "/tmp/rdb_success_comment.txt"
                 with open(comment_file, "w") as f:
                     f.write(comment_body)
@@ -1276,12 +2006,15 @@ def main():
                     timeout=30,
                 )
                 print("Posted success comment")
+                open("/tmp/cost_embedded", "w").write("cost in success comment\n")
             except Exception as e:
                 print(f"Could not post success comment: {e}")
     else:
         print(f"Agent reported failure: {explanation}")
         if ON_FAILURE == "draft" and ISSUE_TYPE == "issue":
             print("Creating draft PR (on_failure=draft)...")
+            # Auto-commit dirty changes so create_pr has something on the remote.
+            _commit_dirty_wip("agent reported failure")
             try:
                 _body = pr_body or explanation
                 _fixes = f"Fixes #{ISSUE_NUMBER}"
@@ -1289,7 +2022,7 @@ def main():
                     _body = _body + ("\n\n" if _body else "") + _fixes
                 pr_url = create_pr(
                     branch,
-                    f"[Draft] Fix for issue #{ISSUE_NUMBER}",
+                    _issue_title or f"Fix for issue #{ISSUE_NUMBER}",
                     _body,
                     draft=True,
                 )
@@ -1305,6 +2038,10 @@ def _cleanup():
 
     Only runs when on_failure: draft is set."""
     if not _pr_created and _branch_created and ISSUE_TYPE == "issue" and ON_FAILURE == "draft":
+        # Auto-commit dirty changes so the remote branch (if any) has the
+        # agent's partial work. This covers cases where the agent crashed
+        # mid-edit before committing.
+        _commit_dirty_wip("agent terminated unexpectedly")
         try:
             remote_exists = bool(run(
                 f"git ls-remote --heads origin {_branch_created}",
@@ -1320,7 +2057,7 @@ def _cleanup():
                 )
                 pr_url = create_pr(
                     _branch_created,
-                    f"WIP: partial work on #{ISSUE_NUMBER}",
+                    _issue_title or f"WIP on issue #{ISSUE_NUMBER}",
                     draft_body,
                     draft=True
                 )
@@ -1335,6 +2072,6 @@ if __name__ == "__main__":
         import traceback
         print(f"Unhandled exception in resolve.py: {e}")
         traceback.print_exc()
-        write_status(False, f"Agent crashed: {e}")
+        write_status(False, f"Agent crashed: {classify_provider_error(e)}")
     finally:
         _cleanup()

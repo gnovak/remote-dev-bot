@@ -6,6 +6,8 @@
 #   /agent-review    — code review on a PR, post comment
 #   /agent-workshop  — design analysis + multi-model council critique
 #   /agent-build     — implement issue + multi-model council code review
+#   /agent-delegate  — full design-to-implementation cycle with no human pauses
+#   /agent-reconcile — rebase PR onto base branch and resolve conflicts
 #
 # To use a specific model, append it: /agent-resolve-claude-large
 # This works for any mode. See models: below for available aliases.
@@ -33,7 +35,7 @@ modes:
 
   design:
     default_model: claude-small
-    max_iterations: 10       # Iteration limit for the agentic loop
+    max_iterations: 15       # Iteration limit for the agentic loop
     extra_files:
       - README.md
       - CONTRIBUTING.md
@@ -51,6 +53,12 @@ modes:
     extra_files:
       - AGENTS.md
       - README.md
+    # Council: models that review the PR when `council = true` inline arg is used.
+    # Defaults to all configured models if not specified.
+    council:
+      - claude-small
+      - gpt-small
+      - gemini-small
 
   workshop:
     default_model: claude-small  # Model for design stage (Stage 1)
@@ -82,6 +90,39 @@ modes:
       - gpt-small
       - gemini-small
 
+  reconcile:
+    default_model: claude-small
+    max_iterations: 50       # Iteration limit for the rebase + conflict resolution loop
+    extra_files:
+      - AGENTS.md
+      - README.md
+
+
+  delegate:
+    default_model: claude-small
+    # Delegate has two independent iteration budgets:
+    #   max_iterations        — code-writing stages (Stage 4 resolve, Stage 6
+    #                           agentic code revision). Same name as elsewhere
+    #                           since it's the knob users typically adjust.
+    #   max_design_iterations — design/exploration stages (Stage 1 design loop,
+    #                           Stage 3a implementation spec loop). Design loops
+    #                           are usually satisfied with fewer iterations than
+    #                           coding loops, so they get a separate default.
+    # Each falls back independently to agent.max_iterations if unset.
+    # Both are settable as inline args in the /agent-delegate comment.
+    max_iterations: 50
+    max_design_iterations: 15
+    extra_files:
+      - README.md
+      - CONTRIBUTING.md
+      - AGENTS.md
+      - CLAUDE.md
+      - .gemini/GEMINI.md
+    # Council: models that review design and code. Defaults to all configured models.
+    council:
+      - claude-small
+      - gpt-small
+      - gemini-small
 
 models:
   claude-small:
@@ -89,16 +130,16 @@ models:
     description: "Balanced cost/capability — good default for most tasks"
 
   claude-large:
-    id: anthropic/claude-opus-4-6
+    id: anthropic/claude-opus-4-7
     description: "Most capable — for complex multi-file features"
 
   gpt-small:
     id: openai/gpt-5.1-codex-mini
-    description: "OpenAI GPT-5.1 Codex Mini — good default"
+    description: "OpenAI GPT-5.1 Codex Mini — fast, cost-effective coding"
 
   gpt-large:
-    id: openai/gpt-5.3-codex
-    description: "OpenAI GPT-5.3 Codex — best coding model"
+    id: openai/gpt-5.5
+    description: "OpenAI GPT-5.5 — frontier coding + reasoning"
 
   gemini-small:
     id: gemini/gemini-2.5-flash
@@ -117,8 +158,8 @@ agent:
   # PR type: "draft" or "ready"
   pr_type: ready
   # What to do when the agent can't fully resolve the issue (success=False):
-  #   draft   — open a draft PR with partial changes (default)
-  #   comment — post a comment only, no PR
+  #   draft   — open a draft PR with partial changes
+  #   comment — post a comment on the issue only, no PR is created
   on_failure: draft
   # Assign the triggering user to the issue when the agent starts
   assign_issue: true
@@ -133,14 +174,18 @@ agent:
   # Bash output truncation limit in characters. Long outputs are trimmed to
   # first half + last half of this length to prevent context bloat.
   # Set to 0 to disable truncation.
-  bash_output_limit: 8000
+  # NOTE: Temporarily disabled (was 8000) to gather baseline data on tool
+  # output sizes without truncation. See design-workspace.md.
+  bash_output_limit: 0
   # Rolling status log: post a one-sentence status update every N iterations
   # as an issue comment. Set to 0 to disable (default — enable per-repo).
   status_log_interval: 0
   # Number of recent tool call/result pairs to keep in context. Older pairs
   # are replaced with a placeholder to prevent O(N²) token growth on long runs.
-  # Set to 0 to keep all tool results (not recommended for runs > ~20 iterations).
-  context_keep_tool_results: 10
+  # Set to 0 to keep all tool results.
+  # NOTE: Temporarily disabled (was 20) to gather baseline data on context
+  # growth without dropping. See design-workspace.md.
+  context_keep_tool_results: 0
   # Context window compaction: when the context grows too large, the oldest
   # messages are summarized by the LLM and replaced with a compact summary.
   # Set max_context_tokens to 0 to disable compaction entirely.
@@ -153,6 +198,9 @@ agent:
   # Fraction of the selected messages to actually summarize and replace.
   # 0.5 = replace 50% of the selected range, keeping the rest verbatim.
   compaction_factor: 0.5
+  # Distillation pre-pass: compress codebase context before the agent loop starts.
+  # Reduces initial context size and quadratic token cost growth on long runs.
+  distill_enabled: true
   # Graceful wrap-up: inject instructions when approaching max iterations.
   # This helps the agent commit partial work before hitting the limit.
   graceful_wrapup:
