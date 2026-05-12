@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.9.0 — Delegate mode, reconcile mode, council reviews (May 2026)
+
+- **Delegate mode** (`/agent-delegate`): Full design-to-implementation pipeline
+  with no human pauses. 6 stages: design loop → council critique → optional
+  implementation spec round → resolve → council code review → agentic code
+  revision. Two independent iteration budgets (`max_iterations` and
+  `max_design_iterations`). Optional `design_rounds=2` adds an implementation
+  spec round between design and code.
+- **Reconcile mode** (`/agent-reconcile`): Rebases a PR onto its base branch
+  and resolves merge conflicts via the agent loop. Same status logs, cost
+  reporting, and graceful wrapup as resolve mode.
+- **Council mode for `/agent-review`**: Pass `council=true` to invoke all
+  configured review models in parallel and post their critiques as separate
+  comments on the PR.
+- **Cumulative cost tables**: Per-step cost tables now include `Info/$`,
+  `LOC/$`, and `Cumulative cost` rows. Delegate mode posts the full pipeline
+  cost summary on the resulting PR rather than the source issue.
+
 ## v0.8.0 — Workshop mode, build mode, and context compaction (Mar 2026)
 
 - **Workshop mode** (`/agent-workshop`): Two-stage multi-model design council.
