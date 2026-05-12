@@ -32,9 +32,10 @@ Three separate GitHub identities are used so each role is cleanly separated:
 - Classic PAT with `public_repo` + `workflow` scopes, no expiration
 - **`public_repo`** — create issues, post comments, open PRs in public repos
   (standard e2e test flow)
-- **`workflow`** — read/write `.github/workflows/` files; required by compiled
-  e2e tests, which temporarily swap the shim for the compiled workflow and must
-  restore it afterwards. Without this scope, the swap fails with HTTP 404.
+- **`workflow`** — read/write `.github/workflows/` files; required when the
+  agent itself needs to modify workflow files in a PR (e.g., the dogfood use
+  case where rdb is editing its own workflow files). Without this scope,
+  writes to `.github/workflows/` fail with HTTP 404.
 - Must be a collaborator on `remote-dev-bot-test` so the security gate allows
   its trigger comments
 - Keeps test activity out of `gnovak`'s GitHub contribution stats
@@ -212,17 +213,10 @@ PYTHONPATH=. pytest tests/ -v
 
 ## Test Infrastructure
 
-### Unit tests (`tests/test_config.py`, `tests/test_yaml.py`, `tests/test_compile.py`)
+### Unit tests (`tests/`)
 
 - Run with `pytest tests/ -v` (needs `PYTHONPATH=.`)
 - CI runs these on PRs to main (`.github/workflows/test.yml`)
-
-#### Keeping defaults in sync
-
-`lib/config.py` and `scripts/compile.py` both have a fallback default for
-`agent.version` (used when the config file has no `agent` section).
-These must stay in sync. Each has a `# NOTE: keep in sync` comment pointing
-to the other.
 
 ### E2E tests (`tests/e2e.sh`)
 
@@ -250,113 +244,81 @@ to prevent, consuming LLM budget. The regex is well covered by unit tests
 character (leading whitespace defeats it), which provides an additional layer of
 safety.
 
-### Compiled workflow tests
-
-- Unit tests (`tests/test_compile.py`): validate both compiled files (resolve
-  and design) — structure, triggers, permissions, model aliases, security
-  microagent
-- E2E: `./tests/e2e.sh --compiled` swaps compiled workflows into the test repo,
-  runs the full suite, then restores the shim. Use this before releases.
-
 ### Full test suite (`.github/workflows/full-test-suite.yml`)
 
-- One-button "run everything" workflow: unit tests → e2e shim → e2e compiled →
-  e2e security
-- Jobs run **sequentially** — all e2e tests share `remote-dev-bot-test` and
-  cannot run in parallel (shared e2e-test pointer, workflow files, and issues)
-- **Failure strategy**: unit tests are a fast-fail gate (e2e jobs skip if they
-  fail); the three e2e blocks continue past each other's failures so one run
-  gives a complete picture across all blocks. After a full run, use the
-  individual workflow_dispatch workflows to rerun only the failing blocks.
+- One-button "run everything" workflow: unit tests → e2e → e2e security
+- Jobs run **sequentially** — both e2e jobs share `remote-dev-bot-test` and
+  cannot run in parallel (shared e2e-test pointer, issues)
+- **Failure strategy**: unit tests are a fast-fail gate (e2e jobs skip if
+  they fail); the e2e blocks continue past each other's failures so one run
+  gives a complete picture. After a full run, use the individual
+  workflow_dispatch workflows to rerun only the failing blocks.
 - Use before releases to validate everything in one go
 
 ### Shared state constraint
 
-All e2e tests (functional, compiled, security) use `remote-dev-bot-test` as
-their target repo. They share:
+Both e2e tests (functional, security) use `remote-dev-bot-test` as their
+target repo. They share:
 
 - The `e2e-test` branch pointer (set to the branch under test)
-- Workflow files in the test repo (compiled tests swap out the shim)
 - Issues and PRs created during the test run
 
-**Do not run e2e workflows in parallel.** Use the full test suite workflow for
-sequential execution, or run individual workflows one at a time.
+**Do not run e2e workflows in parallel.** Use the full test suite workflow
+for sequential execution, or run individual workflows one at a time.
 
 ## Cutting a release
 
-This section covers the CHANGELOG-first release workflow. It complements the
-[Release Procedure](#release-procedure) below (which covers compiling artifacts
-and tagging).
+Users install via the shim (`agent.yml@main`), which calls
+`remote-dev-bot.yml@main`. A release is therefore mainly a CHANGELOG entry,
+a `dev` → `main` merge, and a tag. The tag push triggers
+`.github/workflows/release.yml`, which creates a GitHub release page from
+the matching CHANGELOG section.
+
+E2E tests cost real money (they invoke LLM APIs), so they are not automated.
+Run the full test suite manually before each release. The key rule: **test
+on `dev` before merging to `main`** — once something is on `main` it's live
+for users on the shim.
 
 ### Steps
 
-1. **Draft a comprehensive CHANGELOG entry.** AI or the maintainer writes a
+1. **Ensure `dev` is ready**: all intended PRs merged, unit CI green.
+
+2. **Run the full test suite on `dev`** via GitHub Actions → Full Test Suite
+   → Run workflow (branch: **dev**). Runs unit tests → e2e (all models) →
+   e2e security, sequentially. Do not trigger other e2e workflows while this
+   is running — they share the test repo. If it fails, debug using targeted
+   e2e triggers (one at a time), fix on a branch, merge to `dev`, and re-run.
+
+3. **Draft a comprehensive CHANGELOG entry.** AI or the maintainer writes a
    draft covering everything plausibly relevant: new features, bug fixes,
-   internal changes, refactors, model updates, deprecations. Err on the side of
-   over-inclusion at this stage — the next step trims it.
+   internal changes, refactors, model updates, deprecations. Err on the side
+   of over-inclusion at this stage — the next step trims it.
 
-2. **Human reviews and pares down — mandatory, not skippable.** Read the draft
-   and cut it to what users actually need to know. Remove internal-only changes,
-   implementation details, and redundant entries. **Do not tag without completing
-   this step.** Future automation must not skip it.
+4. **Human reviews and pares down — mandatory, not skippable.** Read the
+   draft and cut it to what users actually need to know. Remove internal-only
+   changes, implementation details, and redundant entries. **Do not tag
+   without completing this step.** Future automation must not skip it.
 
-3. **Merge `dev` → `main`** (fast-forward expected):
+5. **Merge `dev` → `main`** (fast-forward expected):
    ```bash
    git checkout main && git merge --ff-only dev && git push
    ```
 
-4. **Tag and push the tag**:
+6. **Tag and push the tag**:
    ```bash
    git tag -a vX.Y.Z -m "Release vX.Y.Z"
    git push origin vX.Y.Z
    ```
 
-5. **Verify `release.yml` ran.** Pushing a tag triggers `.github/workflows/release.yml`,
-   which automatically creates a GitHub release with the body extracted from the
-   matching `## vX.Y.Z` section in `CHANGELOG.md`. Check the Actions tab to
-   confirm the workflow succeeded and the release page shows the correct notes.
+7. **Verify `release.yml` ran.** The tag push triggers
+   `.github/workflows/release.yml`, which creates a GitHub release with the
+   body extracted from the matching `## vX.Y.Z` section in `CHANGELOG.md`.
+   Check the Actions tab to confirm the workflow succeeded and the release
+   page shows the correct notes.
 
-## Release Procedure
+### How users get the update
 
-Releases distribute three compiled workflows (`agent-resolve.yml`, `agent-design.yml`, `agent-review.yml`) that users download into their repos.
-
-E2E tests cost real money (they invoke LLM APIs), so the full test suite is not automated. Run it manually before each release. The key rule: **test on `dev` before merging to `main`** — once something is on `main` it's live for users.
-
-### Steps
-
-1. **Ensure `dev` is ready**: all intended PRs merged to `dev`, unit CI green.
-
-2. **Run the full test suite on `dev`** via GitHub Actions → Full Test Suite → Run workflow (branch: **dev**).
-   - This runs unit tests → e2e shim (all models) → e2e compiled (all models) → e2e security, sequentially.
-   - Do not trigger other e2e workflows while this is running — they share the test repo and will interfere.
-   - If it fails, debug using targeted e2e triggers (one at a time), fix on a branch, merge to `dev`, and re-run.
-
-3. **Merge `dev` → `main`** once the full test suite passes:
-   ```bash
-   git checkout main && git merge --ff-only dev && git push
-   ```
-
-4. **Compile the release artifacts** (on `main`):
-   ```bash
-   python scripts/compile.py
-   ```
-   This writes `dist/agent-resolve.yml`, `dist/agent-design.yml`, and `dist/agent-review.yml`. Commit the updated dist files if they changed.
-
-5. **Tag the release**:
-   ```bash
-   git tag -a vX.Y.Z -m "Release vX.Y.Z: summary of changes"
-   git push origin vX.Y.Z
-   ```
-
-6. **Create the GitHub release** with compiled workflows:
-   ```bash
-   gh release create vX.Y.Z dist/agent-resolve.yml dist/agent-design.yml dist/agent-review.yml \
-     --title "vX.Y.Z" \
-     --notes "Release notes here"
-   ```
-
-### What goes in a release
-
-- Three compiled workflow files: `agent-resolve.yml` (issue resolution), `agent-design.yml` (design analysis), `agent-review.yml` (code review). All are self-contained with inlined config, model aliases, and security guardrails.
-- Users who installed via compiled workflows get updates by downloading the new release.
-- Users who installed via the shim get updates automatically when `main` is updated (the shim calls `remote-dev-bot.yml@main`).
+Users on the shim install path (`agent.yml@main`) pick up the new release
+automatically the next time their workflow fires — no action on their end.
+The GitHub release page exists for human-readable notes and version
+discoverability; nothing is downloaded from it.
