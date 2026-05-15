@@ -13,7 +13,6 @@ from lib.distill import (
     SOURCE_FILE_CAP,
     OTHER_FILE_CAP,
     DISTILL_SMALL_REPO_LIMIT,
-    DISTILL_STRUCT_EXTRACT_LIMIT,
     DISTILL_OUTPUT_TOKENS,
     TRUNC_HALF_CHARS,
     OTHER_TRUNC_HALF_CHARS,
@@ -378,26 +377,50 @@ class TestMaybeDistill:
         user_msg = [m for m in messages if m["role"] == "user"][0]["content"]
         assert "<codebase>" in user_msg
 
-    def test_large_repo_skips_distillation(self, tmp_path):
-        """Large repos (> DISTILL_STRUCT_EXTRACT_LIMIT) skip distillation."""
-        files = {
-            "main.py": "print('hello')",
-        }
+    def test_large_repo_uses_structural_extract_path(self, tmp_path):
+        """Repos far above the small-repo limit go through the Tier 2 path
+        (structural extract + identify + targeted read) — there is no upper
+        cap that would skip distillation entirely."""
+        files = {"main.py": "print('hello')"}
         make_git_repo(tmp_path, files)
-        
-        original_context = "## Repo context"
-        
-        # Mock gather_repo_files to return a huge file list
+
+        # File list that estimates well above DISTILL_SMALL_REPO_LIMIT
+        # (would previously have been past the old 300K Tier-3 cutoff).
         huge_files = [
-            {"path": f"file_{i}.py", "content": "x" * 100000, "is_source": True, "truncated": False}
-            for i in range(200)
+            {"path": f"file_{i}.py", "content": f"def fn_{i}(): pass\n",
+             "is_source": True, "truncated": False}
+            for i in range(50)
         ]
-        
-        with patch("lib.distill.gather_repo_files", return_value=huge_files):
-            result = maybe_distill(original_context, "Fix a bug", "anthropic/claude-sonnet-4-5", root=str(tmp_path))
-        
-        assert result[0] == original_context  # unchanged
-        assert result[1] == 0
+
+        identify_response = MagicMock()
+        identify_response.choices = [MagicMock()]
+        identify_response.choices[0].message.content = "file_1.py\nfile_2.py"
+        identify_response.usage = MagicMock()
+        identify_response.usage.prompt_tokens = 1000
+        identify_response.usage.completion_tokens = 50
+        identify_response._hidden_params = {"response_cost": 0.01}
+
+        distill_response = MagicMock()
+        distill_response.choices = [MagicMock()]
+        distill_response.choices[0].message.content = "distilled output"
+        distill_response.usage = MagicMock()
+        distill_response.usage.prompt_tokens = 500
+        distill_response.usage.completion_tokens = 100
+        distill_response._hidden_params = {"response_cost": 0.02}
+
+        # Token estimate is well above DISTILL_SMALL_REPO_LIMIT to force Tier 2.
+        with patch("lib.distill.gather_repo_files", return_value=huge_files), \
+             patch("lib.distill.estimate_tokens_for_files",
+                   return_value=DISTILL_SMALL_REPO_LIMIT * 10), \
+             patch("lib.distill.completion",
+                   side_effect=[identify_response, distill_response]) as mock_comp:
+            result = maybe_distill("## Repo context", "Fix a bug",
+                                    "anthropic/claude-sonnet-4-5",
+                                    root=str(tmp_path))
+
+        # Two LLM calls: identify + distill (the Tier 2 path), not skipped.
+        assert mock_comp.call_count == 2
+        assert result[0] == "distilled output"
 
     def test_medium_repo_uses_structural_extract(self, tmp_path):
         """Medium repos use structural extract approach."""
@@ -484,7 +507,6 @@ class TestConstants:
         assert SOURCE_FILE_CAP > 0
         assert OTHER_FILE_CAP > 0
         assert DISTILL_SMALL_REPO_LIMIT > 0
-        assert DISTILL_STRUCT_EXTRACT_LIMIT > DISTILL_SMALL_REPO_LIMIT
         assert DISTILL_OUTPUT_TOKENS > 0
 
 
@@ -751,30 +773,54 @@ class TestMaybeDistillThresholds:
         assert result[0] == "distilled result"
         assert result[0] != original_context
 
-    def test_below_threshold_distill_not_called_original_returned(self, tmp_path):
-        """Tier 3 (huge repo, > DISTILL_STRUCT_EXTRACT_LIMIT tokens): distill() NOT called.
-
-        When the repo is very large (above DISTILL_STRUCT_EXTRACT_LIMIT), maybe_distill()
-        falls back without making any LLM call, and returns the original repo_context
-        unchanged with zero token counts.
-        """
+    def test_empty_file_list_returns_original(self, tmp_path):
+        """When gather_repo_files returns nothing, maybe_distill bails without
+        any LLM call and the original context flows through unchanged. This is
+        the only remaining "skip distillation entirely" path — there is no
+        upper-size cap."""
         files = {"placeholder.py": "x"}
         make_git_repo(tmp_path, files)
-
-        # Token estimate clearly above DISTILL_STRUCT_EXTRACT_LIMIT → Tier 3 skip.
-        huge_token_count = DISTILL_STRUCT_EXTRACT_LIMIT + 1
 
         original_context = "original repo context — must flow through unchanged"
 
         with patch("lib.distill.gather_repo_files", return_value=[]), \
-             patch("lib.distill.estimate_tokens_for_files", return_value=huge_token_count), \
              patch("lib.distill.completion") as mock_comp:
-            result = maybe_distill(original_context, "Fix a bug", "anthropic/claude-sonnet-4-5", root=str(tmp_path))
+            result = maybe_distill(original_context, "Fix a bug",
+                                    "anthropic/claude-sonnet-4-5",
+                                    root=str(tmp_path))
 
-        # distill() must NOT have been called at all
         mock_comp.assert_not_called()
-        # The original context must be returned unchanged
         assert result[0] == original_context
         assert result[1] == 0   # zero input tokens used
         assert result[2] == 0   # zero output tokens
         assert result[3] == 0.0 # zero cost
+
+    def test_overflow_in_tier2_falls_back_to_original(self, tmp_path):
+        """If a Tier-2 LLM call overflows the model context (or otherwise
+        errors), the outer try/except returns the original context. This is
+        the safety net we rely on for very large codebases now that the
+        upper cap is gone."""
+        files = {"main.py": "x"}
+        make_git_repo(tmp_path, files)
+
+        huge_files = [
+            {"path": f"file_{i}.py", "content": "def f(): pass\n",
+             "is_source": True, "truncated": False}
+            for i in range(10)
+        ]
+
+        original_context = "original — should flow through on overflow"
+
+        with patch("lib.distill.gather_repo_files", return_value=huge_files), \
+             patch("lib.distill.estimate_tokens_for_files",
+                   return_value=DISTILL_SMALL_REPO_LIMIT * 100), \
+             patch("lib.distill.completion",
+                   side_effect=Exception("context length exceeded")):
+            result = maybe_distill(original_context, "Fix a bug",
+                                    "anthropic/claude-sonnet-4-5",
+                                    root=str(tmp_path))
+
+        assert result[0] == original_context
+        assert result[1] == 0
+        assert result[2] == 0
+        assert result[3] == 0.0

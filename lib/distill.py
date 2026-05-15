@@ -3,11 +3,20 @@
 Gathers the target codebase, makes a single LLM call to extract only what's
 relevant to the task, and returns a focused context block for the agent.
 
-Three tiers:
-  1. Small repos (<= DISTILL_SMALL_REPO_LIMIT tokens): send full codebase
-  2. Medium repos (<= DISTILL_STRUCT_EXTRACT_LIMIT tokens): send structural
-     extract, identify relevant files, read those in full (second pass)
-  3. Large repos: skip distillation entirely (return original context)
+Two tiers:
+  1. Small repos (<= DISTILL_SMALL_REPO_LIMIT tokens): send the full codebase
+     in one call.
+  2. Larger repos: send a compact structural extract (function/class signatures
+     for Python, head-lines for other files), use a first LLM call to identify
+     relevant files, then read only those in full and pass them through a
+     second distillation call.
+
+There is no upper cap on repo size. The structural extract is roughly 10-15%
+of the codebase by tokens (varies with file mix), so the Tier-2 LLM input
+remains well below typical 1M-token model context windows for codebases up
+to several million tokens. If the extract ever does overflow the model's
+context window, the outer try/except returns the original (un-distilled)
+context as a graceful fallback.
 """
 
 import ast
@@ -19,9 +28,9 @@ from litellm import completion
 
 # --- Constants (all hardcoded — no user-facing config) ---
 
-# Token budget for the distillation call input
+# Token budget below which we skip the structural-extract step and just send
+# the whole codebase to the distill LLM in one shot.
 DISTILL_SMALL_REPO_LIMIT = 100_000    # tokens — try to send whole codebase
-DISTILL_STRUCT_EXTRACT_LIMIT = 300_000  # tokens — for medium repos, use structural extract
 
 # Per-file size caps before truncation (in characters)
 SOURCE_FILE_CAP = 50_000    # for source/config files
@@ -454,9 +463,14 @@ def maybe_distill(repo_context, issue_context, model, root="."):
             total_output += out
             total_cost += cost
 
-        elif total_tokens <= DISTILL_STRUCT_EXTRACT_LIMIT:
-            # Tier 2: Medium repo — structural extract + second pass
-            print("  [Distill] Tier 2 (medium repo): structural extract + targeted read")
+        else:
+            # Tier 2: Larger repo — structural extract + second pass.
+            # No upper bound here: the structural extract is ~10-15% of total
+            # tokens, so this path scales to multi-million-token codebases
+            # before hitting model context limits. If the extract does
+            # overflow the model context, the outer try/except returns the
+            # un-distilled context as a graceful fallback.
+            print(f"  [Distill] Tier 2 (~{total_tokens:,} tokens): structural extract + targeted read")
             # The distillation input uses the extract without line numbers
             # (line numbers aren't useful for the distillation LLM's task of
             # identifying relevant files).
@@ -487,11 +501,6 @@ def maybe_distill(repo_context, issue_context, model, root="."):
             total_input += inp
             total_output += out
             total_cost += cost
-
-        else:
-            # Tier 3: Large repo — skip
-            print(f"  [Distill] Repo too large (~{total_tokens:,} tokens) — skipping distillation")
-            return fallback
 
         if not result or not result.strip():
             print("  [Distill] Empty distillation result — falling back")
