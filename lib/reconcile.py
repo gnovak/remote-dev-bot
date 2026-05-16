@@ -236,7 +236,8 @@ def write_status(success, explanation):
         json.dump({"success": success, "explanation": explanation}, f)
 
 
-def write_usage(input_tokens, output_tokens, cost, iterations):
+def write_usage(input_tokens, output_tokens, cost, iterations,
+                cache_read_tokens=0, cache_creation_tokens=0):
     """Write token usage to /tmp/llm_usage.json."""
     with open("/tmp/llm_usage.json", "w") as f:
         json.dump(
@@ -245,6 +246,8 @@ def write_usage(input_tokens, output_tokens, cost, iterations):
                 "output_tokens": output_tokens,
                 "cost": cost,
                 "iterations": iterations,
+                "cache_read_tokens": cache_read_tokens,
+                "cache_creation_tokens": cache_creation_tokens,
             },
             f,
         )
@@ -461,6 +464,8 @@ def main():
     total_input_tokens = 0
     total_output_tokens = 0
     total_cost = 0.0
+    total_cache_read_tokens = 0
+    total_cache_creation_tokens = 0
     finish_args = None
     last_iteration = 0
     no_tool_call_count = 0
@@ -587,6 +592,10 @@ def main():
             if usage:
                 total_input_tokens += getattr(usage, "prompt_tokens", 0)
                 total_output_tokens += getattr(usage, "completion_tokens", 0)
+                prompt_details = getattr(usage, "prompt_tokens_details", None)
+                if prompt_details:
+                    total_cache_read_tokens += getattr(prompt_details, "cached_tokens", 0) or 0
+                    total_cache_creation_tokens += getattr(prompt_details, "cache_creation_input_tokens", 0) or 0
             cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
             if cost:
                 total_cost += cost
@@ -752,14 +761,19 @@ def main():
             loop_completed_naturally = True
 
     finally:
-        write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1)
+        write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1,
+                    cache_read_tokens=total_cache_read_tokens,
+                    cache_creation_tokens=total_cache_creation_tokens)
 
     # Post status log to the PR if collected.
     if status_log and PR_NUMBER and GITHUB_REPO:
         try:
+            from lib.formatting import build_cache_savings_summary
             log_text = "\n\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
             model_header = f"\U0001f916 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n" if ALIAS else ""
-            comment_body = f"## Agent Status Log\n\n{model_header}{log_text}"
+            cache_summary = build_cache_savings_summary(model=LLM_MODEL)
+            header_block = cache_summary + "\n\n" if cache_summary else ""
+            comment_body = f"## Agent Status Log\n\n{model_header}{header_block}{log_text}"
             comment_file = "/tmp/rdb_status_log_comment.txt"
             with open(comment_file, "w") as f:
                 f.write(comment_body)

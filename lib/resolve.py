@@ -1035,47 +1035,6 @@ def build_cost_table():
     lines = TABLE_HEADER[:]
     lines += [f"| {k} | {v} |" for k, v in rows]
     return "\n".join(lines)
-def build_cache_savings_summary():
-    """Build a cache savings summary string for the agent status log.
-
-    Returns a non-empty string if cache was used, or '' otherwise.
-    """
-    import math
-
-    try:
-        with open("/tmp/llm_usage.json") as f:
-            d = json.load(f)
-    except Exception:
-        return ""
-
-    input_toks = int(d.get("input_tokens", 0))
-    output_toks = int(d.get("output_tokens", 0))
-    cost_val = float(d.get("cost") or 0)
-    cache_read_toks = int(d.get("cache_read_tokens", 0))
-    cache_creation_toks = int(d.get("cache_creation_tokens", 0))
-
-    if cache_read_toks == 0 and cache_creation_toks == 0:
-        return ""
-
-    from lib.formatting import _fmt_tok
-
-    parts = []
-    if cache_read_toks > 0:
-        parts.append(f"{_fmt_tok(cache_read_toks)} tokens read from cache")
-    if cache_creation_toks > 0:
-        parts.append(f"{_fmt_tok(cache_creation_toks)} tokens written to cache")
-
-    # Estimate savings
-    uncached_input = input_toks - cache_read_toks
-    if cache_read_toks > 0 and uncached_input > 0 and (input_toks + output_toks) > 0:
-        avg_input_price = cost_val / (input_toks + output_toks)
-        cache_savings = cache_read_toks * avg_input_price * 0.9
-        rounded_savings = math.ceil(cache_savings * 100) / 100
-        parts.append(f"~${rounded_savings:.2f} saved")
-
-    return f"**Cache:** {', '.join(parts)}"
-
-
 def write_status(success, explanation, no_op=False):
     """Write resolve status to /tmp/resolve_status.json."""
     payload = {"success": success, "explanation": explanation}
@@ -1188,7 +1147,6 @@ def main():
     distill_cost = 0.0
     pre_distill_tokens = 0  # token estimate before distillation
     post_distill_tokens = 0  # token estimate after distillation (0 = distillation did not run)
-    distillation_summary = ""
     if DISTILL_ENABLED:
         try:
             from lib.distill import maybe_distill
@@ -1260,9 +1218,8 @@ def main():
     last_iteration = 0
     no_tool_call_count = 0
     status_log = []  # list of (iteration, status_text) tuples
-    # Add distillation summary as first status log entry if distillation ran
-    if distillation_summary:
-        status_log.append((0, f"**Distillation summary:** {distillation_summary}"))
+    # Distillation summary (with savings) is added to the status log header
+    # at posting time — see the call to build_distillation_summary below.
     transient_error_counter = [0]  # mutable counter for transient API errors
 
     rate_limit_retries = 0
@@ -1829,51 +1786,19 @@ def main():
                     cache_read_tokens=total_cache_read_tokens,
                     cache_creation_tokens=total_cache_creation_tokens)
 
-    def _fmt_tokens(n):
-        """Format a token count as a human-readable string: '1.3 M', '73 K', '850'."""
-        if n >= 1_000_000:
-            return f"{n / 1_000_000:.1f} M"
-        if n >= 1_000:
-            return f"{n / 1_000:.0f} K"
-        return str(n)
-
-    # Compute distillation savings summary (if distillation ran)
-    distillation_summary = ""
-    if distillation_ran and pre_distill_tokens > 0 and post_distill_tokens > 0:
-        try:
-            actual_iterations = last_iteration + 1
-            tokens_saved_per_iter = pre_distill_tokens - post_distill_tokens
-            total_tokens_saved = tokens_saved_per_iter * actual_iterations
-            # Estimate cost saved using LiteLLM model pricing
-            cost_saved_str = ""
-            try:
-                model_info = litellm.get_model_info(LLM_MODEL)
-                input_cost_per_token = model_info.get("input_cost_per_token", 0)
-                if input_cost_per_token:
-                    cost_saved = total_tokens_saved * input_cost_per_token
-                    cost_saved_str = f", ~${cost_saved:.2f} saved"
-            except Exception:
-                pass  # cost estimate is optional; skip if unavailable
-            distillation_summary = (
-                f"**Distillation:** {_fmt_tokens(pre_distill_tokens)} tokens → {_fmt_tokens(post_distill_tokens)} tokens "
-                f"({_fmt_tokens(tokens_saved_per_iter)} saved/iter × {actual_iterations} iters = "
-                f"{_fmt_tokens(total_tokens_saved)} tokens saved{cost_saved_str})"
-            )
-            print(f"Distillation savings: {distillation_summary}")
-        except Exception as e:
-            print(f"Could not compute distillation savings: {e}")
-
     # Post rolling status log as issue comment (if any entries were collected)
     if status_log and ISSUE_NUMBER and GITHUB_REPO:
         try:
+            from lib.formatting import build_cache_savings_summary, build_distillation_summary
             log_text = "\n\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
             model_header = f"\U0001f916 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n" if ALIAS else ""
-            cache_summary = build_cache_savings_summary()
-            header_parts = []
-            if distillation_summary:
-                header_parts.append(distillation_summary)
-            if cache_summary:
-                header_parts.append(cache_summary)
+            distillation_summary = ""
+            if distillation_ran:
+                distillation_summary = build_distillation_summary(
+                    pre_distill_tokens, post_distill_tokens, last_iteration + 1, LLM_MODEL
+                )
+            cache_summary = build_cache_savings_summary(model=LLM_MODEL)
+            header_parts = [p for p in (distillation_summary, cache_summary) if p]
             header_block = "\n\n".join(header_parts)
             if header_block:
                 comment_body = f"## Agent Status Log\n\n{model_header}{header_block}\n\n{log_text}"

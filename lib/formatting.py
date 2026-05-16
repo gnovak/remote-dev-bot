@@ -65,3 +65,109 @@ TABLE_HEADER: list = [
     '| Metric | Value |',
     '|--------|-------|',
 ]
+
+
+def _model_rates(model: str):
+    """Return (list_input_rate, cache_read_rate, cache_write_rate) for the model,
+    or (0, 0, 0) if LiteLLM doesn't know the model. Rates are per-token dollars.
+
+    Falls back to standard Anthropic ratios (read = 0.1× input, write = 1.25× input)
+    if LiteLLM has the input rate but not the cache rates.
+    """
+    try:
+        import litellm
+        info = litellm.get_model_info(model)
+    except Exception:
+        return (0.0, 0.0, 0.0)
+    list_input = float(info.get("input_cost_per_token") or 0)
+    if not list_input:
+        return (0.0, 0.0, 0.0)
+    cache_read = float(info.get("cache_read_input_token_cost") or 0) or (list_input * 0.1)
+    cache_write = float(info.get("cache_creation_input_token_cost") or 0) or (list_input * 1.25)
+    return (list_input, cache_read, cache_write)
+
+
+def build_cache_savings_summary(usage_path: str = "/tmp/llm_usage.json",
+                                 model: 'str | None' = None) -> str:
+    """Build a cache savings summary string for the agent status log.
+
+    Reads cache_read_tokens / cache_creation_tokens from usage_path (written
+    by write_usage in resolve / reconcile) and estimates savings against the
+    model's list input rate from LiteLLM's pricing table — NOT against the
+    blended post-cache cost (which was the bug fixed in this commit:
+    the old formula divided actual_cost by total_tokens, producing a rate
+    that was already discounted by caching AND diluted by output tokens,
+    leading to estimates 3-4× too low).
+
+    Returns '' if cache was not used or the file is missing.
+    """
+    import json
+
+    try:
+        with open(usage_path) as f:
+            d = json.load(f)
+    except Exception:
+        return ""
+
+    cache_read = int(d.get("cache_read_tokens", 0) or 0)
+    cache_write = int(d.get("cache_creation_tokens", 0) or 0)
+    if cache_read == 0 and cache_write == 0:
+        return ""
+
+    parts = []
+    if cache_read > 0:
+        parts.append(f"{_fmt_tok(cache_read)} tokens read from cache")
+    if cache_write > 0:
+        parts.append(f"{_fmt_tok(cache_write)} tokens written to cache")
+
+    if model:
+        list_input, read_rate, write_rate = _model_rates(model)
+        if list_input > 0:
+            # Reads: saved (list_input - read_rate) per token (default 0.9× list).
+            # Writes: cost extra (write_rate - list_input) per token (default 0.25× list).
+            read_savings = cache_read * (list_input - read_rate)
+            write_overhead = cache_write * (write_rate - list_input)
+            net = read_savings - write_overhead
+            if net > 0:
+                parts.append(f"~${round(net, 2):.2f} saved")
+
+    return f"**Cache:** {', '.join(parts)}"
+
+
+def build_distillation_summary(pre_tokens: int, post_tokens: int,
+                                iterations: int, model: 'str | None' = None) -> str:
+    """Build a distillation savings summary for the agent status log.
+
+    Distillation reduces tokens-per-iteration by (pre - post). After iteration 1,
+    those tokens sit in the prompt cache, so the per-iter saving from iter 2
+    onward is at the full input rate minus the cache-read rate (i.e., they
+    would have been cached too without distillation).
+
+    To avoid overstating savings, we apply the cache-read rate for iters 2..N
+    (the previous formula used the full input rate, overstating by ~10× for
+    long runs since the alternative — sending more tokens every iter — would
+    also have been cached).
+    """
+    if pre_tokens <= 0 or post_tokens <= 0 or iterations <= 0:
+        return ""
+    tokens_per_iter = pre_tokens - post_tokens
+    if tokens_per_iter <= 0:
+        return ""
+
+    summary = (
+        f"**Distillation:** {_fmt_tok(pre_tokens)} → {_fmt_tok(post_tokens)} tokens "
+        f"({_fmt_tok(tokens_per_iter)} saved/iter × {iterations} iters"
+    )
+
+    if model:
+        list_input, read_rate, _ = _model_rates(model)
+        if list_input > 0:
+            # First iteration would have paid full rate; subsequent iters would
+            # have been cache hits at read_rate. Distillation lets us avoid
+            # sending these tokens at all.
+            cost_saved = tokens_per_iter * (list_input + max(iterations - 1, 0) * read_rate)
+            if cost_saved > 0:
+                summary += f" = ~${round(cost_saved, 2):.2f} saved"
+
+    summary += ")"
+    return summary
