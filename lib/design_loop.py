@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 
-from lib.tools import (
+from tools import (
     validate_path as _tools_validate_path,
     execute_read_file as _tools_execute_read_file,
     execute_gh as _tools_execute_gh,

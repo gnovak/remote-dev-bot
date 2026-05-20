@@ -16,7 +16,7 @@ Usage from workflow Python heredoc:
 import re
 import subprocess
 
-from lib.formatting import _fmt_tok, _fmt_loc
+from formatting import _fmt_tok, _fmt_loc
 
 
 def extract_costs_from_text(text: str) -> tuple:

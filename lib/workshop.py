@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 # Cost formatting helpers — imported from shared lib/formatting.py
 # ---------------------------------------------------------------------------
 
-from lib.formatting import _fmt_tok, _fmt_ela, _fmt_bpd, _fmt_loc, _fmt_info, TABLE_HEADER
+from formatting import _fmt_tok, _fmt_ela, _fmt_bpd, _fmt_loc, _fmt_info, TABLE_HEADER
 
 
 def _build_cost_table(input_tokens, output_tokens, cost, elapsed, output_text):
