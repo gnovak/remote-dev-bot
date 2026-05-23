@@ -1145,16 +1145,20 @@ def main():
     distill_input_tokens = 0
     distill_output_tokens = 0
     distill_cost = 0.0
-    pre_distill_tokens = 0  # token estimate before distillation
-    post_distill_tokens = 0  # token estimate after distillation (0 = distillation did not run)
+    # pre_distill_tokens reflects what distillation actually saw (the codebase
+    # total), so the savings metric in the status log compares against the
+    # hypothetical "drag full codebase along every iteration" baseline. It is
+    # NOT the size of EXTRA_FILES (which was a bug — those are added context
+    # docs, not the thing distillation is replacing).
+    pre_distill_tokens = 0
+    post_distill_tokens = 0  # 0 = distillation did not run
     if DISTILL_ENABLED:
         try:
             from lib.distill import maybe_distill
-            pre_distill_tokens = len(repo_context) // 4
             print("Running context distillation pre-step...")
-            # Estimate tokens before distillation so we can measure savings
-            undistilled_tokens = estimate_tokens([{"content": repo_context}])
-            distilled, distill_input_tokens, distill_output_tokens, distill_cost, structural_extract = maybe_distill(
+            (distilled, distill_input_tokens, distill_output_tokens,
+             distill_cost, structural_extract,
+             codebase_total_tokens) = maybe_distill(
                 repo_context, issue_context, LLM_MODEL
             )
             if distilled != repo_context:
@@ -1165,9 +1169,10 @@ def main():
                 if structural_extract:
                     agent_context += f"\n\n## Codebase Index\n\n{structural_extract}"
                 distillation_ran = True
+                pre_distill_tokens = codebase_total_tokens
                 post_distill_tokens = len(distilled) // 4
                 print(f"Distillation complete: {distill_input_tokens} input tokens, {distill_output_tokens} output tokens, ${distill_cost:.4f}")
-                print(f"  [Distillation] {pre_distill_tokens} tokens -> {post_distill_tokens} tokens")
+                print(f"  [Distillation] codebase {pre_distill_tokens:,} tokens -> distilled context {post_distill_tokens:,} tokens")
             else:
                 agent_context = repo_context
                 print("Distillation skipped or returned original context")
