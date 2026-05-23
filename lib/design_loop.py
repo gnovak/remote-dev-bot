@@ -338,7 +338,10 @@ def run_design_loop(
                 + (f"\n\n## Discussion so far:\n{issue_comments}" if issue_comments else "")
             )
             print("Running context distillation pre-step (design loop)...")
-            distilled, distill_input_tokens, distill_output_tokens, distill_cost, structural_extract = maybe_distill(
+            # Note: design loop currently doesn't surface a per-iter savings
+            # metric, so we discard codebase_total_tokens here.
+            (distilled, distill_input_tokens, distill_output_tokens,
+             distill_cost, structural_extract, _codebase_total) = maybe_distill(
                 extra_context, issue_context_text, model
             )
             if distilled != extra_context:

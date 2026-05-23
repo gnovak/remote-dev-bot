@@ -462,7 +462,9 @@ class TestMaybeDistill:
         assert result[2] == 150   # 50 + 100
 
     def test_returns_tuple(self, tmp_path):
-        """maybe_distill returns (context, input_tokens, output_tokens, cost, structural_extract)."""
+        """maybe_distill returns
+        (context, input_tokens, output_tokens, cost, structural_extract,
+         codebase_total_tokens)."""
         files = {"main.py": "x"}
         make_git_repo(tmp_path, files)
 
@@ -475,13 +477,16 @@ class TestMaybeDistill:
         mock_response._hidden_params = {"response_cost": 0.001}
 
         with patch("lib.distill.completion", return_value=mock_response):
-            ctx, inp, out, cost, struct_extract = maybe_distill("repo", "task", "anthropic/claude-sonnet-4-5", root=str(tmp_path))
+            ctx, inp, out, cost, struct_extract, codebase_tokens = maybe_distill(
+                "repo", "task", "anthropic/claude-sonnet-4-5", root=str(tmp_path),
+            )
 
         assert ctx == "distilled"
         assert inp == 10
         assert out == 5
         assert cost == 0.001
         assert "<structural_extract>" in struct_extract
+        assert codebase_tokens >= 0
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +513,73 @@ class TestConstants:
         assert OTHER_FILE_CAP > 0
         assert DISTILL_SMALL_REPO_LIMIT > 0
         assert DISTILL_OUTPUT_TOKENS > 0
+
+
+# ---------------------------------------------------------------------------
+# Distillation system prompt — content locks
+# ---------------------------------------------------------------------------
+
+class TestDistillSystemPrompt:
+    """The distill LLM was over-compressing files when issues mentioned
+    specific line numbers — see PR that introduced this test for the
+    bridge-analysis #392 incident. The prompt now has a hard rule that
+    files to be modified are returned in FULL. Lock that in."""
+
+    def test_includes_files_must_be_full_rule(self):
+        from lib.distill import DISTILL_SYSTEM_PROMPT
+        # The phrase doesn't have to be exact — just confirm the rule
+        # is still present in some form that mentions "FULL" or "complete"
+        # for files-to-be-modified.
+        prompt_lower = DISTILL_SYSTEM_PROMPT.lower()
+        assert "full" in prompt_lower or "complete file" in prompt_lower
+        assert "modified" in prompt_lower or "modify" in prompt_lower
+
+    def test_warns_against_line_number_excerpting(self):
+        from lib.distill import DISTILL_SYSTEM_PROMPT
+        # Verify the prompt addresses the specific failure mode where
+        # the LLM excerpts around line-number references in the task.
+        assert "line number" in DISTILL_SYSTEM_PROMPT.lower()
+
+
+# ---------------------------------------------------------------------------
+# _small_repo_limit (model-dependent threshold)
+# ---------------------------------------------------------------------------
+
+class TestSmallRepoLimit:
+    """The Tier-1-vs-Tier-2 cutoff scales with the model's input window so
+    1M-token models get the headroom to ingest a much bigger codebase in
+    one shot, while smaller-window models stay conservative."""
+
+    def test_returns_fallback_for_unknown_model(self):
+        from lib.distill import _small_repo_limit, DISTILL_SMALL_REPO_LIMIT
+        with patch("litellm.get_model_info", side_effect=Exception("unknown")):
+            assert _small_repo_limit("nonsense/x") == DISTILL_SMALL_REPO_LIMIT
+
+    def test_scales_with_model_window(self):
+        from lib.distill import _small_repo_limit
+        # 1M window × 0.25 = 250K, within the clamp range
+        with patch("litellm.get_model_info",
+                   return_value={"max_input_tokens": 1_000_000}):
+            assert _small_repo_limit("any/model") == 250_000
+
+    def test_clamps_to_min_for_small_windows(self):
+        from lib.distill import _small_repo_limit, DISTILL_SMALL_REPO_LIMIT_MIN
+        # 100K window × 0.25 = 25K, but we floor at MIN
+        with patch("litellm.get_model_info",
+                   return_value={"max_input_tokens": 100_000}):
+            assert _small_repo_limit("any/model") == DISTILL_SMALL_REPO_LIMIT_MIN
+
+    def test_clamps_to_max_for_huge_windows(self):
+        from lib.distill import _small_repo_limit, DISTILL_SMALL_REPO_LIMIT_MAX
+        # 10M window × 0.25 = 2.5M, but we ceiling at MAX
+        with patch("litellm.get_model_info",
+                   return_value={"max_input_tokens": 10_000_000}):
+            assert _small_repo_limit("any/model") == DISTILL_SMALL_REPO_LIMIT_MAX
+
+    def test_returns_fallback_when_window_is_zero(self):
+        from lib.distill import _small_repo_limit, DISTILL_SMALL_REPO_LIMIT
+        with patch("litellm.get_model_info", return_value={"max_input_tokens": 0}):
+            assert _small_repo_limit("any/model") == DISTILL_SMALL_REPO_LIMIT
 
 
 # ---------------------------------------------------------------------------
@@ -741,16 +813,16 @@ class TestMaybeDistillThresholds:
     """
 
     def test_above_threshold_distill_called_and_result_returned(self, tmp_path):
-        """Tier 1 (small repo, <= DISTILL_SMALL_REPO_LIMIT tokens): distill() is called.
+        """Tier 1 (small repo, <= effective small-repo limit): distill() is called.
 
         Input clearly within the small-repo limit so maybe_distill() must invoke
         distill() exactly once (full-codebase path) and return its output.
+
+        The limit is now model-dependent (see _small_repo_limit); we stub it
+        here to keep the test independent of LiteLLM's pricing table.
         """
         files = {"main.py": "def foo(): pass"}
         make_git_repo(tmp_path, files)
-
-        # Use a token estimate clearly below DISTILL_SMALL_REPO_LIMIT → Tier 1 path.
-        small_token_count = DISTILL_SMALL_REPO_LIMIT - 1
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
@@ -762,8 +834,11 @@ class TestMaybeDistillThresholds:
 
         original_context = "original repo context"
 
+        # Pin both the codebase size estimate AND the model-dependent
+        # small-repo limit so the test deterministically exercises Tier 1.
         with patch("lib.distill.gather_repo_files", return_value=[{"path": "main.py", "content": "def foo(): pass", "is_source": True, "truncated": False}]), \
-             patch("lib.distill.estimate_tokens_for_files", return_value=small_token_count), \
+             patch("lib.distill.estimate_tokens_for_files", return_value=50_000), \
+             patch("lib.distill._small_repo_limit", return_value=100_000), \
              patch("lib.distill.completion", return_value=mock_response) as mock_comp:
             result = maybe_distill(original_context, "Fix a bug", "anthropic/claude-sonnet-4-5", root=str(tmp_path))
 
