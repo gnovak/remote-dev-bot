@@ -311,7 +311,7 @@ jobs:
           fi
 
           TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
-          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          TIMEOUT_SECONDS=$(awk -v m="$TIMEOUT_MINUTES" 'BEGIN{print int(m*60)}')
           echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
           echo $(date +%s) > /tmp/start_time
           # Run agent loop under timeout. On expiry: SIGTERM first, then SIGKILL after 60s.
@@ -863,7 +863,7 @@ jobs:
           fi
 
           TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
-          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          TIMEOUT_SECONDS=$(awk -v m="$TIMEOUT_MINUTES" 'BEGIN{print int(m*60)}')
           echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
           echo $(date +%s) > /tmp/start_time
           # Run agent loop under timeout. On expiry: SIGTERM first, then SIGKILL after 60s.
@@ -2204,7 +2204,7 @@ jobs:
           echo "Reconciling PR #${PR_NUMBER} onto base branch: ${BASE_BRANCH}"
 
           TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
-          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          TIMEOUT_SECONDS=$(awk -v m="$TIMEOUT_MINUTES" 'BEGIN{print int(m*60)}')
           echo "Reconcile timeout: ${TIMEOUT_MINUTES} minutes"
           echo $(date +%s) > /tmp/start_time
 
@@ -3742,7 +3742,7 @@ jobs:
           Running resolve agent with \`${{ needs.parse.outputs.alias }}\` (\`${{ needs.parse.outputs.model }}\`) to implement the revised design..."
 
           TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
-          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          TIMEOUT_SECONDS=$(awk -v m="$TIMEOUT_MINUTES" 'BEGIN{print int(m*60)}')
           echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
 
           timeout --kill-after=60 "$TIMEOUT_SECONDS" \
@@ -4064,7 +4064,7 @@ jobs:
           Running resolve agent with \`${{ needs.parse.outputs.alias }}\` (\`${{ needs.parse.outputs.model }}\`) to apply council code review feedback to this PR..."
 
           TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
-          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          TIMEOUT_SECONDS=$(awk -v m="$TIMEOUT_MINUTES" 'BEGIN{print int(m*60)}')
           echo "Stage 6 resolver timeout: ${TIMEOUT_MINUTES} minutes"
 
           timeout --kill-after=60 "$TIMEOUT_SECONDS" \

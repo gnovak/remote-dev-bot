@@ -89,7 +89,7 @@ DEFAULT_TIMEOUT_MINUTES = 120
 ALLOWED_ARGS = {
     "max_iterations": int,       # agent.max_iterations (code-writing stages)
     "max_design_iterations": int,  # delegate: budget for design/exploration stages
-    "timeout_minutes": int,      # agent.timeout_minutes
+    "timeout_minutes": float,    # agent.timeout_minutes (float so e2e tests can use sub-minute values)
     "extra_files": list,         # mode's extra_files
     "branch": str,               # agent.branch (target branch for PRs)
     "status_log_interval": int,       # rolling status log interval (0 = disabled)

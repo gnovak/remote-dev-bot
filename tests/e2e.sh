@@ -375,17 +375,30 @@ log "  Issue #$RF_ISSUE_NUM created. Triggering /agent-resolve..."
 post_issue_comment "$RF_ISSUE_NUM" "$TEST_REPO" "/agent-resolve"
 
 # --- Trigger timeout test ---
+# Purpose: verify the watchdog kills the agent process when it exceeds
+# timeout_minutes. The task must be concrete enough that the agent cannot
+# scope-reduce its way to an early finish() — and the timeout short enough
+# that even fast scope-reduced work doesn't fit. (The previous vague
+# "refactor everything" prompt with timeout_minutes=1 let the agent finish
+# in 50s by creating one file with type hints; watchdog never fired.)
 log "Creating timeout test issue..."
 timeout_ts=$(date +%s)
 timeout_title="Test: timeout enforcement (e2e-timeout-$timeout_ts)"
 timeout_issue_url=$(gh issue create --repo "$TEST_REPO" \
     --title "$timeout_title" \
-    --body "Analyze and refactor every file in this repository to follow best practices, add comprehensive type hints, docstrings, and unit tests. This task is intentionally scope-heavy.")
+    --body "Create exactly 50 Python files named day_01.py through day_50.py in a new \`days/\` directory at the repo root. Each file must contain exactly one function with this exact signature and body (substitute NN with the day number, NOT zero-padded in the body):
+
+\`\`\`python
+def visits_on_day_NN() -> int:
+    return NN
+\`\`\`
+
+All 50 files must be created and committed in a single PR. This is a concrete, fully-specified task that cannot be scope-reduced — produce all 50 files or report failure.")
 timeout_issue_num="${timeout_issue_url##*/}"
 cleanup_issues+=("$timeout_issue_num")
 
-log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout_minutes = 1..."
-post_issue_comment "$timeout_issue_num" "$TEST_REPO" $'/agent-resolve\ntimeout_minutes = 1'
+log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout_minutes = 0.5..."
+post_issue_comment "$timeout_issue_num" "$TEST_REPO" $'/agent-resolve\ntimeout_minutes = 0.5'
 
 TIMEOUT_RUN_ID=""
 TIMEOUT_RESULT=""
