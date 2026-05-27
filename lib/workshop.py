@@ -48,6 +48,53 @@ def _build_cost_table(input_tokens, output_tokens, cost, elapsed, output_text):
     return '\n'.join(lines)
 
 
+def _build_stage_cost_block(
+    *,
+    github_repo,
+    issue_number,
+    input_tokens,
+    output_tokens,
+    cost,
+    elapsed,
+    output_text,
+):
+    """Build the per-step cost table for a delegate stage, followed by the
+    canonical cumulative cost table (only when there are prior cost markers
+    on the issue — i.e., this is not the first step to emit a cost block).
+
+    The cumulative table is produced by lib/cumulative_cost.compute_cumulative_table,
+    which is the same code paths individual /agent-resolve / /agent-design /
+    /agent-review invocations use, so a delegate run looks identical to the
+    sequence of manual invocations it expands into.
+    """
+    parts = [_build_cost_table(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost=cost,
+        elapsed=elapsed,
+        output_text=output_text,
+    )]
+    if github_repo and issue_number:
+        try:
+            from cumulative_cost import compute_cumulative_table
+            cum = compute_cumulative_table(
+                repo=github_repo,
+                number=str(issue_number),
+                current_cost=cost,
+                current_input_tokens=input_tokens,
+                current_output_tokens=output_tokens,
+            )
+            if cum:
+                parts.append('')
+                parts.append(cum)
+        except Exception as e:
+            # Cumulative-cost computation is best-effort visibility — never
+            # block a stage from posting its result if it fails.
+            import sys as _sys
+            print(f"  [delegate] Could not compute cumulative cost: {e}", file=_sys.stderr)
+    return '\n'.join(parts)
+
+
 # ---------------------------------------------------------------------------
 # API key resolution
 # ---------------------------------------------------------------------------
@@ -975,6 +1022,8 @@ def run_delegate(
     post_comment_fn=None,
     design_rounds=1,
     distill_enabled=True,
+    github_repo="",
+    issue_number="",
 ):
     """Run the full delegate pipeline (6 stages, no human checkpoints).
 
@@ -1123,7 +1172,9 @@ def run_delegate(
             "total_cost": all_cost,
         }
 
-    design_cost_table = _build_cost_table(
+    design_cost_block = _build_stage_cost_block(
+        github_repo=github_repo,
+        issue_number=issue_number,
         input_tokens=design_result.get("input_tokens", 0),
         output_tokens=design_result.get("output_tokens", 0),
         cost=design_result.get("cost", 0.0),
@@ -1135,7 +1186,7 @@ def run_delegate(
         f"{design_analysis}\n\n"
         f"---\n"
         f"_Design analysis by `/agent-delegate` Stage 1 (`{model_alias}`)_\n\n"
-        f"{design_cost_table}"
+        f"{design_cost_block}"
     )
 
     # =======================================================================
@@ -1267,7 +1318,9 @@ def run_delegate(
             "`/agent` command(s). Blocked for safety."
         )
     else:
-        revision_cost_table = _build_cost_table(
+        revision_cost_block = _build_stage_cost_block(
+            github_repo=github_repo,
+            issue_number=issue_number,
             input_tokens=revision_result["input_tokens"],
             output_tokens=revision_result["output_tokens"],
             cost=revision_result["cost"],
@@ -1279,7 +1332,7 @@ def run_delegate(
             f"{revised_design}\n\n"
             f"---\n"
             f"_Revised design by `/agent-delegate` Stage 3 (`{model_alias}`)_\n\n"
-            f"{revision_cost_table}"
+            f"{revision_cost_block}"
         )
 
     # =======================================================================
@@ -1372,7 +1425,9 @@ def run_delegate(
                 "total_cost": all_cost,
             }
 
-        spec_cost_table = _build_cost_table(
+        spec_cost_block = _build_stage_cost_block(
+            github_repo=github_repo,
+            issue_number=issue_number,
             input_tokens=spec_result.get("input_tokens", 0),
             output_tokens=spec_result.get("output_tokens", 0),
             cost=spec_result.get("cost", 0.0),
@@ -1384,7 +1439,7 @@ def run_delegate(
             f"{implementation_spec}\n\n"
             f"---\n"
             f"_Implementation spec by `/agent-delegate` Stage 3a (`{model_alias}`)_\n\n"
-            f"{spec_cost_table}"
+            f"{spec_cost_block}"
         )
 
         # ---- Stage 3b: Council spec review ----
@@ -1529,7 +1584,9 @@ def run_delegate(
             )
             revised_spec = None
         else:
-            spec_revision_cost_table = _build_cost_table(
+            spec_revision_cost_block = _build_stage_cost_block(
+                github_repo=github_repo,
+                issue_number=issue_number,
                 input_tokens=spec_revision_result["input_tokens"],
                 output_tokens=spec_revision_result["output_tokens"],
                 cost=spec_revision_result["cost"],
@@ -1541,7 +1598,7 @@ def run_delegate(
                 f"{revised_spec}\n\n"
                 f"---\n"
                 f"_Revised implementation spec by `/agent-delegate` Stage 3c (`{model_alias}`)_\n\n"
-                f"{spec_revision_cost_table}"
+                f"{spec_revision_cost_block}"
             )
 
     # =======================================================================
@@ -1565,18 +1622,13 @@ def run_delegate(
         f"Proceeding to implementation (Stage 4)...\n"
     )
 
-    # Build aggregate cost table for the pre-resolve stages
-    stages_pre_resolve_cost_table = _build_cost_table(
-        input_tokens=all_input_tokens,
-        output_tokens=all_output_tokens,
-        cost=all_cost,
-        elapsed=time.time() - design_start,
-        output_text=revised_spec or revised_design,
-    )
-    post(
-        f"### 📊 Delegate {stages_done_label} Aggregate Cost\n\n"
-        f"{stages_pre_resolve_cost_table}"
-    )
+    # No separate aggregate-cost block here — each per-stage cost block above
+    # carries a canonical cumulative table (via compute_cumulative_table), so
+    # the cumulative on the last reported stage IS the running total. The old
+    # bespoke "Delegate Stages 1-3c Aggregate Cost" block used the per-step
+    # cost format (with bold **$X.XX**), which the cumulative-cost scanner
+    # would have picked up as a prior per-step cost — risking quadratic
+    # double-counting on any subsequent /agent-* invocation on the issue.
 
     return {
         "design_result": design_result,

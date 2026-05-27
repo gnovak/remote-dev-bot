@@ -3618,6 +3618,8 @@ jobs:
               post_comment_fn=post_comment,
               design_rounds=design_rounds,
               distill_enabled=distill_enabled,
+              github_repo=github_repo,
+              issue_number=issue_number,
           )
 
           # Save usage data
