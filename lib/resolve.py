@@ -481,6 +481,32 @@ You operate in a fully automated pipeline — there is no human available to ans
 - Make forward progress on every turn, or call finish() to stop.
 """
 
+SCOPE = """
+## Scope: what counts as "done"
+
+Read the issue body AND the issue/PR comments before forming your plan. The
+comments are not optional context — they often contain decisive scope
+information that supersedes the body.
+
+**If the comments contain a substantial design analysis, implementation
+spec, or output from a prior `/agent-design`, `/agent-workshop`, or
+`/agent-delegate` run, treat the most recent revised version as the
+binding contract for your work — NOT the issue body alone.** The issue
+body may be a sketch; the spec is the contract. Implement every component
+the spec lists (every file, route, table, function, test). Do NOT call
+`finish(success=True)` while spec items remain unaddressed unless you have
+a concrete reason a specific item should be omitted, which you post as a
+comment on the issue first.
+
+If no design or spec comments exist, the issue body is the contract.
+
+When a detailed spec is present, expect a multi-file, multi-component
+implementation that takes far more iterations than a typical bug fix.
+Scope-reducing to "the foundational piece" and shipping a tiny PR is the
+wrong outcome — it leaves the issue effectively unresolved and the user
+has to re-invoke the agent on the same scope.
+"""
+
 WORKFLOW = """
 ## Problem-Solving Workflow
 
@@ -488,7 +514,7 @@ Follow this process:
 
 1. **Read only what you need**: Read only the files you are about to change — no speculative exploration. If the issue already identifies the relevant files, go straight to them. You should be writing or modifying a file by iteration 5 for a simple fix, or iteration 10 for a complex multi-file change. If you are still only reading files past iteration 10, stop and start implementing.
 2. **Plan**: Identify the minimal set of changes needed.
-3. **Implement**: Make focused, minimal changes. Modify existing files rather than creating new ones. Never create multiple versions of the same file (e.g., fix.py alongside fix_v2.py).
+3. **Implement**: Make focused changes scoped to the task. For a bug fix, prefer modifying existing files over creating new ones — and never create multiple versions of the same file (e.g., fix.py alongside fix_v2.py). For a spec-driven implementation, create exactly the new files the spec lists (no more, no fewer).
 4. **Verify**: Run tests if they exist. Check that the code is syntactically valid. If tests require dependencies that aren't installed, install them first (`pip install pytest`, `npm install`, etc.) — you are allowed to install packages freely.
 5. **Commit and push**: Stage all changes, commit with a clear message, and push.
 6. **Finish**: Call finish() with a meaningful pr_title and pr_body.
@@ -518,10 +544,16 @@ def _budget_paragraph(max_iterations):
     return (
         f"\n## Iteration Budget\n\n"
         f"You have a budget of **{max_iterations} iterations** for this task. "
-        f"Aim to finish in significantly fewer if the task allows — the budget is a "
-        f"ceiling, not a target. Don't pad with extra exploration just because the "
-        f"budget is there. A simple fix should take 5-10 iterations; a complex "
-        f"multi-file change rarely needs more than 20-30.\n"
+        f"Aim to finish in significantly fewer if the task allows — the budget "
+        f"is a ceiling, not a target. Don't pad with extra exploration just "
+        f"because the budget is there.\n\n"
+        f"Typical iteration counts:\n"
+        f"- Simple fix (one file, focused change): 5-10 iterations.\n"
+        f"- Complex multi-file change: 20-30 iterations.\n"
+        f"- Implementing a detailed multi-component spec (see ## Scope above): "
+        f"50-100+ iterations — every file, route, table, and test the spec "
+        f"lists has to be created. Stopping at 20-30 to ship a 'foundational' "
+        f"subset is the wrong call when a spec is the contract.\n"
     )
 
 STUCK_RECOVERY = """
@@ -644,6 +676,7 @@ is complete before committing — call `finish()` now.
 
     prompt = (
         AGENT_ROLE
+        + SCOPE
         + _budget_paragraph(MAX_ITERATIONS)
         + f"\n# Repository Context\n\n{repo_context}\n\n"
         + WORKFLOW
