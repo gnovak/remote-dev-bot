@@ -358,8 +358,17 @@ def run_build_council(
     pr_diff,
     extra_instructions="",
     post_comment_fn=None,
+    banner_label="Build Stage 2 — Council Code Review",
+    attribution_label="/agent-build Stage 2",
+    completion_label="Build Stage 2 complete — awaiting human review",
 ):
-    """Run Stage 2 council code reviews for build mode.
+    """Run parallel council code reviews on a PR.
+
+    Used by:
+      - /agent-build Stage 2 (defaults)
+      - /agent-delegate Stage 5 (overrides labels for "Delegate Stage 5/6")
+      - /agent-review with council=true (overrides labels for plain
+        "Council Code Review", no build/delegate prefix)
 
     Runs each council model's review in parallel (non-agentic). Posts each
     review via post_comment_fn (defaults to print if None).
@@ -367,6 +376,11 @@ def run_build_council(
     extra_instructions is the mode-level extra_instructions string; each council
     member's model-level extra_instructions (from council_model["extra_instructions"])
     is appended per-reviewer.
+
+    banner_label, attribution_label, completion_label parameterize the
+    user-visible mode-specific text so the same parallel-review code can
+    serve build mode, delegate Stage 5, and /agent-review council=true
+    without each emitting "Build Stage 2 — ..." headers.
 
     Returns dict with council_results, total_input_tokens,
     total_output_tokens, total_cost.
@@ -382,8 +396,8 @@ def run_build_council(
 
     if not council_models:
         post(
-            "## 🏛️ Build Stage 2 — Council Code Review\n\n"
-            "⚠️ No council models configured. Skipping council code review.\n"
+            f"## 🏛️ {banner_label}\n\n"
+            f"⚠️ No council models configured. Skipping council code review.\n"
         )
         return {
             "council_results": [],
@@ -393,7 +407,7 @@ def run_build_council(
         }
 
     post(
-        f"## 🏛️ Build Stage 2 — Council Code Review\n\n"
+        f"## 🏛️ {banner_label}\n\n"
         f"Requesting code reviews from {len(council_models)} council member(s): "
         f"{', '.join('`' + m['alias'] + '`' for m in council_models)}...\n"
     )
@@ -465,12 +479,12 @@ def run_build_council(
                 f"🤖 **Council reviewer:** `{cr['model_alias']}` (`{cr['model_id']}`)\n\n"
                 f"{cr['review']}\n\n"
                 f"---\n"
-                f"_Council code review by `/agent-build` Stage 2 (`{cr['model_alias']}`)_"
+                f"_Council code review by `{attribution_label}` (`{cr['model_alias']}`)_"
             )
 
     n = len(council_results)
     post(
-        f"## Build Stage 2 complete — awaiting human review\n\n"
+        f"## {completion_label}\n\n"
         f"{n} model(s) have posted code reviews above. Please review the feedback "
         f"and address any concerns before merging.\n"
     )

@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 from workshop import (
     build_council_review_prompt,
     resolve_council_models,
+    run_build_council,
     COUNCIL_REVIEW_SYSTEM_PROMPT,
 )
 
@@ -18,6 +19,74 @@ from workshop import (
 # ---------------------------------------------------------------------------
 # resolve_council_models
 # ---------------------------------------------------------------------------
+
+class TestRunBuildCouncilLabels:
+    """run_build_council is shared by build Stage 2, delegate Stage 5, and
+    /agent-review council=true. Each uses different banner/attribution/
+    completion labels — verify the parameters are threaded through to the
+    posted comments so the labels can be customized per-caller."""
+
+    def _mock_review_result(self, alias="claude-small"):
+        return {
+            "review": f"## Code Review by {alias}\n\nLooks good.",
+            "model_alias": alias,
+            "model_id": "anthropic/test",
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cost": 0.01,
+            "elapsed": 1.0,
+        }
+
+    def test_default_labels_match_build_stage_2(self):
+        from unittest.mock import patch
+        posted = []
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}), \
+             patch("workshop.run_council_code_review",
+                   return_value=self._mock_review_result()):
+            run_build_council(
+                council_models=[{"alias": "claude-small", "id": "anthropic/test"}],
+                issue_title="t",
+                issue_body="b",
+                pr_title="pt",
+                pr_body="pb",
+                pr_diff="diff",
+                post_comment_fn=posted.append,
+            )
+        joined = "\n".join(posted)
+        assert "Build Stage 2 — Council Code Review" in joined
+        assert "/agent-build Stage 2" in joined
+        assert "Build Stage 2 complete" in joined
+
+    def test_custom_labels_for_review_council(self):
+        """When /agent-review with council=true calls this function, labels
+        should NOT say 'Build Stage 2' — that text would confuse the user
+        about which command they invoked."""
+        from unittest.mock import patch
+        posted = []
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}), \
+             patch("workshop.run_council_code_review",
+                   return_value=self._mock_review_result()):
+            run_build_council(
+                council_models=[{"alias": "claude-small", "id": "anthropic/test"}],
+                issue_title="t",
+                issue_body="b",
+                pr_title="pt",
+                pr_body="pb",
+                pr_diff="diff",
+                post_comment_fn=posted.append,
+                banner_label="Council Code Review",
+                attribution_label="/agent-review council=true",
+                completion_label="Council code review complete — awaiting human review",
+            )
+        joined = "\n".join(posted)
+        # Custom labels present
+        assert "## 🏛️ Council Code Review" in joined
+        assert "/agent-review council=true" in joined
+        assert "Council code review complete — awaiting human review" in joined
+        # Build-mode labels NOT leaking in
+        assert "Build Stage 2" not in joined
+        assert "/agent-build" not in joined
+
 
 class TestResolveCouncilModels:
     """Tests for council model filtering logic."""
