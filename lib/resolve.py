@@ -507,19 +507,134 @@ wrong outcome — it leaves the issue effectively unresolved and the user
 has to re-invoke the agent on the same scope.
 """
 
+METHODOLOGY_FAITHFULNESS = """
+## Methodology faithfulness
+
+When the spec names a specific algorithm or methodology (e.g., "BT+EB
+ranking", "BH-FDR correction", "softmax with temperature 1.0"), OR
+references an existing implementation in the codebase as authoritative
+("uses the logic in `notebooks/leaderboard.py`", "matches the behavior
+of the prior `compute_score()` function"), your implementation must
+reproduce that algorithm's results to within rounding error. **The
+spec's methodology is the contract.**
+
+Do NOT silently substitute a "simpler but sensible" stand-in just
+because the canonical algorithm is harder to port. If the reference
+implementation is a Python notebook or other awkward source, port it
+faithfully anyway — reading and porting a 1500-line notebook is
+exactly the kind of multi-iteration work the budget exists for.
+
+If you genuinely cannot port the canonical implementation in this run
+(missing dependencies, library version mismatch, etc.):
+1. Call `finish(success=False)` — do NOT call `success=True` on a
+   simplified stand-in. Adding a TODO and shipping is the failure mode
+   the human reviewer will catch downstream by clicking around. Be
+   honest now.
+2. In your `finish()` explanation, name the canonical reference (file
+   + function), what you tried, why you couldn't, and what's missing.
+3. Do **not** ship the placeholder anyway. A user-facing application
+   that displays simplified statistics as if they were the canonical
+   analysis is worse than no application — it erodes trust in numbers
+   that look correct but aren't.
+
+If the spec is internally inconsistent — e.g., says "use functions from
+`bridge_analysis.X`" but those functions actually live in `notebooks/Y`
+— grep/find the real location and use that. A spec citation that
+doesn't resolve to real code is a spec error, not an invitation to
+write a placeholder.
+"""
+
+DEVIATION_REPORTING = """
+## Reporting deviations from the spec
+
+If your implementation is in any way less than what the spec called for
+— skipped components, simplified algorithms, placeholder stand-ins, an
+acceptance test you couldn't write, a route that returns mock data —
+state this **explicitly in the PR body's first paragraph**. Format:
+
+> **Known gaps from the spec:**
+> - `web/queries/leaderboard.py::compute_rankings` ships an EB-shrunk
+>   average instead of the spec's BT+EB. See TODO at line 47.
+> - No acceptance test asserting BT+EB output match. See TODO at
+>   `tests/test_leaderboard.py:89`.
+
+Buried code comments don't count. A reviewer reading the PR body should
+see the gaps without having to grep for TODOs. If there are no gaps,
+omit the section entirely — silence in the PR body means "the spec was
+implemented faithfully."
+"""
+
 WORKFLOW = """
 ## Problem-Solving Workflow
 
 Follow this process:
 
-1. **Read only what you need**: Read only the files you are about to change — no speculative exploration. If the issue already identifies the relevant files, go straight to them. You should be writing or modifying a file by iteration 5 for a simple fix, or iteration 10 for a complex multi-file change. If you are still only reading files past iteration 10, stop and start implementing.
-2. **Plan**: Identify the minimal set of changes needed.
-3. **Implement**: Make focused changes scoped to the task. For a bug fix, prefer modifying existing files over creating new ones — and never create multiple versions of the same file (e.g., fix.py alongside fix_v2.py). For a spec-driven implementation, create exactly the new files the spec lists (no more, no fewer).
-4. **Verify**: Run tests if they exist. Check that the code is syntactically valid. If tests require dependencies that aren't installed, install them first (`pip install pytest`, `npm install`, etc.) — you are allowed to install packages freely.
-5. **Commit and push**: Stage all changes, commit with a clear message, and push.
-6. **Finish**: Call finish() with a meaningful pr_title and pr_body.
+1. **Read what you need to do the work correctly.** For a bug fix, that's usually a small set of files identified by the issue. For an algorithm extraction or porting task, that's the entire reference implementation — yes, read the 1500-line notebook end-to-end if that's where the canonical logic lives. Don't speculatively read unrelated code, but don't under-read either: a partial read that misses key context leads to wrong implementations, which costs more than the read would have.
+2. **Plan**: Identify the changes needed to satisfy the spec.
+3. **Implement**: For a bug fix, prefer modifying existing files over creating new ones — and never create multiple versions of the same file (e.g., fix.py alongside fix_v2.py). For a spec-driven implementation, create exactly the new files the spec lists (no more, no fewer). For every new function, class, or module you add, **write a test for it** — see "Tests" below.
+4. **Verify**: Run all tests, including the ones you just wrote. Check that the code is syntactically valid. If tests require dependencies that aren't installed, install them first (`pip install pytest`, `npm install`, etc.) — you are allowed to install packages freely.
+5. **End-to-end check**: Before committing, verify the change actually works end-to-end, not just "unit tests pass." See "End-to-end verification" below — this is mandatory, not optional.
+6. **Commit and push**: Stage all changes, commit with a clear message, and push.
+7. **Finish**: Call finish() with a meaningful pr_title and pr_body. If you simplified, skipped, or stubbed anything, follow the "Reporting deviations from the spec" rule above.
 
 Never add documentation files (CHANGES.md, NOTES.md, etc.) to version control unless the issue specifically asks for them.
+"""
+
+TESTS = """
+## Tests
+
+For every new function, class, or module you add, write a test. Unit
+tests for pure logic; integration tests for code that touches the
+filesystem, database, or network. Existing tests passing doesn't tell
+you your new code is correct — it only tells you that you didn't
+break what was already there. A PR body that says "All N existing
+tests pass" without naming a single new test is a red flag.
+
+**Load-bearing methodology claims need named tests.** If the spec says
+"uses BT+EB ranking", there must be a test like
+`test_leaderboard_matches_bt_eb_reference_within_tolerance` that
+asserts the output matches a reference implementation. "BT+EB" without
+such a test is just a label — and a label that the next refactor can
+silently violate.
+
+If the spec lists tests to add, add exactly those (no more, no fewer
+than what the spec calls out as required, plus whatever your judgment
+says the new code needs).
+"""
+
+END_TO_END = """
+## End-to-end verification
+
+Unit tests verify that the units behave as their authors thought they
+would. They do NOT verify that the system actually works — the seams
+between units, the configuration wiring, the runtime environment.
+
+Before calling `finish(success=True)`, run the thing:
+
+- **Web app / server tasks**: start the server (`uvicorn app:app`,
+  `flask run`, `python manage.py runserver`, etc.) and `curl` at
+  least one route. Expect a 200 from a healthy route or a deliberate
+  redirect from `/login`. A 500 or `ImportError` on startup means
+  ship-blocking bugs.
+- **CLI tasks**: invoke the command on a realistic input. If the spec
+  says "the new `web-add-user` command adds an email to the
+  pass-list," actually run it and verify the email lands in the
+  database.
+- **Library / function tasks**: write and run a smoke test that
+  exercises the new function with realistic inputs and asserts the
+  output is sensible.
+- **Data pipeline tasks**: run the pipeline end-to-end on a small
+  fixture and verify the expected rows land in the expected tables.
+
+This catches the bug class that unit tests miss by design: wrong-
+signature library calls (e.g., `TemplateResponse(name, context)`
+when the current Starlette signature is `(request, name, context)`),
+missing config wiring, functions that are never invoked by any
+caller, schema/code mismatches, etc.
+
+If end-to-end fails and you can't fix it within the iteration budget,
+that's a `finish(success=False)` — not a "ship it and hope unit tests
+were enough."
 """
 
 EFFICIENCY = """
@@ -527,10 +642,14 @@ EFFICIENCY = """
 
 Each tool call costs real money. Be targeted and deliberate:
 
-- **Don't over-explore.** If the issue + comments already identify the files and changes needed, go straight to implementing. Read only the files you are actually about to change.
 - **Read files once.** Don't re-read a file you already read unless it changed.
-- **Call finish() as soon as the task is done.** Don't do unnecessary verification passes after a successful test run.
-- **Exploration should be proportional to task complexity.** A one-line fix does not warrant reading 10 files.
+- **Call finish() as soon as the task is genuinely done.** Done means the
+  spec is satisfied end-to-end, including the methodology faithfulness
+  rule above — not "the code compiles and unit tests pass."
+- **Don't pad iterations for their own sake**, but don't shortcut either.
+  Iteration count should be whatever the task requires. A simple bug fix
+  is ~5-10 iterations. An algorithm extraction or multi-component
+  implementation is as many as it takes — that's what the budget is for.
 """
 
 
@@ -544,16 +663,20 @@ def _budget_paragraph(max_iterations):
     return (
         f"\n## Iteration Budget\n\n"
         f"You have a budget of **{max_iterations} iterations** for this task. "
-        f"Aim to finish in significantly fewer if the task allows — the budget "
-        f"is a ceiling, not a target. Don't pad with extra exploration just "
-        f"because the budget is there.\n\n"
-        f"Typical iteration counts:\n"
-        f"- Simple fix (one file, focused change): 5-10 iterations.\n"
-        f"- Complex multi-file change: 20-30 iterations.\n"
+        f"The budget is a ceiling, not a target — don't pad iterations for "
+        f"their own sake, but don't shortcut either. Iteration count should "
+        f"be whatever the task actually requires:\n\n"
+        f"- Simple bug fix (one file, focused change): a handful of iterations.\n"
+        f"- Multi-file refactor: as many as it takes to do it right.\n"
+        f"- Algorithm extraction / porting from a reference implementation "
+        f"(e.g., notebook → module): expect to spend a meaningful fraction "
+        f"of the budget reading the reference end-to-end. That's the work.\n"
         f"- Implementing a detailed multi-component spec (see ## Scope above): "
-        f"50-100+ iterations — every file, route, table, and test the spec "
-        f"lists has to be created. Stopping at 20-30 to ship a 'foundational' "
-        f"subset is the wrong call when a spec is the contract.\n"
+        f"plan to use a large fraction of the budget. Every file, route, "
+        f"table, and test the spec lists has to be created — and faithfully, "
+        f"not as a stub. Stopping at 20-30 iterations to ship a 'foundational' "
+        f"subset, or shipping a simplified stand-in for a load-bearing "
+        f"algorithm (see ## Methodology faithfulness), is the wrong call.\n"
     )
 
 STUCK_RECOVERY = """
@@ -677,9 +800,13 @@ is complete before committing — call `finish()` now.
     prompt = (
         AGENT_ROLE
         + SCOPE
+        + METHODOLOGY_FAITHFULNESS
+        + DEVIATION_REPORTING
         + _budget_paragraph(MAX_ITERATIONS)
         + f"\n# Repository Context\n\n{repo_context}\n\n"
         + WORKFLOW
+        + TESTS
+        + END_TO_END
         + READING_THE_TASK
         + f"# Task\n\n{issue_context_str}\n"
         + GIT_INSTRUCTIONS
