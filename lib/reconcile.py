@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib.context import (
     classify_provider_error,
     compact_messages,
+    completion_with_retries,
     estimate_tokens,
 )
 from lib.tools import (
@@ -296,8 +297,12 @@ The rebase will stop at conflicts. For each conflicting file:
 
 1. **Read the file** — use read_file to see the full conflict markers.
 2. **Understand both sides** — before writing anything, explain:
-   - What the BASE side (above `=======`) was trying to do
-   - What the INCOMING side (below `=======`, from origin/{BASE_BRANCH}) was trying to do
+   - What the BASE side (above `=======`, from origin/{BASE_BRANCH}) was trying to do
+   - What the INCOMING side (below `=======`, the PR branch's commit being replayed) was trying to do
+
+   Note the sides during a rebase are the reverse of a merge: HEAD (above
+   `=======`) is origin/{BASE_BRANCH}, and the "incoming" side below is
+   this PR's own commit being replayed on top.
 3. **Write the resolved file** — produce a merged result that preserves both intentions.
    Use `bash` to write the resolved content: `cat > path << 'RESOLVED_EOF' ... RESOLVED_EOF`
 4. **Stage the file**: `git add <file>`
@@ -543,7 +548,11 @@ def main():
                         _last_blk["cache_control"] = _cc
 
             try:
-                response = completion(
+                # Wrapped like the sibling loops (resolve, design_loop) so a
+                # transient provider error (e.g. Anthropic 529 "overloaded")
+                # is retried instead of killing the run.
+                response = completion_with_retries(
+                    completion,
                     model=LLM_MODEL,
                     messages=messages,
                     tools=TOOLS,
@@ -595,7 +604,11 @@ def main():
                 prompt_details = getattr(usage, "prompt_tokens_details", None)
                 if prompt_details:
                     total_cache_read_tokens += getattr(prompt_details, "cached_tokens", 0) or 0
-                    total_cache_creation_tokens += getattr(prompt_details, "cache_creation_input_tokens", 0) or 0
+                    # litellm's PromptTokensDetailsWrapper field is
+                    # cache_creation_tokens (NOT cache_creation_input_tokens);
+                    # the old name always read as 0, so cache-write tokens
+                    # never appeared and cache-savings figures overstated.
+                    total_cache_creation_tokens += getattr(prompt_details, "cache_creation_tokens", 0) or 0
             cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
             if cost:
                 total_cost += cost
@@ -608,6 +621,14 @@ def main():
                 no_tool_call_count += 1
                 if no_tool_call_count >= 3:
                     print("No tool calls for 3 consecutive iterations — breaking")
+                    # Write a status: the post-loop code only writes one when
+                    # the loop ends naturally, so without this the run reports
+                    # no failure explanation at all.
+                    write_status(
+                        False,
+                        f"Agent stalled at iteration {iteration + 1}: 3 consecutive "
+                        "responses returned no tool call.",
+                    )
                     break
                 print(f"No tool calls (attempt {no_tool_call_count}/3) — injecting recovery message")
                 messages.append({
