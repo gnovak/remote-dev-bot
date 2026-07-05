@@ -250,7 +250,7 @@ def _extract_python_signatures(content, include_line_numbers=False):
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
             # Get the function signature from source lines
-            sig = _format_function_sig(node, content)
+            sig = _format_function_sig(node)
             docstring = ast.get_docstring(node)
             if include_line_numbers:
                 parts.append(f"{sig}  # line {node.lineno}")
@@ -271,7 +271,7 @@ def _extract_python_signatures(content, include_line_numbers=False):
             # Include method signatures
             for item in ast.iter_child_nodes(node):
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    sig = _format_function_sig(item, content)
+                    sig = _format_function_sig(item)
                     if include_line_numbers:
                         parts.append(f"    {sig}  # line {item.lineno}")
                     else:
@@ -288,19 +288,19 @@ def _extract_python_signatures(content, include_line_numbers=False):
     return "\n".join(parts) if parts else content.split("\n")[:STRUCT_EXTRACT_HEAD_LINES]
 
 
-def _format_function_sig(node, source):
+def _format_function_sig(node):
     """Format a function/async function node as its signature line."""
     prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
-    # Try to get the source segment for just the signature
+    # ast.arguments nodes carry no position attributes, so
+    # ast.get_source_segment(source, node.args) always returns None —
+    # unparse the node instead to keep defaults, *args/**kwargs,
+    # keyword-only args, and annotations.
     try:
-        args = ast.get_source_segment(source, node.args)
-        if args:
-            return f"{prefix} {node.name}({args}):"
+        return f"{prefix} {node.name}({ast.unparse(node.args)}):"
     except Exception:
-        pass
-    # Fallback: reconstruct from AST
-    arg_names = [a.arg for a in node.args.args]
-    return f"{prefix} {node.name}({', '.join(arg_names)}):"
+        # Fallback: reconstruct bare positional names from the AST
+        arg_names = [a.arg for a in node.args.args]
+        return f"{prefix} {node.name}({', '.join(arg_names)}):"
 
 
 def format_structural_extract(files, include_line_numbers=False):

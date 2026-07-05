@@ -300,6 +300,34 @@ class MyClass:
         assert "MyClass" in result
         assert "method" in result
 
+    def test_python_signatures_keep_full_argument_spec(self):
+        """Signatures must keep defaults, *args/**kwargs, keyword-only args,
+        and annotations — not degrade to bare positional names (the old
+        ast.get_source_segment(source, node.args) path always returned None
+        because ast.arguments carries no position attributes)."""
+        py_content = '''
+def full(a, b: int = 3, *args, key: str = "x", **kwargs) -> bool:
+    """Docstring."""
+    return True
+
+async def afull(timeout: float = 1.5):
+    pass
+
+class C:
+    def method(self, x: int = 0, *, flag=False):
+        pass
+'''
+        files = [
+            {"path": "mod.py", "content": py_content, "is_source": True, "truncated": False},
+        ]
+        result = format_structural_extract(files)
+        # ast.unparse spacing around annotated defaults varies across Python
+        # versions ("int=3" vs "int = 3") — compare with whitespace stripped.
+        squeezed = result.replace(" ", "")
+        assert "deffull(a,b:int=3,*args,key:str='x',**kwargs):" in squeezed
+        assert "asyncdefafull(timeout:float=1.5):" in squeezed
+        assert "defmethod(self,x:int=0,*,flag=False):" in squeezed
+
     def test_non_python_first_lines(self):
         js_content = "\n".join([f"line {i}" for i in range(50)])
         files = [
