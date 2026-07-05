@@ -36,6 +36,11 @@ class TestEstimateTokens:
         ]
         assert estimate_tokens(messages) == (4 + 100) // 4  # "bash" + args
 
+    def test_tool_calls_none(self):
+        """Raw litellm dicts can carry tool_calls: None — must not TypeError."""
+        messages = [{"role": "assistant", "content": None, "tool_calls": None}]
+        assert estimate_tokens(messages) == 0
+
     def test_multiple_messages(self):
         messages = [
             {"role": "system", "content": "a" * 40},
@@ -157,3 +162,72 @@ class TestCompactMessages:
         new_msgs, stats = compact_messages(msgs, 0.5, 0.5, self._mock_llm("Summary"))
         assert stats["messages_compacted"] == 2
         assert len(new_msgs) == 4  # system + summary + 2 remaining
+
+    @staticmethod
+    def _assert_no_orphan_tool_results(msgs):
+        """A role=tool message must follow an assistant(tool_calls) or another
+        tool message — otherwise providers reject the list with a 400."""
+        for i, msg in enumerate(msgs):
+            if msg.get("role") == "tool":
+                prev = msgs[i - 1] if i > 0 else {}
+                assert prev.get("role") in ("assistant", "tool") and (
+                    prev.get("role") == "tool" or prev.get("tool_calls")
+                ), f"orphaned tool result at index {i}"
+
+    def test_boundary_advances_past_tool_results(self):
+        """A cut landing between assistant(tool_calls) and its tool results
+        advances so the whole group is compacted, not orphaned."""
+        msgs = [
+            {"role": "system", "content": "System prompt."},
+            {"role": "user", "content": "Please list and read the files. " + "x" * 100},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"function": {"name": "bash", "arguments": '{"command": "ls"}'}},
+                {"function": {"name": "read_file", "arguments": '{"path": "a.py"}'}},
+            ]},
+            {"role": "tool", "content": "file1.py\nfile2.py"},
+            {"role": "tool", "content": "print('hello')"},
+            {"role": "user", "content": "Good, now edit file1.py"},
+            {"role": "assistant", "content": "Done editing file1.py."},
+        ]
+        # coverage 1/3 of 6 post-system messages -> raw cut = 2, which would
+        # orphan the two tool results at indices 3-4.
+        new_msgs, stats = compact_messages(msgs, 1 / 3, 0.5, self._mock_llm("Summary"))
+        assert stats["messages_compacted"] == 4
+        self._assert_no_orphan_tool_results(new_msgs)
+        # Message after the summary is the post-group user message
+        assert new_msgs[2]["role"] == "user"
+
+    def test_boundary_retreats_when_tail_protected(self):
+        """If advancing past the tool group would eat the protected recent
+        tail, the cut retreats so the whole group is kept instead."""
+        msgs = [
+            {"role": "system", "content": "System prompt."},
+            {"role": "user", "content": "Please investigate the bug. " + "x" * 100},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"function": {"name": "bash", "arguments": '{"command": "pytest"}'}},
+            ]},
+            {"role": "tool", "content": "1 failed, 42 passed"},
+            {"role": "tool", "content": "traceback details"},
+        ]
+        # coverage 0.5 of 4 -> raw cut = 2; advancing to 4 would leave < 2
+        # recent messages, so the cut retreats to 1.
+        new_msgs, stats = compact_messages(msgs, 0.5, 0.5, self._mock_llm("Summary"))
+        assert stats["messages_compacted"] == 1
+        self._assert_no_orphan_tool_results(new_msgs)
+        # The assistant(tool_calls) + results group survives intact
+        assert new_msgs[2].get("tool_calls")
+
+    def test_nothing_safe_to_compact_returns_unchanged(self):
+        """When everything before the protected tail is one tool-call group,
+        compaction is a no-op rather than producing an invalid list."""
+        msgs = [
+            {"role": "system", "content": "System prompt."},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"function": {"name": "bash", "arguments": '{"command": "ls"}'}},
+            ]},
+            {"role": "tool", "content": "file1.py"},
+            {"role": "tool", "content": "file2.py"},
+        ]
+        new_msgs, stats = compact_messages(msgs, 0.5, 0.5, self._mock_llm("Summary"))
+        assert stats["messages_compacted"] == 0
+        assert new_msgs == msgs

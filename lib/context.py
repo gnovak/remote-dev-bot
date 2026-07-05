@@ -275,8 +275,9 @@ def estimate_tokens(messages):
                     total_chars += len(block.get("text", ""))
                 elif isinstance(block, str):
                     total_chars += len(block)
-        # Count tool_calls arguments as tokens too
-        for tc in msg.get("tool_calls", []):
+        # Count tool_calls arguments as tokens too. Raw litellm message dicts
+        # can carry tool_calls: None, so guard beyond the missing-key case.
+        for tc in msg.get("tool_calls") or []:
             if isinstance(tc, dict):
                 fn = tc.get("function", {})
                 total_chars += len(fn.get("arguments", ""))
@@ -332,6 +333,25 @@ def compact_messages(messages, compaction_coverage, compaction_factor, llm_call_
     # Always keep at least 2 recent messages to preserve immediate context
     if n_to_compact >= len(post_system) - 1:
         n_to_compact = max(1, len(post_system) - 2)
+
+    # Never split an assistant(tool_calls) message from its role="tool"
+    # results: a cut that leaves tool results at the head of the kept
+    # messages with their tool_use gone produces a list providers reject
+    # with a 400. Prefer advancing the boundary so the whole group is
+    # compacted; if that would eat into the protected recent tail, retreat
+    # so the whole group is kept instead.
+    cut = n_to_compact
+    while cut < len(post_system) and post_system[cut].get("role") == "tool":
+        cut += 1
+    if cut > len(post_system) - 2:
+        cut = n_to_compact
+        while cut > 0 and post_system[cut].get("role") == "tool":
+            cut -= 1
+    n_to_compact = cut
+    if n_to_compact == 0:
+        # The boundary retreated past the start: everything up to the
+        # protected tail is one tool-call group — nothing safe to compact.
+        return messages, {"messages_compacted": 0, "tokens_before": 0, "tokens_after": 0}
 
     selected = post_system[:n_to_compact]
     remaining = post_system[n_to_compact:]
