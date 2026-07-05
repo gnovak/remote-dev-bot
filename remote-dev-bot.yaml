@@ -12,7 +12,11 @@
 # To use a specific model, append it: /agent-resolve-claude-large
 # This works for any mode. See models: below for available aliases.
 
-default_model: claude-small
+# auto = pick the small model of whichever provider API key is configured,
+# checked in priority order: ANTHROPIC_API_KEY (claude-small) >
+# OPENAI_API_KEY (gpt-small) > GEMINI_API_KEY (gemini-small).
+# Set an explicit alias (e.g. claude-small) to pin a model instead.
+default_model: auto
 
 # Modes define what the agent does. Each mode specifies optional defaults;
 # omit a key to inherit from the agent: section below.
@@ -24,7 +28,8 @@ default_model: claude-small
 #     need light orientation files; extra context would add noise
 modes:
   resolve:
-    default_model: claude-small
+    # Optional: pin a mode-specific model (overrides the global default_model).
+    # default_model: claude-small
     max_iterations: 50       # Iteration limit for the agent loop
     extra_files:
       - AGENTS.md
@@ -34,7 +39,6 @@ modes:
     #   Always add type annotations to any Python functions you write.
 
   design:
-    default_model: claude-small
     max_iterations: 15       # Iteration limit for the agentic loop
     extra_files:
       - README.md
@@ -61,7 +65,8 @@ modes:
       - gemini-small
 
   workshop:
-    default_model: claude-small  # Model for design stage (Stage 1)
+    # Optional: pin the design-stage (Stage 1) model.
+    # default_model: claude-small
     max_iterations: 15       # Iteration limit for the design loop
     extra_files:
       - README.md
@@ -79,7 +84,6 @@ modes:
       - gemini-small
 
   build:
-    default_model: claude-small
     max_iterations: 50       # Iteration limit for the implementation loop
     extra_files:
       - AGENTS.md
@@ -91,7 +95,6 @@ modes:
       - gemini-small
 
   reconcile:
-    default_model: claude-small
     max_iterations: 50       # Iteration limit for the rebase + conflict resolution loop
     extra_files:
       - AGENTS.md
@@ -99,7 +102,6 @@ modes:
 
 
   delegate:
-    default_model: claude-small
     # Delegate has two independent iteration budgets:
     #   max_iterations        — code-writing stages (Stage 4 resolve, Stage 6
     #                           agentic code revision). Same name as elsewhere

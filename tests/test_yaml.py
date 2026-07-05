@@ -52,7 +52,8 @@ def test_config_has_required_keys(bot_config):
 
 def test_default_model_exists_in_models(bot_config):
     default = bot_config["default_model"]
-    assert default in bot_config["models"], (
+    # `auto` is the detect-from-API-keys sentinel, resolved in config.py
+    assert default == "auto" or default in bot_config["models"], (
         f"default_model '{default}' not in models"
     )
 
