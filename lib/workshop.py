@@ -695,9 +695,12 @@ def run_workshop(
         return {
             "design_result": design_result,
             "council_results": [],
-            "total_input_tokens": design_result.get("input_tokens", 0),
-            "total_output_tokens": design_result.get("output_tokens", 0),
-            "total_cost": design_result.get("cost", 0.0),
+            "total_input_tokens": design_result.get("input_tokens", 0)
+            + design_result.get("distill_input_tokens", 0),
+            "total_output_tokens": design_result.get("output_tokens", 0)
+            + design_result.get("distill_output_tokens", 0),
+            "total_cost": design_result.get("cost", 0.0)
+            + design_result.get("distill_cost", 0.0),
         }
 
     # Check for agent command loop
@@ -709,9 +712,12 @@ def run_workshop(
         return {
             "design_result": design_result,
             "council_results": [],
-            "total_input_tokens": design_result.get("input_tokens", 0),
-            "total_output_tokens": design_result.get("output_tokens", 0),
-            "total_cost": design_result.get("cost", 0.0),
+            "total_input_tokens": design_result.get("input_tokens", 0)
+            + design_result.get("distill_input_tokens", 0),
+            "total_output_tokens": design_result.get("output_tokens", 0)
+            + design_result.get("distill_output_tokens", 0),
+            "total_cost": design_result.get("cost", 0.0)
+            + design_result.get("distill_cost", 0.0),
         }
 
     # Post design analysis with embedded cost table
@@ -741,9 +747,12 @@ def run_workshop(
         return {
             "design_result": design_result,
             "council_results": [],
-            "total_input_tokens": design_result.get("input_tokens", 0),
-            "total_output_tokens": design_result.get("output_tokens", 0),
-            "total_cost": design_result.get("cost", 0.0),
+            "total_input_tokens": design_result.get("input_tokens", 0)
+            + design_result.get("distill_input_tokens", 0),
+            "total_output_tokens": design_result.get("output_tokens", 0)
+            + design_result.get("distill_output_tokens", 0),
+            "total_cost": design_result.get("cost", 0.0)
+            + design_result.get("distill_cost", 0.0),
         }
 
     post(
@@ -842,15 +851,23 @@ def run_workshop(
         f"- Post `/agent-resolve` to implement directly\n"
     )
 
-    # Aggregate totals
-    total_input = design_result.get("input_tokens", 0) + sum(
-        cr.get("input_tokens", 0) for cr in council_results
+    # Aggregate totals. The distillation pre-pass reports its tokens/cost
+    # separately from the loop's own fields, so include it here — resolve.py
+    # seeds its totals the same way.
+    total_input = (
+        design_result.get("input_tokens", 0)
+        + design_result.get("distill_input_tokens", 0)
+        + sum(cr.get("input_tokens", 0) for cr in council_results)
     )
-    total_output = design_result.get("output_tokens", 0) + sum(
-        cr.get("output_tokens", 0) for cr in council_results
+    total_output = (
+        design_result.get("output_tokens", 0)
+        + design_result.get("distill_output_tokens", 0)
+        + sum(cr.get("output_tokens", 0) for cr in council_results)
     )
-    total_cost = design_result.get("cost", 0.0) + sum(
-        cr.get("cost", 0.0) for cr in council_results
+    total_cost = (
+        design_result.get("cost", 0.0)
+        + design_result.get("distill_cost", 0.0)
+        + sum(cr.get("cost", 0.0) for cr in council_results)
     )
 
     return {
@@ -1168,6 +1185,17 @@ def run_delegate(
     if max_design_iterations is None:
         max_design_iterations = max_iterations
 
+    # wrapup_iteration is computed by config.py against the code-stage budget
+    # (max_iterations, e.g. 40 of 50). Rescale it for the shorter design
+    # stages so the wrap-up nudge can actually fire there (e.g. 12 of 15) —
+    # passed unscaled it exceeds max_design_iterations and is unreachable.
+    if wrapup_iteration and max_iterations:
+        design_wrapup_iteration = int(
+            max_design_iterations * wrapup_iteration / max_iterations
+        )
+    else:
+        design_wrapup_iteration = wrapup_iteration
+
     all_input_tokens = 0
     all_output_tokens = 0
     all_cost = 0.0
@@ -1190,16 +1218,18 @@ def run_delegate(
         extra_context=extra_context,
         max_iterations=max_design_iterations,
         wrapup_enabled=wrapup_enabled,
-        wrapup_iteration=wrapup_iteration,
+        wrapup_iteration=design_wrapup_iteration,
         context_keep_tool_results=context_keep_tool_results,
         distill_enabled=distill_enabled,
     )
     design_elapsed = time.time() - design_start
 
     design_analysis = design_result.get("analysis", "")
-    all_input_tokens += design_result.get("input_tokens", 0)
-    all_output_tokens += design_result.get("output_tokens", 0)
-    all_cost += design_result.get("cost", 0.0)
+    # Include the distillation pre-pass, which the loop reports separately
+    # from its own token/cost fields (resolve.py seeds totals the same way).
+    all_input_tokens += design_result.get("input_tokens", 0) + design_result.get("distill_input_tokens", 0)
+    all_output_tokens += design_result.get("output_tokens", 0) + design_result.get("distill_output_tokens", 0)
+    all_cost += design_result.get("cost", 0.0) + design_result.get("distill_cost", 0.0)
 
     if not design_analysis:
         post(
@@ -1381,6 +1411,11 @@ def run_delegate(
             "⚠️ **Agent loop blocked!** The revised design contained "
             "`/agent` command(s). Blocked for safety."
         )
+        # Discard the contaminated revision, not just its posting — otherwise
+        # it still flows into Stages 3a/3b/3c and the workflow's Stage 4
+        # (Stage 3c already nulls its artifact the same way). Fall back to
+        # the Stage 1 design, which was /agent-checked before we got here.
+        revised_design = design_analysis
     else:
         revision_cost_block = _build_stage_cost_block(
             github_repo=github_repo,
@@ -1436,7 +1471,7 @@ def run_delegate(
             extra_context=spec_extra_context,
             max_iterations=max_design_iterations,
             wrapup_enabled=wrapup_enabled,
-            wrapup_iteration=wrapup_iteration,
+            wrapup_iteration=design_wrapup_iteration,
             context_keep_tool_results=context_keep_tool_results,
             distill_enabled=distill_enabled,
             system_prompt=SPEC_DESIGN_SYSTEM_PROMPT,
@@ -1444,9 +1479,9 @@ def run_delegate(
         spec_elapsed = time.time() - spec_start
 
         implementation_spec = spec_result.get("analysis", "")
-        all_input_tokens += spec_result.get("input_tokens", 0)
-        all_output_tokens += spec_result.get("output_tokens", 0)
-        all_cost += spec_result.get("cost", 0.0)
+        all_input_tokens += spec_result.get("input_tokens", 0) + spec_result.get("distill_input_tokens", 0)
+        all_output_tokens += spec_result.get("output_tokens", 0) + spec_result.get("distill_output_tokens", 0)
+        all_cost += spec_result.get("cost", 0.0) + spec_result.get("distill_cost", 0.0)
 
         if not implementation_spec:
             post(
