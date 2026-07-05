@@ -78,6 +78,8 @@ jobs:
       compaction_factor: ${{ steps.parse.outputs.compaction_factor }}
       design_context_keep_tool_results: ${{ steps.parse.outputs.design_context_keep_tool_results }}
       review_context_keep_tool_results: ${{ steps.parse.outputs.review_context_keep_tool_results }}
+      design_max_iterations: ${{ steps.parse.outputs.design_max_iterations }}
+      review_max_iterations: ${{ steps.parse.outputs.review_max_iterations }}
       workshop_max_iterations: ${{ steps.parse.outputs.workshop_max_iterations }}
       delegate_max_iterations: ${{ steps.parse.outputs.delegate_max_iterations }}
       delegate_max_design_iterations: ${{ steps.parse.outputs.delegate_max_design_iterations }}
@@ -1095,6 +1097,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           GITHUB_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -1170,7 +1173,7 @@ jobs:
 
           council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
           # Mode-level extra_instructions for council reviewers (each model adds its own model-level)
-          council_extra_instructions = "${{ needs.parse.outputs.extra_instructions }}"
+          council_extra_instructions = os.environ.get("EXTRA_INSTRUCTIONS", "")
 
           def post_pr_comment(body):
               proc = subprocess.run(
@@ -1584,6 +1587,9 @@ jobs:
           REVIEW_CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.review_context_keep_tool_results }}
           REVIEW_WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           REVIEW_WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
+          LLM_MODEL: ${{ needs.parse.outputs.model }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
+          MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
         run: |
           date +%s > /tmp/start_time
           python3 << 'PYEOF'
@@ -1596,12 +1602,12 @@ jobs:
           from context import trim_tool_results
           from litellm import completion
 
-          model = "${{ needs.parse.outputs.model }}"
+          model = os.environ["LLM_MODEL"]
 
-          # Load extra_instructions from parse outputs (mode-level + model-level combined)
+          # Load extra_instructions from the step env (mode-level + model-level combined)
           extra_instructions = "\n\n".join(p for p in [
-              "${{ needs.parse.outputs.extra_instructions }}",
-              "${{ needs.parse.outputs.model_extra_instructions }}",
+              os.environ.get("EXTRA_INSTRUCTIONS", ""),
+              os.environ.get("MODEL_EXTRA_INSTRUCTIONS", ""),
           ] if p)
 
           # Get max iterations from config (default 10)
@@ -1966,6 +1972,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           GITHUB_REPO: ${{ github.repository }}
         run: |
@@ -2015,7 +2022,7 @@ jobs:
                       issue_body_text = rest.strip()
 
           council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
-          council_extra_instructions = "${{ needs.parse.outputs.extra_instructions }}"
+          council_extra_instructions = os.environ.get("EXTRA_INSTRUCTIONS", "")
 
           env = {**os.environ, "GH_TOKEN": github_token}
 
@@ -2305,6 +2312,11 @@ jobs:
           EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
           EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
+          CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.context_keep_tool_results }}
+          BASH_OUTPUT_LIMIT: ${{ needs.parse.outputs.bash_output_limit }}
+          MAX_CONTEXT_TOKENS: ${{ needs.parse.outputs.max_context_tokens }}
+          COMPACTION_COVERAGE: ${{ needs.parse.outputs.compaction_coverage }}
+          COMPACTION_FACTOR: ${{ needs.parse.outputs.compaction_factor }}
         run: |
           PR_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
 
@@ -2680,6 +2692,9 @@ jobs:
           DESIGN_WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           DESIGN_WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
           DISTILL_ENABLED: ${{ needs.parse.outputs.distill_enabled }}
+          LLM_MODEL: ${{ needs.parse.outputs.model }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
+          MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
         run: |
           date +%s > /tmp/start_time
           python3 << 'PYEOF'
@@ -2693,12 +2708,12 @@ jobs:
           from context import trim_tool_results
           from litellm import completion
 
-          model = "${{ needs.parse.outputs.model }}"
+          model = os.environ["LLM_MODEL"]
 
-          # Load extra_instructions from parse outputs (mode-level + model-level combined)
+          # Load extra_instructions from the step env (mode-level + model-level combined)
           extra_instructions = "\n\n".join(p for p in [
-              "${{ needs.parse.outputs.extra_instructions }}",
-              "${{ needs.parse.outputs.model_extra_instructions }}",
+              os.environ.get("EXTRA_INSTRUCTIONS", ""),
+              os.environ.get("MODEL_EXTRA_INSTRUCTIONS", ""),
           ] if p)
 
           # Get max iterations from config (default 10)
@@ -2750,7 +2765,8 @@ jobs:
                       + (f"\n\n## Discussion so far:\n{comments}" if comments else "")
                   )
                   print("Running context distillation pre-step (design)...")
-                  distilled, distill_input_tokens, distill_output_tokens, distill_cost, structural_extract = maybe_distill(
+                  (distilled, distill_input_tokens, distill_output_tokens,
+                   distill_cost, structural_extract, _codebase_total) = maybe_distill(
                       repo_context, issue_context_text, model
                   )
                   if distilled != repo_context:
@@ -3338,6 +3354,9 @@ jobs:
           GITHUB_REPO: ${{ github.repository }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           MAX_ITERATIONS: ${{ needs.parse.outputs.workshop_max_iterations }}
+          ALIAS: ${{ needs.parse.outputs.alias }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
+          MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
           EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
@@ -3356,7 +3375,7 @@ jobs:
           from workshop import run_workshop
 
           model = os.environ["LLM_MODEL"]
-          alias = "${{ needs.parse.outputs.alias }}"
+          alias = os.environ["ALIAS"]
           issue_number = os.environ["ISSUE_NUMBER"]
           github_repo = os.environ["GITHUB_REPO"]
           github_token = os.environ["GITHUB_TOKEN"]
@@ -3369,10 +3388,10 @@ jobs:
           # Council models from parse job (JSON list of {alias, id} dicts)
           council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
 
-          # Load extra_instructions from parse outputs
+          # Load extra_instructions from the step env
           # council_extra_instructions is mode-level only (each reviewer adds their own model-level)
-          council_extra_instructions = "${{ needs.parse.outputs.extra_instructions }}"
-          model_extra_instructions = "${{ needs.parse.outputs.model_extra_instructions }}"
+          council_extra_instructions = os.environ.get("EXTRA_INSTRUCTIONS", "")
+          model_extra_instructions = os.environ.get("MODEL_EXTRA_INSTRUCTIONS", "")
           # Stage 1 design agent gets mode + model combined
           extra_instructions = "\n\n".join(p for p in [council_extra_instructions, model_extra_instructions] if p)
 
@@ -3637,6 +3656,9 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           MAX_ITERATIONS: ${{ needs.parse.outputs.delegate_max_iterations }}
           MAX_DESIGN_ITERATIONS: ${{ needs.parse.outputs.delegate_max_design_iterations }}
+          ALIAS: ${{ needs.parse.outputs.alias }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
+          MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
           EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
@@ -3656,7 +3678,7 @@ jobs:
           from workshop import run_delegate
 
           model = os.environ["LLM_MODEL"]
-          alias = "${{ needs.parse.outputs.alias }}"
+          alias = os.environ["ALIAS"]
           issue_number = os.environ["ISSUE_NUMBER"]
           github_repo = os.environ["GITHUB_REPO"]
           github_token = os.environ["GITHUB_TOKEN"]
@@ -3672,8 +3694,8 @@ jobs:
 
           council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
 
-          council_extra_instructions = "${{ needs.parse.outputs.extra_instructions }}"
-          model_extra_instructions = "${{ needs.parse.outputs.model_extra_instructions }}"
+          council_extra_instructions = os.environ.get("EXTRA_INSTRUCTIONS", "")
+          model_extra_instructions = os.environ.get("MODEL_EXTRA_INSTRUCTIONS", "")
           extra_instructions = "\n\n".join(p for p in [council_extra_instructions, model_extra_instructions] if p)
 
           # Generate repository file listing
@@ -3926,6 +3948,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           GITHUB_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -4003,7 +4026,7 @@ jobs:
           issue_body_text = issue_data.get("body", "") or ""
 
           council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
-          council_extra_instructions = "${{ needs.parse.outputs.extra_instructions }}"
+          council_extra_instructions = os.environ.get("EXTRA_INSTRUCTIONS", "")
 
           def post_pr_comment(body):
               proc = subprocess.run(
