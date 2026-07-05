@@ -1339,6 +1339,9 @@ def main():
             # Inject live wrapup message when the threshold is reached.
             # This is more effective than the system prompt hint alone — the agent
             # is deep in context by this point and needs a fresh, visible reminder.
+            # Re-injected EVERY iteration past the threshold — deliberate
+            # escalation (one nudge gets buried under subsequent tool results);
+            # reconcile.py and design_loop use the same mechanics.
             if WRAPUP_ENABLED and WRAPUP_ITERATION > 0 and iteration + 1 >= WRAPUP_ITERATION:
                 remaining = MAX_ITERATIONS - (iteration + 1)
                 is_final = (iteration + 1 == MAX_ITERATIONS)

@@ -496,7 +496,11 @@ def main():
             last_iteration = iteration
             print(f"=== Iteration {iteration + 1}/{MAX_ITERATIONS} ===")
 
-            if WRAPUP_ENABLED and WRAPUP_ITERATION > 0 and iteration + 1 == WRAPUP_ITERATION:
+            # Re-injected EVERY iteration past the threshold — deliberate
+            # escalation, same mechanics as resolve.py and design_loop: one
+            # nudge gets buried under subsequent tool results, repeated
+            # pressure keeps the agent wrapping up.
+            if WRAPUP_ENABLED and WRAPUP_ITERATION > 0 and iteration + 1 >= WRAPUP_ITERATION:
                 remaining = MAX_ITERATIONS - WRAPUP_ITERATION
                 print(f"  [Wrapup] Injecting wrapup message at iteration {iteration + 1}")
                 messages.append({
