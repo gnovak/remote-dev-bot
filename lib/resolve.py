@@ -1095,21 +1095,32 @@ def execute_tool(tool_name, arguments):
 
 def create_pr(branch, pr_title, pr_body, draft=False):
     """Create a pull request and return its URL."""
-    draft_flag = "--draft" if draft else ""
     body_file = "/tmp/rdb_pr_body.txt"
     model_header = f"🤖 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n"
     with open(body_file, "w") as f:
         f.write(model_header + (pr_body or ""))
-    # Quote the title carefully
-    safe_title = pr_title.replace('"', '\\"')
-    cmd = (
-        f'gh pr create --repo {GITHUB_REPO} '
-        f'--base {TARGET_BRANCH} --head {branch} '
-        f'--title "{safe_title}" '
-        f'--body-file {body_file} '
-        f'{draft_flag}'
-    ).strip()
-    output = run(cmd, timeout=60)
+    # Build the command as an argv list (no shell) so the title — which is
+    # LLM-authored from untrusted issue text — cannot inject shell syntax.
+    # A quoted-string interpolation into `shell=True` would leave backticks
+    # and $(...) live even after escaping double quotes.
+    argv = [
+        "gh", "pr", "create",
+        "--repo", GITHUB_REPO,
+        "--base", TARGET_BRANCH,
+        "--head", branch,
+        "--title", pr_title,
+        "--body-file", body_file,
+    ]
+    if draft:
+        argv.append("--draft")
+    result = subprocess.run(
+        argv, capture_output=True, text=True, timeout=60,
+    )
+    output = (result.stdout or "") + (result.stderr or "")
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Command failed (exit {result.returncode}):\n{' '.join(argv)}\n{output}"
+        )
     match = re.search(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+", output)
     if match:
         return match.group(0)
@@ -1520,28 +1531,13 @@ def main():
                     max_tokens=16384,
                     transient_error_counter=transient_error_counter,
                 )
-            except litellm.exceptions.BadRequestError as exc:
-                err_msg = str(exc)
-                if "prefill" in err_msg.lower():
-                    roles = [m.get("role") for m in messages[-5:]]
-                    print(f"Prefill error at iteration {iteration + 1}. "
-                          f"Last 5 roles: {roles}. Error: {exc}")
-                write_status(False, f"Bad request at iteration {iteration + 1}: {exc}")
-                break
-            except litellm.exceptions.RateLimitError as exc:
-                rate_limit_retries += 1
-                if rate_limit_retries <= MAX_RATE_LIMIT_RETRIES:
-                    wait_secs = 60 * rate_limit_retries
-                    print(f"Rate limit hit (retry {rate_limit_retries}/{MAX_RATE_LIMIT_RETRIES}), "
-                          f"waiting {wait_secs}s: {exc}")
-                    time.sleep(wait_secs)
-                    continue
-                else:
-                    print(f"Rate limit: exhausted {MAX_RATE_LIMIT_RETRIES} retries, treating as failure.")
-                    write_status(False, f"Rate limit error after {MAX_RATE_LIMIT_RETRIES} retries "
-                                 f"at iteration {iteration + 1}: {exc}")
-                    break
             except litellm.exceptions.ContextWindowExceededError as exc:
+                # MUST precede the BadRequestError handler below:
+                # ContextWindowExceededError subclasses BadRequestError, so if
+                # BadRequest is caught first this block becomes dead code and a
+                # context overflow dies with a generic "Bad request" instead of
+                # the emergency trim + graceful wrap-up.
+                #
                 # Input prompt is too long for the model's context window.
                 # Attempt emergency recovery: force-trim and inject a wrap-up message,
                 # then continue so the agent can commit/push before we exit.
@@ -1565,6 +1561,27 @@ def main():
                     ),
                 })
                 continue
+            except litellm.exceptions.BadRequestError as exc:
+                err_msg = str(exc)
+                if "prefill" in err_msg.lower():
+                    roles = [m.get("role") for m in messages[-5:]]
+                    print(f"Prefill error at iteration {iteration + 1}. "
+                          f"Last 5 roles: {roles}. Error: {exc}")
+                write_status(False, f"Bad request at iteration {iteration + 1}: {exc}")
+                break
+            except litellm.exceptions.RateLimitError as exc:
+                rate_limit_retries += 1
+                if rate_limit_retries <= MAX_RATE_LIMIT_RETRIES:
+                    wait_secs = 60 * rate_limit_retries
+                    print(f"Rate limit hit (retry {rate_limit_retries}/{MAX_RATE_LIMIT_RETRIES}), "
+                          f"waiting {wait_secs}s: {exc}")
+                    time.sleep(wait_secs)
+                    continue
+                else:
+                    print(f"Rate limit: exhausted {MAX_RATE_LIMIT_RETRIES} retries, treating as failure.")
+                    write_status(False, f"Rate limit error after {MAX_RATE_LIMIT_RETRIES} retries "
+                                 f"at iteration {iteration + 1}: {exc}")
+                    break
             except litellm.exceptions.APIConnectionError as exc:
                 err_msg = str(exc)
                 if _is_context_overflow_error(exc):
@@ -1629,7 +1646,11 @@ def main():
                 if prompt_details:
                     iter_cache_read_toks = getattr(prompt_details, "cached_tokens", 0) or 0
                     total_cache_read_tokens += iter_cache_read_toks
-                    total_cache_creation_tokens += getattr(prompt_details, "cache_creation_input_tokens", 0) or 0
+                    # litellm's PromptTokensDetailsWrapper field is
+                    # cache_creation_tokens (NOT cache_creation_input_tokens);
+                    # the old name always read as 0, so cache-write tokens
+                    # never appeared and cache-savings figures overstated.
+                    total_cache_creation_tokens += getattr(prompt_details, "cache_creation_tokens", 0) or 0
             cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
             if cost:
                 total_cost += cost
@@ -1656,6 +1677,14 @@ def main():
                 no_tool_call_count += 1
                 if no_tool_call_count >= 3:
                     print("No tool calls for 3 consecutive iterations — breaking")
+                    # Write a status: the post-loop code only writes one when
+                    # the loop ends naturally, so without this the run reports
+                    # no failure explanation at all.
+                    write_status(
+                        False,
+                        f"Agent stalled at iteration {iteration + 1}: 3 consecutive "
+                        "responses returned no tool call (empty choices).",
+                    )
                     break
                 print(f"No tool calls (attempt {no_tool_call_count}/3) — injecting recovery message")
                 messages.append(
@@ -1679,6 +1708,14 @@ def main():
                 no_tool_call_count += 1
                 if no_tool_call_count >= 3:
                     print("No tool calls for 3 consecutive iterations — breaking")
+                    # Write a status: the post-loop code only writes one when
+                    # the loop ends naturally, so without this the run reports
+                    # no failure explanation at all.
+                    write_status(
+                        False,
+                        f"Agent stalled at iteration {iteration + 1}: 3 consecutive "
+                        "responses returned no tool call.",
+                    )
                     break
                 print(f"No tool calls (attempt {no_tool_call_count}/3) — injecting recovery message")
                 messages.append(
