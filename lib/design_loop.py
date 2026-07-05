@@ -388,6 +388,15 @@ def run_design_loop(
         {"role": "user", "content": user_content},
     ]
 
+    # Cache strategy: moving-tail cache_control marker on the LAST message
+    # before each API call, same as resolve.py and reconcile.py (see
+    # resolve.py for the full rationale). Without it, design loops — and
+    # workshop/delegate Stage 1/3a, which run through here — pay full input
+    # price every iteration on Anthropic models.
+    _use_cache_markers = model.startswith(("anthropic/", "claude", "gemini/", "vertex_ai/"))
+    # Gemini's cache semantics differ from Anthropic; explicit TTL is required.
+    _cache_ttl = "3600s" if model.startswith(("gemini/", "vertex_ai/")) else None
+
     total_input_tokens = 0
     total_output_tokens = 0
     total_cost = 0.0
@@ -400,6 +409,31 @@ def run_design_loop(
 
     for iteration in range(max_iterations):
         print(f"=== Iteration {iteration + 1}/{max_iterations} ===")
+
+        # Place the moving-tail cache_control marker on the last message.
+        # Strip every existing marker first to avoid accumulation past
+        # Anthropic's 4-marker limit.
+        if _use_cache_markers and messages:
+            for _msg in messages:
+                _c = _msg.get("content")
+                if isinstance(_c, list):
+                    for _blk in _c:
+                        if isinstance(_blk, dict):
+                            _blk.pop("cache_control", None)
+            _tail = messages[-1]
+            _tail_content = _tail.get("content")
+            _cc: dict = {"type": "ephemeral"}
+            if _cache_ttl:
+                _cc["ttl"] = _cache_ttl
+            if isinstance(_tail_content, str):
+                _tail["content"] = [
+                    {"type": "text", "text": _tail_content, "cache_control": _cc}
+                ]
+            elif isinstance(_tail_content, list) and _tail_content:
+                # Apply the marker to the last block of the list.
+                _last_blk = _tail_content[-1]
+                if isinstance(_last_blk, dict):
+                    _last_blk["cache_control"] = _cc
 
         response = completion_with_retries(
             litellm_completion,
