@@ -83,6 +83,15 @@ def normalize_config(config):
 
 KNOWN_PROVIDERS = ("anthropic/", "openai/", "gemini/")
 
+# `default_model: auto` resolves to the first entry whose API-key env var is
+# set. anthropic comes first because claude-small is the historical default,
+# so multi-key installs keep their previous behavior.
+AUTO_MODEL_PRIORITY = (
+    ("ANTHROPIC_API_KEY", "claude-small"),
+    ("OPENAI_API_KEY", "gpt-small"),
+    ("GEMINI_API_KEY", "gemini-small"),
+)
+
 DEFAULT_TIMEOUT_MINUTES = 120
 
 # Arguments that can be overridden via inline args (lines after the command)
@@ -263,6 +272,26 @@ def detect_api_provider(model_id):
     raise ValueError(f"Unknown provider for model: {model_id}")
 
 
+def resolve_auto_model():
+    """Resolve the `auto` default_model sentinel from present API keys.
+
+    Returns the model alias for the highest-priority provider whose API-key
+    env var is non-empty (see AUTO_MODEL_PRIORITY). Raises ValueError when
+    no provider key is available, so a fresh install gets an actionable
+    message instead of a provider auth failure mid-run.
+    """
+    for env_var, alias in AUTO_MODEL_PRIORITY:
+        if os.environ.get(env_var, "").strip():
+            return alias
+    raise ValueError(
+        "default_model is 'auto' but no provider API key is available. "
+        "Add one of "
+        + ", ".join(env_var for env_var, _ in AUTO_MODEL_PRIORITY)
+        + " as a repository secret, or set default_model explicitly in "
+        "remote-dev-bot.yaml."
+    )
+
+
 def parse_command(command_string, known_modes):
     """Parse a command string into (mode, model_alias).
 
@@ -384,7 +413,14 @@ def resolve_config(base_path, override_path, command_string, local_path=None, ti
 
     # Resolve model alias — use mode's default if none specified
     if not alias:
-        alias = mode_config.get("default_model", config.get("default_model", "claude-small"))
+        alias = mode_config.get("default_model", config.get("default_model", "auto"))
+
+    # The `auto` sentinel (base-config default) resolves from whichever
+    # provider API keys are present. Anything explicitly configured — target
+    # repo config, mode-level default, or a model suffix on the command —
+    # bypasses this entirely.
+    if alias == "auto":
+        alias = resolve_auto_model()
 
     models = config.get("models", {})
     if alias not in models:

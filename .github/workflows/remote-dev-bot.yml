@@ -130,6 +130,11 @@ jobs:
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
           COMMAND_PREFIX: ${{ inputs.command_prefix || 'agent' }}
+          # Provider keys are only probed for presence: `default_model: auto`
+          # resolves to the first provider with a configured key.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           # Pass full comment body to config.py via COMMENT_BODY env var.
           # COMMAND_PREFIX tells config.py which slash command prefix to expect.
