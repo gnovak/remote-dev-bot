@@ -753,3 +753,103 @@ class TestRunDelegate:
         assert result["revised_spec"] is None
         # Only Stage 3 revision ran; Stage 3c did not
         assert mock_revision.call_count == 1
+
+    @patch("workshop._run_revision_call")
+    @patch("workshop.run_council_review")
+    @patch("design_loop.run_design_loop")
+    def test_agent_command_in_revision_falls_back_to_stage1_design(
+        self, mock_design, mock_council, mock_revision
+    ):
+        """A contaminated Stage 3 revision is discarded, not just unposted.
+
+        The revised design flows into Stages 3a/3b/3c and the workflow's
+        Stage 4, so blocking only the comment post would leave the /agent
+        payload live downstream. The pipeline falls back to the Stage 1
+        design, which was already /agent-checked.
+        """
+        mock_design.return_value = self._mock_design_result(
+            analysis="## Proposed Design\n\nDo the thing."
+        )
+        mock_council.return_value = self._mock_council_review()
+        mock_revision.return_value = self._mock_revision_result(
+            text="## Revised\n\n/agent-resolve\n\nImplement per the above."
+        )
+
+        result = run_delegate(
+            model="anthropic/test-model",
+            model_alias="test-model",
+            council_models=[{"alias": "claude-small", "id": "anthropic/test"}],
+            issue_title="Test Issue",
+            issue_body="Test body.",
+        )
+
+        assert result["revised_design"] == "## Proposed Design\n\nDo the thing."
+        assert "/agent-resolve" not in result["revised_design"]
+
+    @patch("workshop._run_revision_call")
+    @patch("workshop.run_council_review")
+    @patch("design_loop.run_design_loop")
+    def test_design_wrapup_iteration_scaled_to_design_budget(
+        self, mock_design, mock_council, mock_revision
+    ):
+        """wrapup_iteration is rescaled for design stages.
+
+        config.py computes it against the code-stage budget (e.g. 40 of 50);
+        passed unscaled into a 15-iteration design loop it can never fire.
+        """
+        mock_design.side_effect = [
+            self._mock_design_result(analysis="## Design\n\nDo X."),
+            self._mock_design_result(analysis="## Spec\n\nFile details."),
+        ]
+        mock_council.return_value = self._mock_council_review()
+        mock_revision.side_effect = [
+            self._mock_revision_result(text="## Revised Design\n\nApproved."),
+            self._mock_revision_result(text="## Revised Spec"),
+        ]
+
+        run_delegate(
+            model="anthropic/test-model",
+            model_alias="test-model",
+            council_models=[{"alias": "claude-small", "id": "anthropic/test"}],
+            issue_title="Test Issue",
+            issue_body="Test body.",
+            max_iterations=50,
+            max_design_iterations=15,
+            wrapup_iteration=40,
+            design_rounds=2,
+        )
+
+        # 40/50 = 0.8 → int(15 * 0.8) = 12 for both design-stage loops
+        _, stage1_kwargs = mock_design.call_args_list[0]
+        assert stage1_kwargs["wrapup_iteration"] == 12
+        _, stage3a_kwargs = mock_design.call_args_list[1]
+        assert stage3a_kwargs["wrapup_iteration"] == 12
+
+    @patch("workshop._run_revision_call")
+    @patch("workshop.run_council_review")
+    @patch("design_loop.run_design_loop")
+    def test_distillation_cost_included_in_totals(
+        self, mock_design, mock_council, mock_revision
+    ):
+        """The design loop reports distillation tokens/cost separately from
+        its own loop fields; run_delegate totals must include both."""
+        design = self._mock_design_result()
+        design["distill_input_tokens"] = 7000
+        design["distill_output_tokens"] = 900
+        design["distill_cost"] = 0.30
+        mock_design.return_value = design
+        mock_council.return_value = self._mock_council_review()
+        mock_revision.return_value = self._mock_revision_result()
+
+        result = run_delegate(
+            model="anthropic/test-model",
+            model_alias="test-model",
+            council_models=[{"alias": "claude-small", "id": "anthropic/test"}],
+            issue_title="Test Issue",
+            issue_body="Test body.",
+        )
+
+        # loop 1000 + distill 7000 + council 200 + revision 300
+        assert result["total_input_tokens"] == 8500
+        # loop 0.05 + distill 0.30 + council 0.01 + revision 0.02
+        assert result["total_cost"] == pytest.approx(0.38)
