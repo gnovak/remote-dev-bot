@@ -418,7 +418,11 @@ def run_design_loop(
             prompt_details = getattr(usage, "prompt_tokens_details", None)
             if prompt_details:
                 total_cache_read_tokens += getattr(prompt_details, "cached_tokens", 0) or 0
-                total_cache_creation_tokens += getattr(prompt_details, "cache_creation_input_tokens", 0) or 0
+                # litellm's PromptTokensDetailsWrapper field is
+                # cache_creation_tokens (NOT cache_creation_input_tokens);
+                # the old name always read as 0, so cache-write tokens
+                # never appeared and cache-savings figures overstated.
+                total_cache_creation_tokens += getattr(prompt_details, "cache_creation_tokens", 0) or 0
         cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
         if cost:
             total_cost += cost
