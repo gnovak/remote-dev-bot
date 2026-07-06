@@ -404,7 +404,6 @@ def run_design_loop(
     total_cache_creation_tokens = 0
     final_analysis = None
     last_response = None
-    wrapup_injected = False
     iteration = 0
 
     for iteration in range(max_iterations):
@@ -508,10 +507,13 @@ def run_design_loop(
             break
 
         # Graceful wrapup injection
+        # Re-injected EVERY iteration past the threshold — deliberate
+        # escalation, same mechanics as resolve.py and reconcile.py: one
+        # nudge gets buried under subsequent tool results, repeated
+        # pressure keeps the agent wrapping up.
         if (
             wrapup_enabled
             and wrapup_iteration > 0
-            and not wrapup_injected
             and iteration + 1 >= wrapup_iteration
         ):
             remaining = max_iterations - (iteration + 1)
@@ -525,7 +527,6 @@ def run_design_loop(
                     "Do not start new lines of inquiry."
                 ),
             })
-            wrapup_injected = True
 
     analysis = final_analysis or last_response or ""
 
