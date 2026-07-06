@@ -1,5 +1,9 @@
 # remote-dev-bot — Comprehensive Review (2026-06-11)
 
+> **Correction (2026-07-06):** §4.1's claim that delegate Stage 6 is an
+> advisory "revision plan" is wrong — Stage 6 has been an agentic revision
+> pass since April (#521). See [CORRECTIONS.md](CORRECTIONS.md).
+
 Written 2026-06-11 against dev @ de72856 (PRs #631-633 merged). Synthesizes
 five phases of incremental findings written by sequential subagents and
 preserved alongside this file: `findings-{code,workflows,docs,usage,prompts}.md`.

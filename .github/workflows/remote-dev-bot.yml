@@ -4298,7 +4298,7 @@ jobs:
               echo "3. ✅ Design revision"
               echo "4. ✅ Implementation (resolve)"
               echo "5. ✅ Council code review"
-              echo "6. ✅ Code revision plan"
+              echo "6. ✅ Agentic code revision"
               echo ""
               echo "See the [workflow run logs]($RUN_URL) for full details."
             } > /tmp/delegate_result_comment.md
