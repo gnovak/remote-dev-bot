@@ -1117,7 +1117,9 @@ def run_delegate(
         3c. Spec revision (one-shot) — conditional on design_rounds >= 2
         4. Implementation / resolve (agentic, same as /agent-resolve)
         5. Council code review (parallel, same as /agent-build Stage 2)
-        6. Code revision plan — main agent reads code reviews, describes fixes
+        6. Agentic code revision — the workflow re-invokes resolve.py on the
+           PR branch with the Stage 5 reviews (plus revised design/spec)
+           injected via EXTRA_FILES; the agent applies the fixes and commits
 
     Parameters
     ----------
@@ -1713,7 +1715,8 @@ def run_delegate(
     #   - Run Stages 1-3 (and optionally 3a-3c) here
     #   - Pass the revised design (and revised spec) to the resolve step
     #   - After resolve creates a PR, run Stage 5 (council code review)
-    #   - Post Stage 6 (code revision plan) as a comment
+    #   - Run Stage 6 (agentic code revision): resolve.py on the PR branch
+    #     with the Stage 5 reviews injected via EXTRA_FILES
 
     stages_done_label = "Stages 1-3c" if design_rounds >= 2 else "Stages 1-3"
     post(
