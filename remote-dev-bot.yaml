@@ -9,7 +9,7 @@
 #   /agent-delegate  — full design-to-implementation cycle with no human pauses
 #   /agent-reconcile — rebase PR onto base branch and resolve conflicts
 #
-# To use a specific model, append it: /agent-resolve-claude-large
+# To use a specific model, append it: /agent-resolve-claude-medium
 # This works for any mode. See models: below for available aliases.
 
 # auto = pick the small model of whichever provider API key is configured,
@@ -126,30 +126,69 @@ modes:
       - gpt-small
       - gemini-small
 
+# Model aliases — the tier system
+#
+# Aliases exist so commands and configs don't have to track model releases.
+# Three capability tiers per provider:
+#
+#   *-small   best value-for-money agentic-coding workhorse (~sonnet class)
+#   *-medium  the provider's flagship (~opus class)
+#   *-large   frontier model above the flagship, where one exists
+#
+# Rules used when repointing (models change; alias names don't):
+#   - Tiers are anchored on CAPABILITY at agentic coding, not price. Price
+#     is an expectation each tier carries, not the admission test.
+#   - The ladder is monotone: going up a tier never gets a weaker model,
+#     and never a cheaper one.
+#   - Every alias always resolves to a runnable model. Where a provider has
+#     no distinct model for a tier, the alias co-points at the tier below —
+#     visible ladder compression rather than a hole. (Tempting alternatives
+#     rejected: pointing tiers at models that can't do nontrivial agentic
+#     coding, or at models with surprise 3x+ pricing.)
+#   - The alias set is append-only; repointing is expected and gets a
+#     changelog entry, since it changes what your runs cost.
+#
+# The model landscape doesn't always divide cleanly into three tiers —
+# these mappings involve judgment calls and reasonable people may disagree
+# with them. If you do: define your own aliases in your repo's
+# remote-dev-bot.yaml (they merge with this list) and pin any model you
+# like. An abstraction doesn't have to be perfect to be useful.
 models:
   claude-small:
-    id: anthropic/claude-sonnet-4-6
-    description: "Balanced cost/capability — good default for most tasks"
+    id: anthropic/claude-sonnet-5
+    description: "Anthropic workhorse — best value for most tasks"
+
+  claude-medium:
+    id: anthropic/claude-opus-4-8
+    description: "Anthropic flagship — complex multi-file features"
 
   claude-large:
-    id: anthropic/claude-opus-4-7
-    description: "Most capable — for complex multi-file features"
+    id: anthropic/claude-fable-5
+    description: "Anthropic frontier — hardest long-horizon work (~2-4x medium cost)"
 
   gpt-small:
-    id: openai/gpt-5.1-codex-mini
-    description: "OpenAI GPT-5.1 Codex Mini — fast, cost-effective coding"
+    id: openai/gpt-5.3-codex
+    description: "OpenAI agentic-coding workhorse (Codex line)"
+
+  gpt-medium:
+    id: openai/gpt-5.6-sol
+    description: "OpenAI flagship"
 
   gpt-large:
-    id: openai/gpt-5.5
-    description: "OpenAI GPT-5.5 — frontier coding + reasoning"
+    id: openai/gpt-5.6-sol
+    description: "Co-pointed at gpt-medium — no distinct OpenAI frontier tier suits agentic coding today"
 
   gemini-small:
-    id: gemini/gemini-2.5-flash
-    description: "Google Gemini 2.5 Flash — good default"
+    id: gemini/gemini-3.5-flash
+    description: "Google workhorse — strongest Gemini for agentic coding today"
+
+  gemini-medium:
+    id: gemini/gemini-3.5-flash
+    description: "Co-pointed at gemini-small — repoint to Gemini 3.5 Pro when it reaches GA"
 
   gemini-large:
-    id: gemini/gemini-2.5-pro
-    description: "Google Gemini 2.5 Pro"
+    id: gemini/gemini-3.5-flash
+    description: "Co-pointed — no distinct Google frontier tier today"
 
 # Agent settings — apply to all modes unless overridden per-mode above.
 # Note: 'openhands:' is accepted as a backward-compatible alias for 'agent:'

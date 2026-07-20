@@ -988,7 +988,7 @@ different repo owners. See the shim template in `.github/workflows/agent.yml`.
 ### Agent runs but hits max iterations
 
 - The agent completed the work but couldn't gracefully stop
-- Try a more capable model: `/agent-resolve-claude-large`
+- Try a more capable model: `/agent-resolve-claude-medium`
 - Or increase `max_iterations` in `remote-dev-bot.yaml`
 
 ### Agent runs but skips PR creation
