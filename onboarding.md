@@ -235,17 +235,24 @@ When you run `/agent-resolve` without a model suffix, you get the default model
 
 ### When to Use Larger Models
 
-Try `/agent-resolve-claude-large` or `/agent-resolve-gpt-large` when:
+Model aliases come in three tiers: `*-small` (value workhorse, the default),
+`*-medium` (the provider's flagship), and `*-large` (frontier, where the
+provider offers one — expect a multiple of medium's cost).
+
+Try `/agent-resolve-claude-medium` or `/agent-resolve-gpt-medium` when:
 
 - The task involves complex reasoning across multiple files
 - Previous attempts with the default model failed or produced poor results
 - You're working on architecture-level changes
 
+For the hardest long-horizon tasks, `/agent-resolve-claude-large` escalates
+to the frontier tier.
+
 ### Try It
 
 1. Create an issue with a moderately complex task
 2. First try: `/agent-resolve` (default model)
-3. If the result isn't satisfactory, try: `/agent-resolve-claude-large`
+3. If the result isn't satisfactory, try: `/agent-resolve-claude-medium`
 4. Compare the results and costs
 
 ### Cost Tradeoffs
