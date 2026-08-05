@@ -159,7 +159,7 @@ models:
     description: "Anthropic workhorse — best value for most tasks"
 
   claude-medium:
-    id: anthropic/claude-opus-4-8
+    id: anthropic/claude-opus-5
     description: "Anthropic flagship — complex multi-file features"
 
   claude-large:
@@ -179,15 +179,15 @@ models:
     description: "Co-pointed at gpt-medium — no distinct OpenAI frontier tier suits agentic coding today"
 
   gemini-small:
-    id: gemini/gemini-3.5-flash
+    id: gemini/gemini-3.6-flash
     description: "Google workhorse — strongest Gemini for agentic coding today"
 
   gemini-medium:
-    id: gemini/gemini-3.5-flash
-    description: "Co-pointed at gemini-small — repoint to Gemini 3.5 Pro when it reaches GA"
+    id: gemini/gemini-3.6-flash
+    description: "Co-pointed at gemini-small — repoint to Gemini 3.5 Pro if/when it reaches GA"
 
   gemini-large:
-    id: gemini/gemini-3.5-flash
+    id: gemini/gemini-3.6-flash
     description: "Co-pointed — no distinct Google frontier tier today"
 
 # Agent settings — apply to all modes unless overridden per-mode above.

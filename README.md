@@ -136,7 +136,7 @@ differently. An abstraction doesn't have to be perfect to be useful.
 | ------------------ | ------------ | ----------------------------- |
 | Anthropic (Claude) | `anthropic/` | `anthropic/claude-sonnet-5`   |
 | OpenAI (GPT)       | `openai/`    | `openai/gpt-5.3-codex`        |
-| Google (Gemini)    | `gemini/`    | `gemini/gemini-3.5-flash`     |
+| Google (Gemini)    | `gemini/`    | `gemini/gemini-3.6-flash`     |
 
 ### Supported Providers
 
