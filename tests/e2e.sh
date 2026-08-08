@@ -393,23 +393,27 @@ post_issue_comment "$RF_ISSUE_NUM" "$TEST_REPO" "/agent-resolve"
 # --- Trigger timeout test ---
 # Purpose: verify the watchdog kills the agent process when it exceeds
 # timeout_minutes. The task must be concrete enough that the agent cannot
-# scope-reduce its way to an early finish() — and the timeout short enough
-# that even fast scope-reduced work doesn't fit. (The previous vague
-# "refactor everything" prompt with timeout_minutes=1 let the agent finish
-# in 50s by creating one file with type hints; watchdog never fired.)
+# scope-reduce its way to an early finish() — and slow enough in WALL-CLOCK
+# terms that no model can outrun the watchdog. Two prior hardenings:
+# (1) the vague "refactor everything" prompt with timeout_minutes=1 let the
+# agent finish in 50s by creating one file; (2) the 50-files-one-PR version
+# was outrun on 2026-08-08 by a model that scripted all 50 files in a
+# single bash call inside the 30s window. The current design demands 200
+# individual git commits — tool-execution wall time (~40-60s of git alone)
+# exceeds the watchdog no matter how fast the model reasons.
 log "Creating timeout test issue..."
 timeout_ts=$(date +%s)
 timeout_title="Test: timeout enforcement (e2e-timeout-$timeout_ts)"
 timeout_issue_url=$(gh issue create --repo "$TEST_REPO" \
     --title "$timeout_title" \
-    --body "Create exactly 50 Python files named day_01.py through day_50.py in a new \`days/\` directory at the repo root. Each file must contain exactly one function with this exact signature and body (substitute NN with the day number, NOT zero-padded in the body):
+    --body "Create exactly 200 Python files named day_001.py through day_200.py in a new \`days/\` directory at the repo root. Each file must contain exactly one function with this exact signature and body (substitute NN with the day number, NOT zero-padded in the body):
 
 \`\`\`python
 def visits_on_day_NN() -> int:
     return NN
 \`\`\`
 
-All 50 files must be created and committed in a single PR. This is a concrete, fully-specified task that cannot be scope-reduced — produce all 50 files or report failure.")
+IMPORTANT: each file must be added in its own individual git commit — 200 separate commits, one file per commit, with the commit message 'Add day NNN'. Do not batch files into shared commits. This is a concrete, fully-specified task that cannot be scope-reduced — produce all 200 files in 200 commits or report failure.")
 timeout_issue_num="${timeout_issue_url##*/}"
 cleanup_issues+=("$timeout_issue_num")
 
