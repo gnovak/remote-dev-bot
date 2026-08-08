@@ -171,12 +171,12 @@ models:
     description: "OpenAI agentic-coding workhorse (Codex line)"
 
   gpt-medium:
-    id: openai/gpt-5.6-sol
-    description: "OpenAI flagship"
+    id: openai/gpt-5.3-codex
+    description: "Co-pointed at gpt-small — gpt-5.6-sol requires the Responses API for tool use (issue #653)"
 
   gpt-large:
-    id: openai/gpt-5.6-sol
-    description: "Co-pointed at gpt-medium — no distinct OpenAI frontier tier suits agentic coding today"
+    id: openai/gpt-5.3-codex
+    description: "Co-pointed at gpt-small — no OpenAI model above the Codex line runs rdb's tool loop today"
 
   gemini-small:
     id: gemini/gemini-3.6-flash
