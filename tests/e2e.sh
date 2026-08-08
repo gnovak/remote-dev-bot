@@ -83,7 +83,8 @@ gh_login=$(gh api user --jq .login 2>/dev/null) || {
     echo "ERROR: mint a new PAT with write access to the test repo and update the secret." >&2
     exit 1
 }
-echo "==> Authenticated to GitHub as: ${gh_login}"
+gh_exp=$(gh api user -i 2>/dev/null | grep -i "^github-authentication-token-expiration:" | cut -d" " -f2- | tr -d "\r")
+echo "==> Authenticated to GitHub as: ${gh_login}${gh_exp:+ (token expires: ${gh_exp})}"
 
 check_graphql_quota
 

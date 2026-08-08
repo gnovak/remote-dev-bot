@@ -87,7 +87,21 @@ gh_login=$(gh api user --jq .login 2>/dev/null) || {
     echo "ERROR: mint a new PAT with write access to the test repo and update the secret." >&2
     exit 1
 }
-echo "==> Authenticated to GitHub as: ${gh_login}"
+gh_exp=$(gh api user -i 2>/dev/null | grep -i "^github-authentication-token-expiration:" | cut -d" " -f2- | tr -d "\r")
+echo "==> Authenticated to GitHub as: ${gh_login}${gh_exp:+ (token expires: ${gh_exp})}"
+
+# Validate the unauthorized-user token too, when present — its failures
+# otherwise surface only mid-gating-test.
+if [[ -n "${UNAUTHORIZED_PAT:-}" ]]; then
+    ua_login=$(curl -fs -H "Authorization: token ${UNAUTHORIZED_PAT}" \
+        https://api.github.com/user 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['login'])" 2>/dev/null) || true
+    if [[ -z "${ua_login:-}" ]]; then
+        echo "ERROR: UNAUTHORIZED_PAT is invalid or expired (api.github.com/user failed)." >&2
+        echo "ERROR: In CI this is secrets.RDB_TESTER_UNAUTHORIZED_PAT_TOKEN (remote-dev-bot-tester account)." >&2
+        exit 1
+    fi
+    echo "==> Unauthorized-user token authenticates as: ${ua_login}"
+fi
 
 check_graphql_quota
 
