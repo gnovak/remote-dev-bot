@@ -202,17 +202,24 @@ def test_branch_aware_jobs_use_target_branch_ref(workflow_jobs):
         )
 
 
-def test_dogfood_has_workflows_write_permission():
-    """dogfood.yml must include workflows:write so the fallback github.token
-    can push workflow file changes when no app token is configured.
+def test_no_invalid_workflows_permission_key():
+    """No workflow may use `workflows:` in a permissions block — it is not a
+    valid GitHub Actions permissions scope, and since ~2026-05-01 GitHub
+    hard-rejects it ("Unexpected value 'workflows'"), invalidating the whole
+    workflow file. It was originally added for issue #463 in the belief it
+    let github.token push workflow files; GITHUB_TOKEN can never modify
+    workflow files regardless of permissions — that capability comes from
+    the GitHub App's Workflows permission (see CONTRIBUTING.md).
 
-    Regression test for issue #463.
+    Regression test for the May-August 2026 phantom dogfood failures.
     """
-    dogfood = load_yaml(REPO_ROOT / ".github/workflows/dogfood.yml")
-    permissions = dogfood.get("permissions", {})
-    assert permissions.get("workflows") == "write", (
-        "dogfood.yml must have 'workflows: write' in permissions"
-    )
+    for wf in (REPO_ROOT / ".github/workflows").glob("*.yml"):
+        config = load_yaml(wf)
+        permissions = config.get("permissions", {}) or {}
+        assert "workflows" not in permissions, (
+            f"{wf.name}: 'workflows' is not a valid permissions scope and "
+            f"invalidates the workflow file"
+        )
 
 
 # --- Security checks ---
