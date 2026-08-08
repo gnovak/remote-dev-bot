@@ -19,11 +19,15 @@ on:
   pull_request_review_comment:
     types: [created]
 
+# NOTE: `workflows: write` is not a valid permissions scope — GitHub began
+# hard-rejecting it ~2026-05-01 ("Unexpected value 'workflows'"), which made
+# every push spawn a phantom failed dogfood run and broke /dogfood comments.
+# Workflow-file write access is granted by the App's Workflows permission
+# (see CONTRIBUTING.md), not by a job permissions key.
 permissions:
   contents: write
   issues: write
   pull-requests: write
-  workflows: write
 
 jobs:
   resolve:
