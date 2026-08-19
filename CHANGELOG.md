@@ -1,147 +1,39 @@
 # Changelog
 
-## v1.0.0 — Stabilization, model tiers, zero-config install (Aug 2026)
+## v1.0.0 (Aug 2026)
 
-The 1.0 release. Everything since v0.9.0 was driven by a comprehensive
-code/workflow/docs/usage review (checked into the repo under
-`comprehensive-review/2026-06-11/`) followed by a fix campaign, plus a
-redesign of the model alias system for long-term stability. The release
-gate was a fully green run of the complete test suite — unit tests, e2e
-across every model alias on all three providers, and the security suite.
-
-### Model aliases: three capability tiers
-
-- **New tier system**: aliases are now `{provider}-{small,medium,large}` —
-  small = best value agentic-coding workhorse, medium = the provider's
-  flagship, large = frontier-above-flagship where one exists. Tiers are
-  anchored on capability at agentic coding (price is an expectation, not
-  the admission test), the ladder is monotone, and every alias always
-  resolves to a runnable model — providers lacking a distinct model for a
-  tier co-point at the tier below. The reasoning and repointing rules are
-  documented in `remote-dev-bot.yaml` and the README.
-- **Breaking (pre-1.0)**: `claude-large` now means the frontier tier
-  (Claude Fable 5); the Opus flagship moved to `claude-medium`. `gpt-*`
-  and `gemini-*` gained `medium` tiers.
-- **Current mappings**: claude → sonnet-5 / opus-5 / fable-5; gpt → all
-  tiers on gpt-5.3-codex (GPT-5.6 Sol cannot run tool loops via chat
-  completions — restore tracked in #653); gemini → all tiers on
-  2.5-flash (gemini-3.6-flash blocked on a litellm thought-signature
-  bug — #654).
-- **Post-1.0 policy**: the alias set is append-only; repointing an alias
-  is expected and gets a changelog entry. Pin your own aliases in your
-  repo's `models:` section if you'd draw the lines differently.
-
-### Zero-config install
-
-- **`default_model: auto`**: fresh installs no longer fail when no model
-  is configured. The default resolves from whichever provider API key
-  secrets are present (priority: `ANTHROPIC_API_KEY` > `OPENAI_API_KEY` >
-  `GEMINI_API_KEY`). Explicit configuration always wins; no keys at all
-  fails at parse time with an actionable message.
-- **install.md rewritten around optional config**: the per-repo
-  `remote-dev-bot.yaml` is optional; the previous instructions curl'd a
-  template file that had been deleted (every fresh install 404'd at that
-  step). The base config in this repo is now the live reference.
-
-### Security hardening
-
-- **PR-title shell injection closed**: `create_pr` built a `shell=True`
-  command with the LLM-authored title escaped only for double quotes;
-  backticks and `$(...)` from a prompt-injected issue could execute on
-  the runner. Now an argv-list subprocess call with no shell.
-- **Config values no longer interpolated into workflow Python**:
-  `extra_instructions` and friends were spliced into heredoc Python
-  source in 7 workflow steps — multi-line values (the documented format)
-  crashed the step, and target-repo config could inject code. All sites
-  now pass values through step `env:` blocks.
-- **Phantom security docs removed**: the README described a
-  `SECURITY_GATE` marker and "security microagent" that did not exist;
-  the real gate (author association) is now documented as such.
-
-### Reliability fixes (from the 2026-06-11 review)
-
-- **Context-overflow recovery un-deadened**: `ContextWindowExceededError`
-  subclasses `BadRequestError` and was caught by the wrong handler, so
-  the emergency trim + graceful wrap-up path never ran. Handler order
-  fixed; overflowing runs now wrap up instead of dying.
-- **Compaction no longer corrupts tool-call pairing**: the boundary cut
-  could orphan tool results from their tool calls, producing message
-  lists providers reject with a 400. The cut now respects group
-  boundaries.
-- **resolve.py uses the shared read/write-aware context trimming** (its
-  stale local copy dropped write results as readily as reads).
-- **Reconcile hardened**: transient provider errors (529s) are retried
-  like the sibling loops; context/truncation config is actually plumbed
-  into the job; the rebase conflict-marker explanation in the prompt had
-  the sides reversed and is now correct.
-- **Silent-failure statuses**: the "no tool calls ×3" break paths in
-  resolve and reconcile now write failure statuses instead of ending
-  runs with no explanation.
-- **CI on dev PRs**: unit tests now run on PRs targeting `dev` (the
-  development branch model) — previously only `main`, so dev PRs merged
-  with zero checks.
-- **/dogfood repaired**: an invalid `workflows: write` permissions key
-  (hard-rejected by GitHub since ~May) invalidated the workflow file,
-  breaking `/dogfood` comments and attaching a phantom failed run to
-  every push for three months.
-
-### Cost & caching correctness
-
-- **Design loops now use prompt caching**: the moving-tail cache marker
-  (in resolve and reconcile since v0.7) was ported to the design loop —
-  standalone `/agent-design` and workshop/delegate design stages were
-  paying full input price every iteration on Anthropic models.
-- **Cache-write tokens actually tracked**: all three loops read a
-  litellm field that doesn't exist (`cache_creation_input_tokens` vs
-  `cache_creation_tokens`), so cache-write costs never appeared and
-  savings were overstated.
-- **Design-mode distillation un-broken**: a 5-vs-6 tuple unpack mismatch
-  silently disabled the distillation pre-pass for every `/agent-design`
-  run (the swallowed error meant full-repo context every time).
-- **Distillation and workshop/delegate costs fully accounted**:
-  structural-extract signatures no longer degrade to bare argument
-  names, and distillation cost is included in workshop/delegate totals.
-
-### Delegate & loop behavior
-
-- **Delegate Stage 3 safety blocking fixed**: a revised design containing
-  `/agent` commands is now discarded (falling back to the vetted Stage 1
-  design) instead of merely not being posted while still flowing to
-  later stages.
-- **Design-stage wrapup fixed**: the wrap-up nudge iteration was computed
-  against the code budget (40 of 50) and passed into 15-iteration design
-  loops, where it could never fire. Now rescaled per stage.
-- **Wrapup mechanics unified**: all three loops re-inject the wrap-up
-  nudge every iteration past the threshold (deliberate escalation —
-  previously three different implementations).
-- **Configured design/review iteration budgets respected**: the parse
-  job never exported `design_max_iterations` / `review_max_iterations`,
-  so design loops ran hardcoded defaults and inline overrides were
-  silently ignored.
-
-### Test infrastructure
-
-- **e2e pre-flight**: both e2e scripts validate GitHub tokens up front
-  and print the token owner and expiry, failing fast with rotation
-  instructions instead of mid-suite 401 confusion.
-- **Reconcile e2e failures now count** toward the suite exit code
-  (previously a reconcile failure could exit green).
-- **Timeout test hardened (third design)**: the watchdog test now
-  demands 200 individual git commits, making wall-clock the constraint —
-  fast models had twice outrun task designs that raced reasoning speed.
+- **Model aliases: three capability tiers.** Aliases are now
+  `{provider}-{small,medium,large}`: small = best value-for-money
+  agentic-coding workhorse, medium = the provider's flagship, large =
+  frontier-above-flagship where one exists. Tiers are anchored on
+  capability at agentic coding (price is an expectation, not the
+  admission test) and the ladder is monotone — going up a tier never
+  gets a weaker model. The model landscape doesn't always map cleanly
+  onto three tiers, so aliases sometimes point at the same model rather
+  than leaving a tier undefined or pointing it at something that can't
+  do the job. Repointing rules and reasoning are documented in
+  `remote-dev-bot.yaml` and the README.
+- **Zero-config default model** (`default_model: auto`): fresh installs
+  run without configuring a model at all — the default resolves from
+  whichever provider API key secret is present. Explicit configuration
+  always wins.
+- **Lots of small fixes and cleanup in preparation for 1.0**: security
+  hardening, reliability and prompt-cache correctness, cost-accounting
+  accuracy, doc repair, and test-infrastructure work, driven by a
+  comprehensive pre-1.0 review (`comprehensive-review/2026-06-11/`).
 
 ### Known issues
 
-- `gemini-3.6-flash` is temporarily off the alias table: litellm's
-  Gemini 3.x thought-signature handling intermittently breaks multi-turn
-  tool calling (#654; upstream litellm #16893/#25322). The gemini tiers
-  point at `gemini-2.5-flash` until a fixed litellm release lands.
-- GPT-5.6 Sol requires OpenAI's Responses API for tool use; the gpt
-  tiers point at `gpt-5.3-codex` until litellm's responses bridge covers
-  it (#653).
+- The gemini tiers point at `gemini-2.5-flash` rather than the newer
+  3.x models: litellm's Gemini 3.x thought-signature handling
+  intermittently breaks multi-turn tool calling (#654).
+- The gpt tiers point at `gpt-5.3-codex` rather than GPT-5.6 Sol: the
+  5.6 frontier family requires OpenAI's Responses API for tool use,
+  which rdb's litellm path doesn't use yet (#653).
 
-**Breaking changes:** model alias renames described above (pre-1.0, no
-compatibility guarantee was in effect). Post-1.0, alias names are stable.
+**Breaking changes:** model aliases renamed as part of the tier system
+(pre-1.0, no compatibility guarantee was in effect). Post-1.0, alias
+names are stable and the alias set is append-only.
 
 ## v0.9.0 — Delegate mode, reconcile mode, council reviews (May 2026)
 
