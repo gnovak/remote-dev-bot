@@ -1371,6 +1371,7 @@ log "  Total cost: \$$total_cost ($cost_count tests with cost data)"
 log ""
 log "========================================="
 log "  Smoke tests:    Pass: $pass  Fail: $fail  Timeout: $timeout_count"
+log "  Reconcile test: Pass: $RECONCILE_PASS  Fail: $RECONCILE_FAIL"
 log "  Review+Feedback:  Pass: $RF_PASS  Fail: $RF_FAIL"
 log "  Timeout test:   Pass: $TIMEOUT_PHASE_PASS  Fail: $TIMEOUT_PHASE_FAIL"
 log "  Wrapup test:    Pass: $WRAPUP_PHASE_PASS  Fail: $WRAPUP_PHASE_FAIL"
@@ -1378,7 +1379,7 @@ log "  Total cost:     \$$total_cost"
 log "========================================="
 
 # Exit with failure if any test didn't pass
-total_fail=$((fail + timeout_count + RF_FAIL + TIMEOUT_PHASE_FAIL + WRAPUP_PHASE_FAIL))
+total_fail=$((fail + timeout_count + RECONCILE_FAIL + RF_FAIL + TIMEOUT_PHASE_FAIL + WRAPUP_PHASE_FAIL))
 if [[ $total_fail -gt 0 ]]; then
     exit 1
 fi
