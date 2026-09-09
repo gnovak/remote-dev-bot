@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 from workshop import (
     build_council_review_prompt,
     resolve_council_models,
+    run_build_council,
     COUNCIL_REVIEW_SYSTEM_PROMPT,
 )
 
@@ -18,6 +19,74 @@ from workshop import (
 # ---------------------------------------------------------------------------
 # resolve_council_models
 # ---------------------------------------------------------------------------
+
+class TestRunBuildCouncilLabels:
+    """run_build_council is shared by build Stage 2, delegate Stage 5, and
+    /agent-review council=true. Each uses different banner/attribution/
+    completion labels — verify the parameters are threaded through to the
+    posted comments so the labels can be customized per-caller."""
+
+    def _mock_review_result(self, alias="claude-small"):
+        return {
+            "review": f"## Code Review by {alias}\n\nLooks good.",
+            "model_alias": alias,
+            "model_id": "anthropic/test",
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cost": 0.01,
+            "elapsed": 1.0,
+        }
+
+    def test_default_labels_match_build_stage_2(self):
+        from unittest.mock import patch
+        posted = []
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}), \
+             patch("workshop.run_council_code_review",
+                   return_value=self._mock_review_result()):
+            run_build_council(
+                council_models=[{"alias": "claude-small", "id": "anthropic/test"}],
+                issue_title="t",
+                issue_body="b",
+                pr_title="pt",
+                pr_body="pb",
+                pr_diff="diff",
+                post_comment_fn=posted.append,
+            )
+        joined = "\n".join(posted)
+        assert "Build Stage 2 — Council Code Review" in joined
+        assert "/agent-build Stage 2" in joined
+        assert "Build Stage 2 complete" in joined
+
+    def test_custom_labels_for_review_council(self):
+        """When /agent-review with council=true calls this function, labels
+        should NOT say 'Build Stage 2' — that text would confuse the user
+        about which command they invoked."""
+        from unittest.mock import patch
+        posted = []
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}), \
+             patch("workshop.run_council_code_review",
+                   return_value=self._mock_review_result()):
+            run_build_council(
+                council_models=[{"alias": "claude-small", "id": "anthropic/test"}],
+                issue_title="t",
+                issue_body="b",
+                pr_title="pt",
+                pr_body="pb",
+                pr_diff="diff",
+                post_comment_fn=posted.append,
+                banner_label="Council Code Review",
+                attribution_label="/agent-review council=true",
+                completion_label="Council code review complete — awaiting human review",
+            )
+        joined = "\n".join(posted)
+        # Custom labels present
+        assert "## 🏛️ Council Code Review" in joined
+        assert "/agent-review council=true" in joined
+        assert "Council code review complete — awaiting human review" in joined
+        # Build-mode labels NOT leaking in
+        assert "Build Stage 2" not in joined
+        assert "/agent-build" not in joined
+
 
 class TestResolveCouncilModels:
     """Tests for council model filtering logic."""
@@ -684,3 +753,103 @@ class TestRunDelegate:
         assert result["revised_spec"] is None
         # Only Stage 3 revision ran; Stage 3c did not
         assert mock_revision.call_count == 1
+
+    @patch("workshop._run_revision_call")
+    @patch("workshop.run_council_review")
+    @patch("design_loop.run_design_loop")
+    def test_agent_command_in_revision_falls_back_to_stage1_design(
+        self, mock_design, mock_council, mock_revision
+    ):
+        """A contaminated Stage 3 revision is discarded, not just unposted.
+
+        The revised design flows into Stages 3a/3b/3c and the workflow's
+        Stage 4, so blocking only the comment post would leave the /agent
+        payload live downstream. The pipeline falls back to the Stage 1
+        design, which was already /agent-checked.
+        """
+        mock_design.return_value = self._mock_design_result(
+            analysis="## Proposed Design\n\nDo the thing."
+        )
+        mock_council.return_value = self._mock_council_review()
+        mock_revision.return_value = self._mock_revision_result(
+            text="## Revised\n\n/agent-resolve\n\nImplement per the above."
+        )
+
+        result = run_delegate(
+            model="anthropic/test-model",
+            model_alias="test-model",
+            council_models=[{"alias": "claude-small", "id": "anthropic/test"}],
+            issue_title="Test Issue",
+            issue_body="Test body.",
+        )
+
+        assert result["revised_design"] == "## Proposed Design\n\nDo the thing."
+        assert "/agent-resolve" not in result["revised_design"]
+
+    @patch("workshop._run_revision_call")
+    @patch("workshop.run_council_review")
+    @patch("design_loop.run_design_loop")
+    def test_design_wrapup_iteration_scaled_to_design_budget(
+        self, mock_design, mock_council, mock_revision
+    ):
+        """wrapup_iteration is rescaled for design stages.
+
+        config.py computes it against the code-stage budget (e.g. 40 of 50);
+        passed unscaled into a 15-iteration design loop it can never fire.
+        """
+        mock_design.side_effect = [
+            self._mock_design_result(analysis="## Design\n\nDo X."),
+            self._mock_design_result(analysis="## Spec\n\nFile details."),
+        ]
+        mock_council.return_value = self._mock_council_review()
+        mock_revision.side_effect = [
+            self._mock_revision_result(text="## Revised Design\n\nApproved."),
+            self._mock_revision_result(text="## Revised Spec"),
+        ]
+
+        run_delegate(
+            model="anthropic/test-model",
+            model_alias="test-model",
+            council_models=[{"alias": "claude-small", "id": "anthropic/test"}],
+            issue_title="Test Issue",
+            issue_body="Test body.",
+            max_iterations=50,
+            max_design_iterations=15,
+            wrapup_iteration=40,
+            design_rounds=2,
+        )
+
+        # 40/50 = 0.8 → int(15 * 0.8) = 12 for both design-stage loops
+        _, stage1_kwargs = mock_design.call_args_list[0]
+        assert stage1_kwargs["wrapup_iteration"] == 12
+        _, stage3a_kwargs = mock_design.call_args_list[1]
+        assert stage3a_kwargs["wrapup_iteration"] == 12
+
+    @patch("workshop._run_revision_call")
+    @patch("workshop.run_council_review")
+    @patch("design_loop.run_design_loop")
+    def test_distillation_cost_included_in_totals(
+        self, mock_design, mock_council, mock_revision
+    ):
+        """The design loop reports distillation tokens/cost separately from
+        its own loop fields; run_delegate totals must include both."""
+        design = self._mock_design_result()
+        design["distill_input_tokens"] = 7000
+        design["distill_output_tokens"] = 900
+        design["distill_cost"] = 0.30
+        mock_design.return_value = design
+        mock_council.return_value = self._mock_council_review()
+        mock_revision.return_value = self._mock_revision_result()
+
+        result = run_delegate(
+            model="anthropic/test-model",
+            model_alias="test-model",
+            council_models=[{"alias": "claude-small", "id": "anthropic/test"}],
+            issue_title="Test Issue",
+            issue_body="Test body.",
+        )
+
+        # loop 1000 + distill 7000 + council 200 + revision 300
+        assert result["total_input_tokens"] == 8500
+        # loop 0.05 + distill 0.30 + council 0.01 + revision 0.02
+        assert result["total_cost"] == pytest.approx(0.38)

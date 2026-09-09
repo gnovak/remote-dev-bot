@@ -50,7 +50,7 @@ This is the "engine" — the shared infrastructure that all target repos use.
 | File | Purpose |
 |------|---------|
 | `.github/workflows/remote-dev-bot.yml` | The reusable workflow. Contains all the logic: parses model aliases, runs the LiteLLM agent loop, resolves issues, creates PRs. Target repos call this. |
-| `remote-dev-bot.yaml` | Base configuration. Defines model aliases (`claude-small`, `claude-large`, etc.) and agent settings (max iterations, PR type). |
+| `remote-dev-bot.yaml` | Base configuration. Defines model aliases (`claude-small`, `claude-medium`, etc.) and agent settings (max iterations, PR type). |
 | `.github/workflows/agent.yml` | Shim workflow. Also serves as the template — copy this to target repos. |
 | `install.md` | Step-by-step setup instructions for humans or AI assistants. |
 
@@ -81,13 +81,13 @@ This is where you want the AI agent to help with development.
 
 ## How the Pieces Connect
 
-When someone comments `/agent-resolve-claude-large` on an issue:
+When someone comments `/agent-resolve-claude-medium` on an issue:
 
 1. **Shim triggers** — The target repo's `agent.yml` fires on the comment
 2. **Calls reusable workflow** — The shim calls `remote-dev-bot.yml@main` from remote-dev-bot
 3. **Config checkout** — remote-dev-bot.yml sparse-checks out `remote-dev-bot.yaml` and `lib/` from remote-dev-bot
 4. **Config merge** — base config from remote-dev-bot is merged with any override config in the target repo
-5. **Model resolution** — The alias `claude-large` is resolved to a model ID like `anthropic/claude-opus-4-5`
+5. **Model resolution** — The alias `claude-medium` is resolved to a model ID like `anthropic/claude-opus-4-8`
 6. **Feedback** — A rocket emoji is added to your comment and you're assigned to the issue, so you can see at a glance which issues have active work
 7. **Agent runs** — LiteLLM agent loop (resolve.py) reads the issue, explores the codebase, makes changes
 8. **PR created** — A draft (or ready) PR is opened with the changes
@@ -95,7 +95,7 @@ When someone comments `/agent-resolve-claude-large` on an issue:
 For `/agent-workshop` and `/agent-build`, steps 1–6 are identical. Step 7 runs the same agent loop (design or resolve), then `lib/workshop.py` runs each council model in sequence and posts a review comment. The bot pauses there; no further automation happens until a human triggers the next command.
 
 ```
-User comments /agent-resolve-claude-large
+User comments /agent-resolve-claude-medium
          │
          ▼
 ┌─────────────────────┐
@@ -137,12 +137,12 @@ agent:
   pr_type: ready
 
 # target-repo/remote-dev-bot.yaml (override)
-default_model: claude-large
+default_model: claude-medium
 agent:
   max_iterations: 30
 ```
 
-Result: `default_model: claude-large`, `max_iterations: 30`, `pr_type: ready`
+Result: `default_model: claude-medium`, `max_iterations: 30`, `pr_type: ready`
 (inherited from base).
 
 Merges are deep (leaf-level): overriding `agent.max_iterations` does not

@@ -54,6 +54,10 @@ check_graphql_quota() {
     fi
     remaining=$(echo "$result" | cut -d' ' -f1)
     reset_ts=$(echo "$result" | cut -d' ' -f2)
+    if ! [[ "$remaining" =~ ^[0-9]+$ ]]; then
+        echo "==> Warning: could not parse GraphQL rate limit response — proceeding anyway"
+        return
+    fi
     reset_time=$(python3 -c "
 import datetime
 ts = ${reset_ts}
@@ -69,6 +73,18 @@ print(f'{local_t.strftime(\"%H:%M:%S\")} local / {utc_t.strftime(\"%H:%M:%S\")} 
     fi
     echo "==> GraphQL quota: ${remaining} points remaining (resets ${reset_time})."
 }
+
+# Fail fast with a clear message when GH_TOKEN is dead — an expired
+# RDB_TESTER_PAT_TOKEN otherwise surfaces as confusing 401s on every
+# issue-creation call after the suite has already started.
+gh_login=$(gh api user --jq .login 2>/dev/null) || {
+    echo "ERROR: GH_TOKEN is invalid or expired (gh api user failed)." >&2
+    echo "ERROR: In CI this token comes from secrets.RDB_TESTER_PAT_TOKEN —" >&2
+    echo "ERROR: mint a new PAT with write access to the test repo and update the secret." >&2
+    exit 1
+}
+gh_exp=$(gh api user -i 2>/dev/null | grep -i "^github-authentication-token-expiration:" | cut -d" " -f2- | tr -d "\r")
+echo "==> Authenticated to GitHub as: ${gh_login}${gh_exp:+ (token expires: ${gh_exp})}"
 
 check_graphql_quota
 
@@ -375,17 +391,34 @@ log "  Issue #$RF_ISSUE_NUM created. Triggering /agent-resolve..."
 post_issue_comment "$RF_ISSUE_NUM" "$TEST_REPO" "/agent-resolve"
 
 # --- Trigger timeout test ---
+# Purpose: verify the watchdog kills the agent process when it exceeds
+# timeout_minutes. The task must be concrete enough that the agent cannot
+# scope-reduce its way to an early finish() — and slow enough in WALL-CLOCK
+# terms that no model can outrun the watchdog. Two prior hardenings:
+# (1) the vague "refactor everything" prompt with timeout_minutes=1 let the
+# agent finish in 50s by creating one file; (2) the 50-files-one-PR version
+# was outrun on 2026-08-08 by a model that scripted all 50 files in a
+# single bash call inside the 30s window. The current design demands 200
+# individual git commits — tool-execution wall time (~40-60s of git alone)
+# exceeds the watchdog no matter how fast the model reasons.
 log "Creating timeout test issue..."
 timeout_ts=$(date +%s)
 timeout_title="Test: timeout enforcement (e2e-timeout-$timeout_ts)"
 timeout_issue_url=$(gh issue create --repo "$TEST_REPO" \
     --title "$timeout_title" \
-    --body "Analyze and refactor every file in this repository to follow best practices, add comprehensive type hints, docstrings, and unit tests. This task is intentionally scope-heavy.")
+    --body "Create exactly 200 Python files named day_001.py through day_200.py in a new \`days/\` directory at the repo root. Each file must contain exactly one function with this exact signature and body (substitute NN with the day number, NOT zero-padded in the body):
+
+\`\`\`python
+def visits_on_day_NN() -> int:
+    return NN
+\`\`\`
+
+IMPORTANT: each file must be added in its own individual git commit — 200 separate commits, one file per commit, with the commit message 'Add day NNN'. Do not batch files into shared commits. This is a concrete, fully-specified task that cannot be scope-reduced — produce all 200 files in 200 commits or report failure.")
 timeout_issue_num="${timeout_issue_url##*/}"
 cleanup_issues+=("$timeout_issue_num")
 
-log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout_minutes = 1..."
-post_issue_comment "$timeout_issue_num" "$TEST_REPO" $'/agent-resolve\ntimeout_minutes = 1'
+log "  Issue #$timeout_issue_num. Posting /agent-resolve with timeout_minutes = 0.5..."
+post_issue_comment "$timeout_issue_num" "$TEST_REPO" $'/agent-resolve\ntimeout_minutes = 0.5'
 
 TIMEOUT_RUN_ID=""
 TIMEOUT_RESULT=""
@@ -811,29 +844,38 @@ for pos in "${!issue_nums[@]}"; do
 
     if [[ "$conclusion" == "success" ]]; then
         if [[ "$test_type" == "design" ]]; then
-            # Design mode: check if a comment was posted (not a PR)
+            # Design mode produces nothing but a "Design analysis" comment;
+            # missing that comment = the agent did not deliver its only output.
             comment_count=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
                 --jq '[.[] | select(.body | contains("Design analysis"))] | length' \
                 2>/dev/null || echo "0")
             if [[ "$comment_count" -gt 0 ]]; then
                 status="PASS (comment posted)"
+                ((pass++)) || true
             else
-                status="PASS (no comment found)"
+                status="FAIL (no design comment posted — workflow ran but did not deliver)"
+                ((fail++)) || true
             fi
-            ((pass++)) || true
         elif [[ "$test_type" == "workshop" ]]; then
-            # Workshop mode: check if a Stage 2 summary comment was posted (no PR)
+            # Workshop produces nothing but Stage 1 / Stage 2 comments; missing
+            # them means the workshop pipeline did not deliver. (This is exactly
+            # the failure mode that PR #623 fixed — workshop crashed on import,
+            # produced only an "exited unexpectedly" fallback, and the prior
+            # lax assertion still counted it as a PASS.)
             comment_count=$(gh api "repos/$TEST_REPO/issues/$issue_num/comments" \
                 --jq '[.[] | select(.body | contains("Workshop Stage 2 complete") or contains("Workshop Stage 1"))] | length' \
                 2>/dev/null || echo "0")
             if [[ "$comment_count" -gt 0 ]]; then
                 status="PASS (workshop comments posted)"
+                ((pass++)) || true
             else
-                status="PASS (no workshop comment found)"
+                status="FAIL (no Workshop Stage 1/2 comment — workshop did not run to completion)"
+                ((fail++)) || true
             fi
-            ((pass++)) || true
         elif [[ "$test_type" == "build" ]]; then
-            # Build mode: Stage 1 creates a PR; Stage 2 posts council code reviews on the PR.
+            # Build mode: Stage 1 creates a PR; Stage 2 posts council code reviews.
+            # The council review IS the value-add of build mode over plain resolve,
+            # so missing it = the test didn't exercise what makes build distinct.
             pr_num=$(gh pr list --repo "$TEST_REPO" \
                 --search "head:rdb-fix-issue-$issue_num" \
                 --json number --jq '.[0].number // empty' 2>/dev/null || echo "")
@@ -849,15 +891,18 @@ for pos in "${!issue_nums[@]}"; do
                     2>/dev/null || echo "0")
                 if [[ "$council_comment_count" -gt 0 ]]; then
                     status="PASS (PR #$pr_num + council review posted)"
+                    ((pass++)) || true
                 else
-                    status="PASS (PR #$pr_num created, no council comment found)"
+                    status="FAIL (PR #$pr_num created but no council review — Stage 2 did not run)"
+                    ((fail++)) || true
                 fi
-                ((pass++)) || true
             fi
         elif [[ "$test_type" == "delegate" ]]; then
             # Delegate mode: Stages 1-3 post design/council/revision comments on issue;
             # Stage 4 creates a PR; Stage 5 posts council code review on the PR;
-            # final summary comment is posted on the issue.
+            # final "Delegate pipeline complete" comment on the issue marks completion.
+            # The delegate test must exercise BOTH the council review AND the final
+            # marker — missing either means the pipeline didn't fully run.
             pr_num=$(gh pr list --repo "$TEST_REPO" \
                 --search "head:rdb-fix-issue-$issue_num" \
                 --json number --jq '.[0].number // empty' 2>/dev/null || echo "")
@@ -885,12 +930,17 @@ for pos in "${!issue_nums[@]}"; do
                     2>/dev/null || echo "0")
                 if [[ "$pipeline_comment" -gt 0 ]] && [[ "$council_comment_count" -gt 0 ]]; then
                     status="PASS (PR #$pr_num + council review + pipeline complete)"
+                    ((pass++)) || true
                 elif [[ "$pipeline_comment" -gt 0 ]]; then
-                    status="PASS (PR #$pr_num created, pipeline complete, no council comment found)"
+                    status="FAIL (PR #$pr_num + pipeline complete but no council review — Stage 5 missing)"
+                    ((fail++)) || true
+                elif [[ "$council_comment_count" -gt 0 ]]; then
+                    status="FAIL (PR #$pr_num + council review but no pipeline-complete marker — pipeline did not finish)"
+                    ((fail++)) || true
                 else
-                    status="PASS (PR #$pr_num created, no pipeline complete comment found)"
+                    status="FAIL (PR #$pr_num created but neither council review nor pipeline-complete marker)"
+                    ((fail++)) || true
                 fi
-                ((pass++)) || true
             fi
         else
             # Resolve mode: check if a PR was created
@@ -970,10 +1020,11 @@ else
         reconcile_comment=$(gh api "repos/$TEST_REPO/issues/$RECONCILE_PR_NUM/comments"             --jq '[.[] | select(.body | test("Reconcile complete|reconcile complete"; "i"))] | length'             2>/dev/null || echo "0")
         if [[ "$reconcile_comment" -gt 0 ]]; then
             log "  reconcile-test: PASS (force-pushed new SHA ${new_sha:0:7}, Reconcile complete comment found)  $reconcile_url"
+            ((RECONCILE_PASS++)) || true
         else
-            log "  reconcile-test: PASS (force-pushed new SHA ${new_sha:0:7}, no Reconcile complete comment found)  $reconcile_url"
+            log "  reconcile-test: FAIL (force-pushed but no 'Reconcile complete' comment — workflow may have crashed after the push)  $reconcile_url"
+            ((RECONCILE_FAIL++)) || true
         fi
-        ((RECONCILE_PASS++)) || true
     fi
 fi
 
@@ -1025,10 +1076,11 @@ elif [[ "$RF_REVIEW_RESULT" == "success" ]]; then
         2>/dev/null || echo "0")
     if [[ "$comment_count" -gt 0 ]]; then
         rf_review_status="PASS (review comment posted)"
+        ((RF_PASS++)) || true
     else
-        rf_review_status="PASS (no review comment found)"
+        rf_review_status="FAIL (review workflow succeeded but no 'Code review by' comment posted)"
+        ((RF_FAIL++)) || true
     fi
-    ((RF_PASS++)) || true
 else
     rf_review_status="FAIL ($RF_REVIEW_RESULT)"
     ((RF_FAIL++)) || true
@@ -1049,9 +1101,12 @@ if [[ -z "$TIMEOUT_RESULT" ]]; then
     timeout_status="TIMEOUT (e2e wait exceeded)"
     ((TIMEOUT_PHASE_FAIL++)) || true
 elif [[ "$TIMEOUT_RESULT" == "success" || "$TIMEOUT_RESULT" == "failure" ]]; then
-    # Both success and failure are valid: the watchdog kills OpenHands (making the
-    # resolver step exit non-zero → job conclusion = failure), but cleanup steps
-    # still run due to if:always(). Accept either conclusion as "run completed".
+    # Both success and failure are valid: the watchdog kills the agent (making
+    # the resolver step exit non-zero → job conclusion = failure), but cleanup
+    # steps still run due to if:always(). The PASS criterion is that the
+    # watchdog actually fired and posted a "could not fully resolve" /
+    # "exited unexpectedly" comment — without that, we have no evidence the
+    # timeout path was exercised at all.
     comment_count=$(gh api "repos/$TEST_REPO/issues/$timeout_issue_num/comments" \
         --jq '[.[] | select(.body | contains("could not fully resolve") or contains("exited unexpectedly"))] | length' \
         2>/dev/null || echo "0")
@@ -1059,8 +1114,8 @@ elif [[ "$TIMEOUT_RESULT" == "success" || "$TIMEOUT_RESULT" == "failure" ]]; the
         timeout_status="PASS (watchdog fired + comment posted) [${TIMEOUT_RESULT}]"
         ((TIMEOUT_PHASE_PASS++)) || true
     else
-        timeout_status="PASS (run completed, no comment found) [${TIMEOUT_RESULT}]"
-        ((TIMEOUT_PHASE_PASS++)) || true
+        timeout_status="FAIL (run completed but no watchdog comment — timeout path did not fire) [${TIMEOUT_RESULT}]"
+        ((TIMEOUT_PHASE_FAIL++)) || true
     fi
 else
     timeout_status="FAIL ($TIMEOUT_RESULT)"
@@ -1144,23 +1199,33 @@ if [[ -z "$WRAPUP_RESULT" ]]; then
     wrapup_status="TIMEOUT (e2e wait exceeded)"
     ((WRAPUP_PHASE_FAIL++)) || true
 elif [[ "$WRAPUP_RESULT" == "success" ]]; then
-    # Check for either a PR (agent finished) or a failure comment (wrapup triggered)
+    # The wrapup test runs with max_iterations=4 on a task the agent cannot
+    # plausibly finish, so we expect *either*:
+    #   - A PR (agent finished anyway), OR
+    #   - A "could not fully resolve" comment (wrapup nudge triggered the
+    #     graceful failure path).
+    # Neither = the run completed without exercising the wrapup path → FAIL.
+    #
+    # NB: branch name was historically `openhands-fix-issue-$N` (stale since
+    # v0.6.0 OpenHands removal); current branches are `rdb-fix-issue-$N-$alias`.
+    # That stale name meant the pr_count branch never fired and the test was
+    # silently coasting on the "no clear output" PASS for months.
     pr_count=$(gh pr list --repo "$TEST_REPO" \
-        --search "head:openhands-fix-issue-$wrapup_issue_num" \
+        --search "head:rdb-fix-issue-$wrapup_issue_num" \
         --json number --jq 'length' 2>/dev/null || echo "0")
     comment_count=$(gh api "repos/$TEST_REPO/issues/$wrapup_issue_num/comments" \
         --jq '[.[] | select(.body | contains("could not fully resolve"))] | length' \
         2>/dev/null || echo "0")
     if [[ "$pr_count" -gt 0 ]]; then
         wrapup_status="PASS (agent finished — PR created)"
-        cleanup_branches+=("openhands-fix-issue-$wrapup_issue_num")
+        cleanup_branches+=("rdb-fix-issue-$wrapup_issue_num")
         ((WRAPUP_PHASE_PASS++)) || true
     elif [[ "$comment_count" -gt 0 ]]; then
         wrapup_status="PASS (wrapup triggered — failure comment posted)"
         ((WRAPUP_PHASE_PASS++)) || true
     else
-        wrapup_status="PASS (run completed, no clear output found)"
-        ((WRAPUP_PHASE_PASS++)) || true
+        wrapup_status="FAIL (run completed but neither PR nor wrapup comment — wrapup path did not fire)"
+        ((WRAPUP_PHASE_FAIL++)) || true
     fi
 else
     wrapup_status="FAIL ($WRAPUP_RESULT)"
@@ -1306,6 +1371,7 @@ log "  Total cost: \$$total_cost ($cost_count tests with cost data)"
 log ""
 log "========================================="
 log "  Smoke tests:    Pass: $pass  Fail: $fail  Timeout: $timeout_count"
+log "  Reconcile test: Pass: $RECONCILE_PASS  Fail: $RECONCILE_FAIL"
 log "  Review+Feedback:  Pass: $RF_PASS  Fail: $RF_FAIL"
 log "  Timeout test:   Pass: $TIMEOUT_PHASE_PASS  Fail: $TIMEOUT_PHASE_FAIL"
 log "  Wrapup test:    Pass: $WRAPUP_PHASE_PASS  Fail: $WRAPUP_PHASE_FAIL"
@@ -1313,7 +1379,7 @@ log "  Total cost:     \$$total_cost"
 log "========================================="
 
 # Exit with failure if any test didn't pass
-total_fail=$((fail + timeout_count + RF_FAIL + TIMEOUT_PHASE_FAIL + WRAPUP_PHASE_FAIL))
+total_fail=$((fail + timeout_count + RECONCILE_FAIL + RF_FAIL + TIMEOUT_PHASE_FAIL + WRAPUP_PHASE_FAIL))
 if [[ $total_fail -gt 0 ]]; then
     exit 1
 fi

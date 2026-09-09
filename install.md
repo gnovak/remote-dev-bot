@@ -447,32 +447,31 @@ gh secret list --repo {owner}/{repo}
 # Should list the secrets you just set (values are hidden)
 ```
 
-### Step 2.3.1: Create remote-dev-bot.yaml
+### Step 2.3.1: (Optional) Create remote-dev-bot.yaml
 
-**What this does:** Sets `default_model` in your repo's config file to match
-the API key you just added. Without this step, the bot defaults to a Claude
-model — which will fail on the first run if you added a Gemini or OpenAI key
-instead.
+A per-repo `remote-dev-bot.yaml` is **optional** — the bot runs on sensible
+defaults without one. In particular, you do NOT need to configure a model to
+match your API key: the default is `default_model: auto`, which picks the
+small model of whichever provider key you added in Step 2.3. If you added
+more than one key, the priority order is `ANTHROPIC_API_KEY` (claude-small) >
+`OPENAI_API_KEY` (gpt-small) > `GEMINI_API_KEY` (gemini-small).
 
-Start from the provided template, which includes commented examples of the most
-useful options:
+Create the file only if you want to override a default — pin a specific
+model, change iteration limits, add per-mode extra instructions, and so on.
+Put a `remote-dev-bot.yaml` in the repo root containing just the keys you
+want to change; everything else inherits from the base config. For the live
+reference of every available option and its default, see the rdb repo's own
+config:
 
-```bash
-# From within the target repo:
-curl -o remote-dev-bot.yaml \
-  https://raw.githubusercontent.com/gnovak/remote-dev-bot/main/remote-dev-bot.yaml.template
+https://github.com/gnovak/remote-dev-bot/blob/main/remote-dev-bot.yaml
+
+For example, to pin a model instead of auto-detection:
+
+```yaml
+default_model: gemini-small
 ```
 
-Then open the file and uncomment the `default_model` line that matches your API
-key:
-
-- `default_model: claude-small` — if you added `ANTHROPIC_API_KEY`
-- `default_model: gemini-small` — if you added `GEMINI_API_KEY`
-- `default_model: gpt-small` — if you added `OPENAI_API_KEY`
-
-The rest of the file shows available options with explanations — all commented
-out, so there are no active overrides until you choose to enable them. Browse
-it to see what's configurable; you can always come back and tweak later.
+You can always come back and add this later.
 
 ### Step 2.4: Bot Identity & CI Triggering
 
@@ -989,7 +988,7 @@ different repo owners. See the shim template in `.github/workflows/agent.yml`.
 ### Agent runs but hits max iterations
 
 - The agent completed the work but couldn't gracefully stop
-- Try a more capable model: `/agent-resolve-claude-large`
+- Try a more capable model: `/agent-resolve-claude-medium`
 - Or increase `max_iterations` in `remote-dev-bot.yaml`
 
 ### Agent runs but skips PR creation

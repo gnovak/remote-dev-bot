@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib.context import (
     classify_provider_error,
     compact_messages,
+    completion_with_retries,
     estimate_tokens,
 )
 from lib.tools import (
@@ -236,7 +237,8 @@ def write_status(success, explanation):
         json.dump({"success": success, "explanation": explanation}, f)
 
 
-def write_usage(input_tokens, output_tokens, cost, iterations):
+def write_usage(input_tokens, output_tokens, cost, iterations,
+                cache_read_tokens=0, cache_creation_tokens=0):
     """Write token usage to /tmp/llm_usage.json."""
     with open("/tmp/llm_usage.json", "w") as f:
         json.dump(
@@ -245,6 +247,8 @@ def write_usage(input_tokens, output_tokens, cost, iterations):
                 "output_tokens": output_tokens,
                 "cost": cost,
                 "iterations": iterations,
+                "cache_read_tokens": cache_read_tokens,
+                "cache_creation_tokens": cache_creation_tokens,
             },
             f,
         )
@@ -293,8 +297,12 @@ The rebase will stop at conflicts. For each conflicting file:
 
 1. **Read the file** — use read_file to see the full conflict markers.
 2. **Understand both sides** — before writing anything, explain:
-   - What the BASE side (above `=======`) was trying to do
-   - What the INCOMING side (below `=======`, from origin/{BASE_BRANCH}) was trying to do
+   - What the BASE side (above `=======`, from origin/{BASE_BRANCH}) was trying to do
+   - What the INCOMING side (below `=======`, the PR branch's commit being replayed) was trying to do
+
+   Note the sides during a rebase are the reverse of a merge: HEAD (above
+   `=======`) is origin/{BASE_BRANCH}, and the "incoming" side below is
+   this PR's own commit being replayed on top.
 3. **Write the resolved file** — produce a merged result that preserves both intentions.
    Use `bash` to write the resolved content: `cat > path << 'RESOLVED_EOF' ... RESOLVED_EOF`
 4. **Stage the file**: `git add <file>`
@@ -461,6 +469,8 @@ def main():
     total_input_tokens = 0
     total_output_tokens = 0
     total_cost = 0.0
+    total_cache_read_tokens = 0
+    total_cache_creation_tokens = 0
     finish_args = None
     last_iteration = 0
     no_tool_call_count = 0
@@ -486,7 +496,11 @@ def main():
             last_iteration = iteration
             print(f"=== Iteration {iteration + 1}/{MAX_ITERATIONS} ===")
 
-            if WRAPUP_ENABLED and WRAPUP_ITERATION > 0 and iteration + 1 == WRAPUP_ITERATION:
+            # Re-injected EVERY iteration past the threshold — deliberate
+            # escalation, same mechanics as resolve.py and design_loop: one
+            # nudge gets buried under subsequent tool results, repeated
+            # pressure keeps the agent wrapping up.
+            if WRAPUP_ENABLED and WRAPUP_ITERATION > 0 and iteration + 1 >= WRAPUP_ITERATION:
                 remaining = MAX_ITERATIONS - WRAPUP_ITERATION
                 print(f"  [Wrapup] Injecting wrapup message at iteration {iteration + 1}")
                 messages.append({
@@ -538,7 +552,11 @@ def main():
                         _last_blk["cache_control"] = _cc
 
             try:
-                response = completion(
+                # Wrapped like the sibling loops (resolve, design_loop) so a
+                # transient provider error (e.g. Anthropic 529 "overloaded")
+                # is retried instead of killing the run.
+                response = completion_with_retries(
+                    completion,
                     model=LLM_MODEL,
                     messages=messages,
                     tools=TOOLS,
@@ -587,6 +605,14 @@ def main():
             if usage:
                 total_input_tokens += getattr(usage, "prompt_tokens", 0)
                 total_output_tokens += getattr(usage, "completion_tokens", 0)
+                prompt_details = getattr(usage, "prompt_tokens_details", None)
+                if prompt_details:
+                    total_cache_read_tokens += getattr(prompt_details, "cached_tokens", 0) or 0
+                    # litellm's PromptTokensDetailsWrapper field is
+                    # cache_creation_tokens (NOT cache_creation_input_tokens);
+                    # the old name always read as 0, so cache-write tokens
+                    # never appeared and cache-savings figures overstated.
+                    total_cache_creation_tokens += getattr(prompt_details, "cache_creation_tokens", 0) or 0
             cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
             if cost:
                 total_cost += cost
@@ -599,6 +625,14 @@ def main():
                 no_tool_call_count += 1
                 if no_tool_call_count >= 3:
                     print("No tool calls for 3 consecutive iterations — breaking")
+                    # Write a status: the post-loop code only writes one when
+                    # the loop ends naturally, so without this the run reports
+                    # no failure explanation at all.
+                    write_status(
+                        False,
+                        f"Agent stalled at iteration {iteration + 1}: 3 consecutive "
+                        "responses returned no tool call.",
+                    )
                     break
                 print(f"No tool calls (attempt {no_tool_call_count}/3) — injecting recovery message")
                 messages.append({
@@ -752,14 +786,19 @@ def main():
             loop_completed_naturally = True
 
     finally:
-        write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1)
+        write_usage(total_input_tokens, total_output_tokens, total_cost, last_iteration + 1,
+                    cache_read_tokens=total_cache_read_tokens,
+                    cache_creation_tokens=total_cache_creation_tokens)
 
     # Post status log to the PR if collected.
     if status_log and PR_NUMBER and GITHUB_REPO:
         try:
+            from lib.formatting import build_cache_savings_summary
             log_text = "\n\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
             model_header = f"\U0001f916 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n" if ALIAS else ""
-            comment_body = f"## Agent Status Log\n\n{model_header}{log_text}"
+            cache_summary = build_cache_savings_summary(model=LLM_MODEL)
+            header_block = cache_summary + "\n\n" if cache_summary else ""
+            comment_body = f"## Agent Status Log\n\n{model_header}{header_block}{log_text}"
             comment_file = "/tmp/rdb_status_log_comment.txt"
             with open(comment_file, "w") as f:
                 f.write(comment_body)

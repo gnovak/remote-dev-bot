@@ -78,6 +78,8 @@ jobs:
       compaction_factor: ${{ steps.parse.outputs.compaction_factor }}
       design_context_keep_tool_results: ${{ steps.parse.outputs.design_context_keep_tool_results }}
       review_context_keep_tool_results: ${{ steps.parse.outputs.review_context_keep_tool_results }}
+      design_max_iterations: ${{ steps.parse.outputs.design_max_iterations }}
+      review_max_iterations: ${{ steps.parse.outputs.review_max_iterations }}
       workshop_max_iterations: ${{ steps.parse.outputs.workshop_max_iterations }}
       delegate_max_iterations: ${{ steps.parse.outputs.delegate_max_iterations }}
       delegate_max_design_iterations: ${{ steps.parse.outputs.delegate_max_design_iterations }}
@@ -128,6 +130,11 @@ jobs:
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
           COMMAND_PREFIX: ${{ inputs.command_prefix || 'agent' }}
+          # Provider keys are only probed for presence: `default_model: auto`
+          # resolves to the first provider with a configured key.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           # Pass full comment body to config.py via COMMENT_BODY env var.
           # COMMAND_PREFIX tells config.py which slash command prefix to expect.
@@ -311,7 +318,7 @@ jobs:
           fi
 
           TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
-          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          TIMEOUT_SECONDS=$(awk -v m="$TIMEOUT_MINUTES" 'BEGIN{print int(m*60)}')
           echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
           echo $(date +%s) > /tmp/start_time
           # Run agent loop under timeout. On expiry: SIGTERM first, then SIGKILL after 60s.
@@ -863,7 +870,7 @@ jobs:
           fi
 
           TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
-          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          TIMEOUT_SECONDS=$(awk -v m="$TIMEOUT_MINUTES" 'BEGIN{print int(m*60)}')
           echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
           echo $(date +%s) > /tmp/start_time
           # Run agent loop under timeout. On expiry: SIGTERM first, then SIGKILL after 60s.
@@ -1095,6 +1102,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           GITHUB_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -1170,7 +1178,7 @@ jobs:
 
           council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
           # Mode-level extra_instructions for council reviewers (each model adds its own model-level)
-          council_extra_instructions = "${{ needs.parse.outputs.extra_instructions }}"
+          council_extra_instructions = os.environ.get("EXTRA_INSTRUCTIONS", "")
 
           def post_pr_comment(body):
               proc = subprocess.run(
@@ -1570,6 +1578,10 @@ jobs:
 
       - name: Run review loop
         id: review
+        # Single-reviewer agentic path. Skipped when `council = true` is set on
+        # the trigger comment — in that case the next step runs parallel
+        # non-agentic reviewers via run_build_council instead.
+        if: needs.parse.outputs.council_models == '' || needs.parse.outputs.council_models == '[]'
         env:
           LLM_API_KEY: ${{ steps.apikey.outputs.key }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -1580,6 +1592,9 @@ jobs:
           REVIEW_CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.review_context_keep_tool_results }}
           REVIEW_WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           REVIEW_WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
+          LLM_MODEL: ${{ needs.parse.outputs.model }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
+          MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
         run: |
           date +%s > /tmp/start_time
           python3 << 'PYEOF'
@@ -1592,12 +1607,12 @@ jobs:
           from context import trim_tool_results
           from litellm import completion
 
-          model = "${{ needs.parse.outputs.model }}"
+          model = os.environ["LLM_MODEL"]
 
-          # Load extra_instructions from parse outputs (mode-level + model-level combined)
+          # Load extra_instructions from the step env (mode-level + model-level combined)
           extra_instructions = "\n\n".join(p for p in [
-              "${{ needs.parse.outputs.extra_instructions }}",
-              "${{ needs.parse.outputs.model_extra_instructions }}",
+              os.environ.get("EXTRA_INSTRUCTIONS", ""),
+              os.environ.get("MODEL_EXTRA_INSTRUCTIONS", ""),
           ] if p)
 
           # Get max iterations from config (default 10)
@@ -1951,7 +1966,114 @@ jobs:
                   f.write(review)
           PYEOF
 
+      - name: Run council code review
+        # Parallel multi-reviewer path, activated when `council = true` was set
+        # on the trigger comment. Calls the same run_build_council that build
+        # Stage 2 and delegate Stage 5 use; only the user-visible labels differ
+        # (banner_label / attribution_label / completion_label).
+        if: needs.parse.outputs.council_models != '' && needs.parse.outputs.council_models != '[]'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          date +%s > /tmp/start_time
+          PR_NUMBER=${{ github.event.issue.number || github.event.pull_request.number }}
+          python3 << PYEOF
+          import json
+          import os
+          import subprocess
+          import sys
+
+          sys.path.insert(0, ".remote-dev-bot/lib")
+          from workshop import run_build_council
+
+          github_repo = os.environ["GITHUB_REPO"]
+          github_token = os.environ["GH_TOKEN"]
+          pr_number = "${PR_NUMBER}"
+
+          # PR title / body / diff were already written to /tmp by the
+          # "Fetch PR context" step earlier in this job.
+          def _read(path, default=""):
+              try:
+                  with open(path) as f:
+                      return f.read().strip()
+              except FileNotFoundError:
+                  return default
+
+          pr_title = _read("/tmp/pr_title.txt")
+          pr_body = _read("/tmp/pr_body.txt")
+          pr_diff = _read("/tmp/pr_diff.txt")
+
+          # Cap diff like the single-reviewer path does, to avoid token blowups.
+          if len(pr_diff) > 100000:
+              pr_diff = pr_diff[:100000] + "\n\n... (diff truncated, showing first 100000 characters)"
+
+          # Pull the linked issue if the "Fetch PR context" step found one.
+          linked = _read("/tmp/linked_issue.txt")
+          issue_title = ""
+          issue_body_text = linked  # the file contains "Issue #N: title\n\nbody"
+          if linked:
+              first_line, _, rest = linked.partition("\n")
+              if first_line.startswith("Issue #"):
+                  # "Issue #N: <title>"
+                  parts = first_line.split(":", 1)
+                  if len(parts) == 2:
+                      issue_title = parts[1].strip()
+                      issue_body_text = rest.strip()
+
+          council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
+          council_extra_instructions = os.environ.get("EXTRA_INSTRUCTIONS", "")
+
+          env = {**os.environ, "GH_TOKEN": github_token}
+
+          def post_pr_comment(body):
+              proc = subprocess.run(
+                  ["gh", "pr", "comment", pr_number,
+                   "--repo", github_repo,
+                   "--body", body],
+                  env=env,
+                  capture_output=True, text=True,
+              )
+              if proc.returncode != 0:
+                  print(f"Warning: failed to post PR comment: {proc.stderr}", file=sys.stderr)
+
+          build_result = run_build_council(
+              council_models=council_models,
+              issue_title=issue_title,
+              issue_body=issue_body_text,
+              pr_title=pr_title,
+              pr_body=pr_body,
+              pr_diff=pr_diff,
+              extra_instructions=council_extra_instructions,
+              post_comment_fn=post_pr_comment,
+              banner_label="Council Code Review",
+              attribution_label="/agent-review council=true",
+              completion_label="Council code review complete — awaiting human review",
+          )
+
+          # Write usage data so the "Post cost comment (fallback)" step
+          # below picks it up (the council path does not embed cost in any
+          # single per-reviewer comment).
+          usage = {
+              "input_tokens": build_result["total_input_tokens"],
+              "output_tokens": build_result["total_output_tokens"],
+              "cost": build_result["total_cost"],
+              "iterations": 0,
+          }
+          with open("/tmp/llm_usage.json", "w") as f:
+              json.dump(usage, f)
+          PYEOF
+
       - name: Post review comment
+        # Single-reviewer agentic path only — paired with "Run review loop"
+        # above. Council mode posts each reviewer's comment directly from
+        # within run_build_council, so this step doesn't apply.
+        if: needs.parse.outputs.council_models == '' || needs.parse.outputs.council_models == '[]'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
         run: |
@@ -2195,6 +2317,11 @@ jobs:
           EXTRA_FILES: ${{ needs.parse.outputs.extra_files }}
           EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
+          CONTEXT_KEEP_TOOL_RESULTS: ${{ needs.parse.outputs.context_keep_tool_results }}
+          BASH_OUTPUT_LIMIT: ${{ needs.parse.outputs.bash_output_limit }}
+          MAX_CONTEXT_TOKENS: ${{ needs.parse.outputs.max_context_tokens }}
+          COMPACTION_COVERAGE: ${{ needs.parse.outputs.compaction_coverage }}
+          COMPACTION_FACTOR: ${{ needs.parse.outputs.compaction_factor }}
         run: |
           PR_NUMBER="${{ github.event.issue.number || github.event.pull_request.number }}"
 
@@ -2204,7 +2331,7 @@ jobs:
           echo "Reconciling PR #${PR_NUMBER} onto base branch: ${BASE_BRANCH}"
 
           TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
-          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          TIMEOUT_SECONDS=$(awk -v m="$TIMEOUT_MINUTES" 'BEGIN{print int(m*60)}')
           echo "Reconcile timeout: ${TIMEOUT_MINUTES} minutes"
           echo $(date +%s) > /tmp/start_time
 
@@ -2570,6 +2697,9 @@ jobs:
           DESIGN_WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
           DESIGN_WRAPUP_ITERATION: ${{ needs.parse.outputs.graceful_wrapup_iteration }}
           DISTILL_ENABLED: ${{ needs.parse.outputs.distill_enabled }}
+          LLM_MODEL: ${{ needs.parse.outputs.model }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
+          MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
         run: |
           date +%s > /tmp/start_time
           python3 << 'PYEOF'
@@ -2583,12 +2713,12 @@ jobs:
           from context import trim_tool_results
           from litellm import completion
 
-          model = "${{ needs.parse.outputs.model }}"
+          model = os.environ["LLM_MODEL"]
 
-          # Load extra_instructions from parse outputs (mode-level + model-level combined)
+          # Load extra_instructions from the step env (mode-level + model-level combined)
           extra_instructions = "\n\n".join(p for p in [
-              "${{ needs.parse.outputs.extra_instructions }}",
-              "${{ needs.parse.outputs.model_extra_instructions }}",
+              os.environ.get("EXTRA_INSTRUCTIONS", ""),
+              os.environ.get("MODEL_EXTRA_INSTRUCTIONS", ""),
           ] if p)
 
           # Get max iterations from config (default 10)
@@ -2640,7 +2770,8 @@ jobs:
                       + (f"\n\n## Discussion so far:\n{comments}" if comments else "")
                   )
                   print("Running context distillation pre-step (design)...")
-                  distilled, distill_input_tokens, distill_output_tokens, distill_cost, structural_extract = maybe_distill(
+                  (distilled, distill_input_tokens, distill_output_tokens,
+                   distill_cost, structural_extract, _codebase_total) = maybe_distill(
                       repo_context, issue_context_text, model
                   )
                   if distilled != repo_context:
@@ -3228,6 +3359,9 @@ jobs:
           GITHUB_REPO: ${{ github.repository }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           MAX_ITERATIONS: ${{ needs.parse.outputs.workshop_max_iterations }}
+          ALIAS: ${{ needs.parse.outputs.alias }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
+          MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
           EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
@@ -3246,7 +3380,7 @@ jobs:
           from workshop import run_workshop
 
           model = os.environ["LLM_MODEL"]
-          alias = "${{ needs.parse.outputs.alias }}"
+          alias = os.environ["ALIAS"]
           issue_number = os.environ["ISSUE_NUMBER"]
           github_repo = os.environ["GITHUB_REPO"]
           github_token = os.environ["GITHUB_TOKEN"]
@@ -3259,10 +3393,10 @@ jobs:
           # Council models from parse job (JSON list of {alias, id} dicts)
           council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
 
-          # Load extra_instructions from parse outputs
+          # Load extra_instructions from the step env
           # council_extra_instructions is mode-level only (each reviewer adds their own model-level)
-          council_extra_instructions = "${{ needs.parse.outputs.extra_instructions }}"
-          model_extra_instructions = "${{ needs.parse.outputs.model_extra_instructions }}"
+          council_extra_instructions = os.environ.get("EXTRA_INSTRUCTIONS", "")
+          model_extra_instructions = os.environ.get("MODEL_EXTRA_INSTRUCTIONS", "")
           # Stage 1 design agent gets mode + model combined
           extra_instructions = "\n\n".join(p for p in [council_extra_instructions, model_extra_instructions] if p)
 
@@ -3527,6 +3661,9 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           MAX_ITERATIONS: ${{ needs.parse.outputs.delegate_max_iterations }}
           MAX_DESIGN_ITERATIONS: ${{ needs.parse.outputs.delegate_max_design_iterations }}
+          ALIAS: ${{ needs.parse.outputs.alias }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
+          MODEL_EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.model_extra_instructions }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
           EXTRA_FILES: ${{ env.RDB_EXTRA_FILES }}
           WRAPUP_ENABLED: ${{ needs.parse.outputs.graceful_wrapup_enabled }}
@@ -3546,7 +3683,7 @@ jobs:
           from workshop import run_delegate
 
           model = os.environ["LLM_MODEL"]
-          alias = "${{ needs.parse.outputs.alias }}"
+          alias = os.environ["ALIAS"]
           issue_number = os.environ["ISSUE_NUMBER"]
           github_repo = os.environ["GITHUB_REPO"]
           github_token = os.environ["GITHUB_TOKEN"]
@@ -3562,8 +3699,8 @@ jobs:
 
           council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
 
-          council_extra_instructions = "${{ needs.parse.outputs.extra_instructions }}"
-          model_extra_instructions = "${{ needs.parse.outputs.model_extra_instructions }}"
+          council_extra_instructions = os.environ.get("EXTRA_INSTRUCTIONS", "")
+          model_extra_instructions = os.environ.get("MODEL_EXTRA_INSTRUCTIONS", "")
           extra_instructions = "\n\n".join(p for p in [council_extra_instructions, model_extra_instructions] if p)
 
           # Generate repository file listing
@@ -3618,6 +3755,8 @@ jobs:
               post_comment_fn=post_comment,
               design_rounds=design_rounds,
               distill_enabled=distill_enabled,
+              github_repo=github_repo,
+              issue_number=issue_number,
           )
 
           # Save usage data
@@ -3742,7 +3881,7 @@ jobs:
           Running resolve agent with \`${{ needs.parse.outputs.alias }}\` (\`${{ needs.parse.outputs.model }}\`) to implement the revised design..."
 
           TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
-          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          TIMEOUT_SECONDS=$(awk -v m="$TIMEOUT_MINUTES" 'BEGIN{print int(m*60)}')
           echo "Resolver timeout: ${TIMEOUT_MINUTES} minutes"
 
           timeout --kill-after=60 "$TIMEOUT_SECONDS" \
@@ -3814,6 +3953,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RDB_PAT_TOKEN || github.token }}
           COUNCIL_MODELS: ${{ needs.parse.outputs.council_models }}
+          EXTRA_INSTRUCTIONS: ${{ needs.parse.outputs.extra_instructions }}
           GITHUB_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -3891,7 +4031,7 @@ jobs:
           issue_body_text = issue_data.get("body", "") or ""
 
           council_models = json.loads(os.environ.get("COUNCIL_MODELS", "[]") or "[]")
-          council_extra_instructions = "${{ needs.parse.outputs.extra_instructions }}"
+          council_extra_instructions = os.environ.get("EXTRA_INSTRUCTIONS", "")
 
           def post_pr_comment(body):
               proc = subprocess.run(
@@ -3913,6 +4053,9 @@ jobs:
               pr_diff=pr_diff,
               extra_instructions=council_extra_instructions,
               post_comment_fn=post_pr_comment,
+              banner_label="Delegate Stage 5/6 — Council Code Review",
+              attribution_label="/agent-delegate Stage 5",
+              completion_label="Delegate Stage 5/6 complete — awaiting human review",
           )
 
           # Merge council usage into aggregate
@@ -4064,7 +4207,7 @@ jobs:
           Running resolve agent with \`${{ needs.parse.outputs.alias }}\` (\`${{ needs.parse.outputs.model }}\`) to apply council code review feedback to this PR..."
 
           TIMEOUT_MINUTES="${{ needs.parse.outputs.timeout_minutes }}"
-          TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
+          TIMEOUT_SECONDS=$(awk -v m="$TIMEOUT_MINUTES" 'BEGIN{print int(m*60)}')
           echo "Stage 6 resolver timeout: ${TIMEOUT_MINUTES} minutes"
 
           timeout --kill-after=60 "$TIMEOUT_SECONDS" \
@@ -4155,7 +4298,7 @@ jobs:
               echo "3. ✅ Design revision"
               echo "4. ✅ Implementation (resolve)"
               echo "5. ✅ Council code review"
-              echo "6. ✅ Code revision plan"
+              echo "6. ✅ Agentic code revision"
               echo ""
               echo "See the [workflow run logs]($RUN_URL) for full details."
             } > /tmp/delegate_result_comment.md

@@ -31,6 +31,7 @@ from lib.context import (
     compact_messages,
     completion_with_retries,
     estimate_tokens,
+    trim_tool_results,
 )
 from lib.tools import (
     validate_path,
@@ -481,19 +482,160 @@ You operate in a fully automated pipeline — there is no human available to ans
 - Make forward progress on every turn, or call finish() to stop.
 """
 
+SCOPE = """
+## Scope: what counts as "done"
+
+Read the issue body AND the issue/PR comments before forming your plan. The
+comments are not optional context — they often contain decisive scope
+information that supersedes the body.
+
+**If the comments contain a substantial design analysis, implementation
+spec, or output from a prior `/agent-design`, `/agent-workshop`, or
+`/agent-delegate` run, treat the most recent revised version as the
+binding contract for your work — NOT the issue body alone.** The issue
+body may be a sketch; the spec is the contract. Implement every component
+the spec lists (every file, route, table, function, test). Do NOT call
+`finish(success=True)` while spec items remain unaddressed unless you have
+a concrete reason a specific item should be omitted, which you post as a
+comment on the issue first.
+
+If no design or spec comments exist, the issue body is the contract.
+
+When a detailed spec is present, expect a multi-file, multi-component
+implementation that takes far more iterations than a typical bug fix.
+Scope-reducing to "the foundational piece" and shipping a tiny PR is the
+wrong outcome — it leaves the issue effectively unresolved and the user
+has to re-invoke the agent on the same scope.
+"""
+
+METHODOLOGY_FAITHFULNESS = """
+## Methodology faithfulness
+
+When the spec names a specific algorithm or methodology (e.g., "BT+EB
+ranking", "BH-FDR correction", "softmax with temperature 1.0"), OR
+references an existing implementation in the codebase as authoritative
+("uses the logic in `notebooks/leaderboard.py`", "matches the behavior
+of the prior `compute_score()` function"), your implementation must
+reproduce that algorithm's results to within rounding error. **The
+spec's methodology is the contract.**
+
+Do NOT silently substitute a "simpler but sensible" stand-in just
+because the canonical algorithm is harder to port. If the reference
+implementation is a Python notebook or other awkward source, port it
+faithfully anyway — reading and porting a 1500-line notebook is
+exactly the kind of multi-iteration work the budget exists for.
+
+If you genuinely cannot port the canonical implementation in this run
+(missing dependencies, library version mismatch, etc.):
+1. Call `finish(success=False)` — do NOT call `success=True` on a
+   simplified stand-in. Adding a TODO and shipping is the failure mode
+   the human reviewer will catch downstream by clicking around. Be
+   honest now.
+2. In your `finish()` explanation, name the canonical reference (file
+   + function), what you tried, why you couldn't, and what's missing.
+3. Do **not** ship the placeholder anyway. A user-facing application
+   that displays simplified statistics as if they were the canonical
+   analysis is worse than no application — it erodes trust in numbers
+   that look correct but aren't.
+
+If the spec is internally inconsistent — e.g., says "use functions from
+`bridge_analysis.X`" but those functions actually live in `notebooks/Y`
+— grep/find the real location and use that. A spec citation that
+doesn't resolve to real code is a spec error, not an invitation to
+write a placeholder.
+"""
+
+DEVIATION_REPORTING = """
+## Reporting deviations from the spec
+
+If your implementation is in any way less than what the spec called for
+— skipped components, simplified algorithms, placeholder stand-ins, an
+acceptance test you couldn't write, a route that returns mock data —
+state this **explicitly in the PR body's first paragraph**. Format:
+
+> **Known gaps from the spec:**
+> - `web/queries/leaderboard.py::compute_rankings` ships an EB-shrunk
+>   average instead of the spec's BT+EB. See TODO at line 47.
+> - No acceptance test asserting BT+EB output match. See TODO at
+>   `tests/test_leaderboard.py:89`.
+
+Buried code comments don't count. A reviewer reading the PR body should
+see the gaps without having to grep for TODOs. If there are no gaps,
+omit the section entirely — silence in the PR body means "the spec was
+implemented faithfully."
+"""
+
 WORKFLOW = """
 ## Problem-Solving Workflow
 
 Follow this process:
 
-1. **Read only what you need**: Read only the files you are about to change — no speculative exploration. If the issue already identifies the relevant files, go straight to them. You should be writing or modifying a file by iteration 5 for a simple fix, or iteration 10 for a complex multi-file change. If you are still only reading files past iteration 10, stop and start implementing.
-2. **Plan**: Identify the minimal set of changes needed.
-3. **Implement**: Make focused, minimal changes. Modify existing files rather than creating new ones. Never create multiple versions of the same file (e.g., fix.py alongside fix_v2.py).
-4. **Verify**: Run tests if they exist. Check that the code is syntactically valid. If tests require dependencies that aren't installed, install them first (`pip install pytest`, `npm install`, etc.) — you are allowed to install packages freely.
-5. **Commit and push**: Stage all changes, commit with a clear message, and push.
-6. **Finish**: Call finish() with a meaningful pr_title and pr_body.
+1. **Read what you need to do the work correctly.** For a bug fix, that's usually a small set of files identified by the issue. For an algorithm extraction or porting task, that's the entire reference implementation — yes, read the 1500-line notebook end-to-end if that's where the canonical logic lives. Don't speculatively read unrelated code, but don't under-read either: a partial read that misses key context leads to wrong implementations, which costs more than the read would have.
+2. **Plan**: Identify the changes needed to satisfy the spec.
+3. **Implement**: For a bug fix, prefer modifying existing files over creating new ones — and never create multiple versions of the same file (e.g., fix.py alongside fix_v2.py). For a spec-driven implementation, create exactly the new files the spec lists (no more, no fewer). For every new function, class, or module you add, **write a test for it** — see "Tests" below.
+4. **Verify**: Run all tests, including the ones you just wrote. Check that the code is syntactically valid. If tests require dependencies that aren't installed, install them first (`pip install pytest`, `npm install`, etc.) — you are allowed to install packages freely.
+5. **End-to-end check**: Before committing, verify the change actually works end-to-end, not just "unit tests pass." See "End-to-end verification" below — this is mandatory, not optional.
+6. **Commit and push**: Stage all changes, commit with a clear message, and push.
+7. **Finish**: Call finish() with a meaningful pr_title and pr_body. If you simplified, skipped, or stubbed anything, follow the "Reporting deviations from the spec" rule above.
 
 Never add documentation files (CHANGES.md, NOTES.md, etc.) to version control unless the issue specifically asks for them.
+"""
+
+TESTS = """
+## Tests
+
+For every new function, class, or module you add, write a test. Unit
+tests for pure logic; integration tests for code that touches the
+filesystem, database, or network. Existing tests passing doesn't tell
+you your new code is correct — it only tells you that you didn't
+break what was already there. A PR body that says "All N existing
+tests pass" without naming a single new test is a red flag.
+
+**Load-bearing methodology claims need named tests.** If the spec says
+"uses BT+EB ranking", there must be a test like
+`test_leaderboard_matches_bt_eb_reference_within_tolerance` that
+asserts the output matches a reference implementation. "BT+EB" without
+such a test is just a label — and a label that the next refactor can
+silently violate.
+
+If the spec lists tests to add, add exactly those (no more, no fewer
+than what the spec calls out as required, plus whatever your judgment
+says the new code needs).
+"""
+
+END_TO_END = """
+## End-to-end verification
+
+Unit tests verify that the units behave as their authors thought they
+would. They do NOT verify that the system actually works — the seams
+between units, the configuration wiring, the runtime environment.
+
+Before calling `finish(success=True)`, run the thing:
+
+- **Web app / server tasks**: start the server (`uvicorn app:app`,
+  `flask run`, `python manage.py runserver`, etc.) and `curl` at
+  least one route. Expect a 200 from a healthy route or a deliberate
+  redirect from `/login`. A 500 or `ImportError` on startup means
+  ship-blocking bugs.
+- **CLI tasks**: invoke the command on a realistic input. If the spec
+  says "the new `web-add-user` command adds an email to the
+  pass-list," actually run it and verify the email lands in the
+  database.
+- **Library / function tasks**: write and run a smoke test that
+  exercises the new function with realistic inputs and asserts the
+  output is sensible.
+- **Data pipeline tasks**: run the pipeline end-to-end on a small
+  fixture and verify the expected rows land in the expected tables.
+
+This catches the bug class that unit tests miss by design: wrong-
+signature library calls (e.g., `TemplateResponse(name, context)`
+when the current Starlette signature is `(request, name, context)`),
+missing config wiring, functions that are never invoked by any
+caller, schema/code mismatches, etc.
+
+If end-to-end fails and you can't fix it within the iteration budget,
+that's a `finish(success=False)` — not a "ship it and hope unit tests
+were enough."
 """
 
 EFFICIENCY = """
@@ -501,10 +643,14 @@ EFFICIENCY = """
 
 Each tool call costs real money. Be targeted and deliberate:
 
-- **Don't over-explore.** If the issue + comments already identify the files and changes needed, go straight to implementing. Read only the files you are actually about to change.
 - **Read files once.** Don't re-read a file you already read unless it changed.
-- **Call finish() as soon as the task is done.** Don't do unnecessary verification passes after a successful test run.
-- **Exploration should be proportional to task complexity.** A one-line fix does not warrant reading 10 files.
+- **Call finish() as soon as the task is genuinely done.** Done means the
+  spec is satisfied end-to-end, including the methodology faithfulness
+  rule above — not "the code compiles and unit tests pass."
+- **Don't pad iterations for their own sake**, but don't shortcut either.
+  Iteration count should be whatever the task requires. A simple bug fix
+  is ~5-10 iterations. An algorithm extraction or multi-component
+  implementation is as many as it takes — that's what the budget is for.
 """
 
 
@@ -518,10 +664,20 @@ def _budget_paragraph(max_iterations):
     return (
         f"\n## Iteration Budget\n\n"
         f"You have a budget of **{max_iterations} iterations** for this task. "
-        f"Aim to finish in significantly fewer if the task allows — the budget is a "
-        f"ceiling, not a target. Don't pad with extra exploration just because the "
-        f"budget is there. A simple fix should take 5-10 iterations; a complex "
-        f"multi-file change rarely needs more than 20-30.\n"
+        f"The budget is a ceiling, not a target — don't pad iterations for "
+        f"their own sake, but don't shortcut either. Iteration count should "
+        f"be whatever the task actually requires:\n\n"
+        f"- Simple bug fix (one file, focused change): a handful of iterations.\n"
+        f"- Multi-file refactor: as many as it takes to do it right.\n"
+        f"- Algorithm extraction / porting from a reference implementation "
+        f"(e.g., notebook → module): expect to spend a meaningful fraction "
+        f"of the budget reading the reference end-to-end. That's the work.\n"
+        f"- Implementing a detailed multi-component spec (see ## Scope above): "
+        f"plan to use a large fraction of the budget. Every file, route, "
+        f"table, and test the spec lists has to be created — and faithfully, "
+        f"not as a stub. Stopping at 20-30 iterations to ship a 'foundational' "
+        f"subset, or shipping a simplified stand-in for a load-bearing "
+        f"algorithm (see ## Methodology faithfulness), is the wrong call.\n"
     )
 
 STUCK_RECOVERY = """
@@ -644,9 +800,14 @@ is complete before committing — call `finish()` now.
 
     prompt = (
         AGENT_ROLE
+        + SCOPE
+        + METHODOLOGY_FAITHFULNESS
+        + DEVIATION_REPORTING
         + _budget_paragraph(MAX_ITERATIONS)
         + f"\n# Repository Context\n\n{repo_context}\n\n"
         + WORKFLOW
+        + TESTS
+        + END_TO_END
         + READING_THE_TASK
         + f"# Task\n\n{issue_context_str}\n"
         + GIT_INSTRUCTIONS
@@ -839,83 +1000,6 @@ TOOLS = [
 
 
 
-def trim_tool_results(messages, keep_n):
-    """Remove oldest tool call/result pairs, keeping the last keep_n pairs.
-
-    Preserves all assistant text content and the system prompt.
-    Operates on OpenAI-format messages where tool calls are in assistant messages
-    (role="assistant", tool_calls=[...]) and results are role="tool" messages.
-    """
-    if keep_n <= 0:
-        return messages
-
-    # Collect indices of all "tool" role messages (each is one tool result)
-    tool_result_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
-
-    if len(tool_result_indices) <= keep_n:
-        return messages
-
-    # Number of pairs to drop
-    n_drop = len(tool_result_indices) - keep_n
-    indices_to_drop = set(tool_result_indices[:n_drop])
-
-    # Also find the assistant messages that contain tool_calls for the pairs we're dropping.
-    # Each assistant message with tool_calls is immediately followed by one or more tool messages.
-    # We scan backwards from each tool_result index to find its owning assistant message.
-    dropped_tool_call_ids = set()
-    for idx in indices_to_drop:
-        dropped_tool_call_ids.add(messages[idx].get("tool_call_id"))
-
-    new_messages = []
-    for i, msg in enumerate(messages):
-        role = msg.get("role")
-        if i in indices_to_drop:
-            # Drop this tool result message entirely
-            continue
-        if role == "assistant" and msg.get("tool_calls"):
-            # Filter out tool_calls whose IDs are being dropped
-            remaining_calls = [
-                tc for tc in msg["tool_calls"]
-                if tc.get("id") not in dropped_tool_call_ids
-            ]
-            dropped_calls = [
-                tc for tc in msg["tool_calls"]
-                if tc.get("id") in dropped_tool_call_ids
-            ]
-            if dropped_calls:
-                # Build a new assistant message: preserve content, replace dropped calls
-                # with a placeholder text note. Keep remaining tool calls if any.
-                n_omitted = len(dropped_calls)
-                placeholder_text = f"[{n_omitted} tool call(s) omitted for context]"
-                new_msg = dict(msg)
-                if remaining_calls:
-                    new_msg["tool_calls"] = remaining_calls
-                    # Prepend placeholder to content (content may be str or list or None)
-                    if new_msg.get("content") is None:
-                        new_msg["content"] = placeholder_text
-                    elif isinstance(new_msg["content"], str):
-                        new_msg["content"] = placeholder_text + "\n" + new_msg["content"]
-                    else:
-                        # list of content blocks — prepend text block
-                        new_msg["content"] = [{"type": "text", "text": placeholder_text}] + list(new_msg["content"])
-                else:
-                    # No remaining calls — strip tool_calls entirely, keep only content
-                    new_msg = {"role": "assistant"}
-                    if msg.get("content") is None or msg.get("content") == []:
-                        new_msg["content"] = placeholder_text
-                    elif isinstance(msg["content"], str):
-                        new_msg["content"] = (msg["content"] + "\n" + placeholder_text).strip()
-                    else:
-                        new_msg["content"] = list(msg["content"]) + [{"type": "text", "text": placeholder_text}]
-                new_messages.append(new_msg)
-            else:
-                new_messages.append(msg)
-        else:
-            new_messages.append(msg)
-
-    return new_messages
-
-
 def execute_tool(tool_name, arguments):
     """Dispatch a tool call and return the result string."""
     if tool_name == "bash":
@@ -935,21 +1019,32 @@ def execute_tool(tool_name, arguments):
 
 def create_pr(branch, pr_title, pr_body, draft=False):
     """Create a pull request and return its URL."""
-    draft_flag = "--draft" if draft else ""
     body_file = "/tmp/rdb_pr_body.txt"
     model_header = f"🤖 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n"
     with open(body_file, "w") as f:
         f.write(model_header + (pr_body or ""))
-    # Quote the title carefully
-    safe_title = pr_title.replace('"', '\\"')
-    cmd = (
-        f'gh pr create --repo {GITHUB_REPO} '
-        f'--base {TARGET_BRANCH} --head {branch} '
-        f'--title "{safe_title}" '
-        f'--body-file {body_file} '
-        f'{draft_flag}'
-    ).strip()
-    output = run(cmd, timeout=60)
+    # Build the command as an argv list (no shell) so the title — which is
+    # LLM-authored from untrusted issue text — cannot inject shell syntax.
+    # A quoted-string interpolation into `shell=True` would leave backticks
+    # and $(...) live even after escaping double quotes.
+    argv = [
+        "gh", "pr", "create",
+        "--repo", GITHUB_REPO,
+        "--base", TARGET_BRANCH,
+        "--head", branch,
+        "--title", pr_title,
+        "--body-file", body_file,
+    ]
+    if draft:
+        argv.append("--draft")
+    result = subprocess.run(
+        argv, capture_output=True, text=True, timeout=60,
+    )
+    output = (result.stdout or "") + (result.stderr or "")
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Command failed (exit {result.returncode}):\n{' '.join(argv)}\n{output}"
+        )
     match = re.search(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+", output)
     if match:
         return match.group(0)
@@ -1035,47 +1130,6 @@ def build_cost_table():
     lines = TABLE_HEADER[:]
     lines += [f"| {k} | {v} |" for k, v in rows]
     return "\n".join(lines)
-def build_cache_savings_summary():
-    """Build a cache savings summary string for the agent status log.
-
-    Returns a non-empty string if cache was used, or '' otherwise.
-    """
-    import math
-
-    try:
-        with open("/tmp/llm_usage.json") as f:
-            d = json.load(f)
-    except Exception:
-        return ""
-
-    input_toks = int(d.get("input_tokens", 0))
-    output_toks = int(d.get("output_tokens", 0))
-    cost_val = float(d.get("cost") or 0)
-    cache_read_toks = int(d.get("cache_read_tokens", 0))
-    cache_creation_toks = int(d.get("cache_creation_tokens", 0))
-
-    if cache_read_toks == 0 and cache_creation_toks == 0:
-        return ""
-
-    from lib.formatting import _fmt_tok
-
-    parts = []
-    if cache_read_toks > 0:
-        parts.append(f"{_fmt_tok(cache_read_toks)} tokens read from cache")
-    if cache_creation_toks > 0:
-        parts.append(f"{_fmt_tok(cache_creation_toks)} tokens written to cache")
-
-    # Estimate savings
-    uncached_input = input_toks - cache_read_toks
-    if cache_read_toks > 0 and uncached_input > 0 and (input_toks + output_toks) > 0:
-        avg_input_price = cost_val / (input_toks + output_toks)
-        cache_savings = cache_read_toks * avg_input_price * 0.9
-        rounded_savings = math.ceil(cache_savings * 100) / 100
-        parts.append(f"~${rounded_savings:.2f} saved")
-
-    return f"**Cache:** {', '.join(parts)}"
-
-
 def write_status(success, explanation, no_op=False):
     """Write resolve status to /tmp/resolve_status.json."""
     payload = {"success": success, "explanation": explanation}
@@ -1186,17 +1240,20 @@ def main():
     distill_input_tokens = 0
     distill_output_tokens = 0
     distill_cost = 0.0
-    pre_distill_tokens = 0  # token estimate before distillation
-    post_distill_tokens = 0  # token estimate after distillation (0 = distillation did not run)
-    distillation_summary = ""
+    # pre_distill_tokens reflects what distillation actually saw (the codebase
+    # total), so the savings metric in the status log compares against the
+    # hypothetical "drag full codebase along every iteration" baseline. It is
+    # NOT the size of EXTRA_FILES (which was a bug — those are added context
+    # docs, not the thing distillation is replacing).
+    pre_distill_tokens = 0
+    post_distill_tokens = 0  # 0 = distillation did not run
     if DISTILL_ENABLED:
         try:
             from lib.distill import maybe_distill
-            pre_distill_tokens = len(repo_context) // 4
             print("Running context distillation pre-step...")
-            # Estimate tokens before distillation so we can measure savings
-            undistilled_tokens = estimate_tokens([{"content": repo_context}])
-            distilled, distill_input_tokens, distill_output_tokens, distill_cost, structural_extract = maybe_distill(
+            (distilled, distill_input_tokens, distill_output_tokens,
+             distill_cost, structural_extract,
+             codebase_total_tokens) = maybe_distill(
                 repo_context, issue_context, LLM_MODEL
             )
             if distilled != repo_context:
@@ -1207,9 +1264,10 @@ def main():
                 if structural_extract:
                     agent_context += f"\n\n## Codebase Index\n\n{structural_extract}"
                 distillation_ran = True
+                pre_distill_tokens = codebase_total_tokens
                 post_distill_tokens = len(distilled) // 4
                 print(f"Distillation complete: {distill_input_tokens} input tokens, {distill_output_tokens} output tokens, ${distill_cost:.4f}")
-                print(f"  [Distillation] {pre_distill_tokens} tokens -> {post_distill_tokens} tokens")
+                print(f"  [Distillation] codebase {pre_distill_tokens:,} tokens -> distilled context {post_distill_tokens:,} tokens")
             else:
                 agent_context = repo_context
                 print("Distillation skipped or returned original context")
@@ -1260,9 +1318,8 @@ def main():
     last_iteration = 0
     no_tool_call_count = 0
     status_log = []  # list of (iteration, status_text) tuples
-    # Add distillation summary as first status log entry if distillation ran
-    if distillation_summary:
-        status_log.append((0, f"**Distillation summary:** {distillation_summary}"))
+    # Distillation summary (with savings) is added to the status log header
+    # at posting time — see the call to build_distillation_summary below.
     transient_error_counter = [0]  # mutable counter for transient API errors
 
     rate_limit_retries = 0
@@ -1282,6 +1339,9 @@ def main():
             # Inject live wrapup message when the threshold is reached.
             # This is more effective than the system prompt hint alone — the agent
             # is deep in context by this point and needs a fresh, visible reminder.
+            # Re-injected EVERY iteration past the threshold — deliberate
+            # escalation (one nudge gets buried under subsequent tool results);
+            # reconcile.py and design_loop use the same mechanics.
             if WRAPUP_ENABLED and WRAPUP_ITERATION > 0 and iteration + 1 >= WRAPUP_ITERATION:
                 remaining = MAX_ITERATIONS - (iteration + 1)
                 is_final = (iteration + 1 == MAX_ITERATIONS)
@@ -1398,28 +1458,13 @@ def main():
                     max_tokens=16384,
                     transient_error_counter=transient_error_counter,
                 )
-            except litellm.exceptions.BadRequestError as exc:
-                err_msg = str(exc)
-                if "prefill" in err_msg.lower():
-                    roles = [m.get("role") for m in messages[-5:]]
-                    print(f"Prefill error at iteration {iteration + 1}. "
-                          f"Last 5 roles: {roles}. Error: {exc}")
-                write_status(False, f"Bad request at iteration {iteration + 1}: {exc}")
-                break
-            except litellm.exceptions.RateLimitError as exc:
-                rate_limit_retries += 1
-                if rate_limit_retries <= MAX_RATE_LIMIT_RETRIES:
-                    wait_secs = 60 * rate_limit_retries
-                    print(f"Rate limit hit (retry {rate_limit_retries}/{MAX_RATE_LIMIT_RETRIES}), "
-                          f"waiting {wait_secs}s: {exc}")
-                    time.sleep(wait_secs)
-                    continue
-                else:
-                    print(f"Rate limit: exhausted {MAX_RATE_LIMIT_RETRIES} retries, treating as failure.")
-                    write_status(False, f"Rate limit error after {MAX_RATE_LIMIT_RETRIES} retries "
-                                 f"at iteration {iteration + 1}: {exc}")
-                    break
             except litellm.exceptions.ContextWindowExceededError as exc:
+                # MUST precede the BadRequestError handler below:
+                # ContextWindowExceededError subclasses BadRequestError, so if
+                # BadRequest is caught first this block becomes dead code and a
+                # context overflow dies with a generic "Bad request" instead of
+                # the emergency trim + graceful wrap-up.
+                #
                 # Input prompt is too long for the model's context window.
                 # Attempt emergency recovery: force-trim and inject a wrap-up message,
                 # then continue so the agent can commit/push before we exit.
@@ -1443,6 +1488,27 @@ def main():
                     ),
                 })
                 continue
+            except litellm.exceptions.BadRequestError as exc:
+                err_msg = str(exc)
+                if "prefill" in err_msg.lower():
+                    roles = [m.get("role") for m in messages[-5:]]
+                    print(f"Prefill error at iteration {iteration + 1}. "
+                          f"Last 5 roles: {roles}. Error: {exc}")
+                write_status(False, f"Bad request at iteration {iteration + 1}: {exc}")
+                break
+            except litellm.exceptions.RateLimitError as exc:
+                rate_limit_retries += 1
+                if rate_limit_retries <= MAX_RATE_LIMIT_RETRIES:
+                    wait_secs = 60 * rate_limit_retries
+                    print(f"Rate limit hit (retry {rate_limit_retries}/{MAX_RATE_LIMIT_RETRIES}), "
+                          f"waiting {wait_secs}s: {exc}")
+                    time.sleep(wait_secs)
+                    continue
+                else:
+                    print(f"Rate limit: exhausted {MAX_RATE_LIMIT_RETRIES} retries, treating as failure.")
+                    write_status(False, f"Rate limit error after {MAX_RATE_LIMIT_RETRIES} retries "
+                                 f"at iteration {iteration + 1}: {exc}")
+                    break
             except litellm.exceptions.APIConnectionError as exc:
                 err_msg = str(exc)
                 if _is_context_overflow_error(exc):
@@ -1507,7 +1573,11 @@ def main():
                 if prompt_details:
                     iter_cache_read_toks = getattr(prompt_details, "cached_tokens", 0) or 0
                     total_cache_read_tokens += iter_cache_read_toks
-                    total_cache_creation_tokens += getattr(prompt_details, "cache_creation_input_tokens", 0) or 0
+                    # litellm's PromptTokensDetailsWrapper field is
+                    # cache_creation_tokens (NOT cache_creation_input_tokens);
+                    # the old name always read as 0, so cache-write tokens
+                    # never appeared and cache-savings figures overstated.
+                    total_cache_creation_tokens += getattr(prompt_details, "cache_creation_tokens", 0) or 0
             cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
             if cost:
                 total_cost += cost
@@ -1534,6 +1604,14 @@ def main():
                 no_tool_call_count += 1
                 if no_tool_call_count >= 3:
                     print("No tool calls for 3 consecutive iterations — breaking")
+                    # Write a status: the post-loop code only writes one when
+                    # the loop ends naturally, so without this the run reports
+                    # no failure explanation at all.
+                    write_status(
+                        False,
+                        f"Agent stalled at iteration {iteration + 1}: 3 consecutive "
+                        "responses returned no tool call (empty choices).",
+                    )
                     break
                 print(f"No tool calls (attempt {no_tool_call_count}/3) — injecting recovery message")
                 messages.append(
@@ -1557,6 +1635,14 @@ def main():
                 no_tool_call_count += 1
                 if no_tool_call_count >= 3:
                     print("No tool calls for 3 consecutive iterations — breaking")
+                    # Write a status: the post-loop code only writes one when
+                    # the loop ends naturally, so without this the run reports
+                    # no failure explanation at all.
+                    write_status(
+                        False,
+                        f"Agent stalled at iteration {iteration + 1}: 3 consecutive "
+                        "responses returned no tool call.",
+                    )
                     break
                 print(f"No tool calls (attempt {no_tool_call_count}/3) — injecting recovery message")
                 messages.append(
@@ -1829,51 +1915,19 @@ def main():
                     cache_read_tokens=total_cache_read_tokens,
                     cache_creation_tokens=total_cache_creation_tokens)
 
-    def _fmt_tokens(n):
-        """Format a token count as a human-readable string: '1.3 M', '73 K', '850'."""
-        if n >= 1_000_000:
-            return f"{n / 1_000_000:.1f} M"
-        if n >= 1_000:
-            return f"{n / 1_000:.0f} K"
-        return str(n)
-
-    # Compute distillation savings summary (if distillation ran)
-    distillation_summary = ""
-    if distillation_ran and pre_distill_tokens > 0 and post_distill_tokens > 0:
-        try:
-            actual_iterations = last_iteration + 1
-            tokens_saved_per_iter = pre_distill_tokens - post_distill_tokens
-            total_tokens_saved = tokens_saved_per_iter * actual_iterations
-            # Estimate cost saved using LiteLLM model pricing
-            cost_saved_str = ""
-            try:
-                model_info = litellm.get_model_info(LLM_MODEL)
-                input_cost_per_token = model_info.get("input_cost_per_token", 0)
-                if input_cost_per_token:
-                    cost_saved = total_tokens_saved * input_cost_per_token
-                    cost_saved_str = f", ~${cost_saved:.2f} saved"
-            except Exception:
-                pass  # cost estimate is optional; skip if unavailable
-            distillation_summary = (
-                f"**Distillation:** {_fmt_tokens(pre_distill_tokens)} tokens → {_fmt_tokens(post_distill_tokens)} tokens "
-                f"({_fmt_tokens(tokens_saved_per_iter)} saved/iter × {actual_iterations} iters = "
-                f"{_fmt_tokens(total_tokens_saved)} tokens saved{cost_saved_str})"
-            )
-            print(f"Distillation savings: {distillation_summary}")
-        except Exception as e:
-            print(f"Could not compute distillation savings: {e}")
-
     # Post rolling status log as issue comment (if any entries were collected)
     if status_log and ISSUE_NUMBER and GITHUB_REPO:
         try:
+            from lib.formatting import build_cache_savings_summary, build_distillation_summary
             log_text = "\n\n".join(f"**Iter {i}:** {text}" for i, text in status_log)
             model_header = f"\U0001f916 **Model:** `{ALIAS}` (`{LLM_MODEL}`)\n\n" if ALIAS else ""
-            cache_summary = build_cache_savings_summary()
-            header_parts = []
-            if distillation_summary:
-                header_parts.append(distillation_summary)
-            if cache_summary:
-                header_parts.append(cache_summary)
+            distillation_summary = ""
+            if distillation_ran:
+                distillation_summary = build_distillation_summary(
+                    pre_distill_tokens, post_distill_tokens, last_iteration + 1, LLM_MODEL
+                )
+            cache_summary = build_cache_savings_summary(model=LLM_MODEL)
+            header_parts = [p for p in (distillation_summary, cache_summary) if p]
             header_block = "\n\n".join(header_parts)
             if header_block:
                 comment_body = f"## Agent Status Log\n\n{model_header}{header_block}\n\n{log_text}"

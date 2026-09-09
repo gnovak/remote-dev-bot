@@ -24,10 +24,12 @@ Three separate GitHub identities are used so each role is cleanly separated:
 | Account                 | Purpose                                                                                                                                                        | Credentials stored as                                                                                 |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `gnovak`                | Repo owner. Used for normal development and testing.                                                                                                           | `RDB_PAT_TOKEN` (on both repos), or GitHub App (`RDB_APP_ID` variable + `RDB_APP_PRIVATE_KEY` secret) |
-| `remote-dev-bot`        | Dedicated bot account. Collaborator on `remote-dev-bot-test`. Posts authorized test comments that trigger agent runs without attributing activity to `gnovak`. | `RDB_TESTER_PAT_TOKEN` (on remote-dev-bot)                                                            |
+| `remote-dev-bot`        | Dedicated bot account. Collaborator on `remote-dev-bot-test`. Posts authorized test comments that trigger agent runs without attributing activity to `gnovak`. | `RDB_TESTER_PAT_TOKEN` (on remote-dev-bot) — but see the temporary-state note below                   |
 | `remote-dev-bot-tester` | Simulates an unauthorized external user. NOT a collaborator on any repo.                                                                                       | `RDB_TESTER_UNAUTHORIZED_PAT_TOKEN` (on remote-dev-bot)                                               |
 
 ### remote-dev-bot (bot account) details
+
+The intended setup:
 
 - Classic PAT with `public_repo` + `workflow` scopes, no expiration
 - **`public_repo`** — create issues, post comments, open PRs in public repos
@@ -39,6 +41,17 @@ Three separate GitHub identities are used so each role is cleanly separated:
 - Must be a collaborator on `remote-dev-bot-test` so the security gate allows
   its trigger comments
 - Keeps test activity out of `gnovak`'s GitHub contribution stats
+
+> **Temporary state (as of 2026-08):** the `remote-dev-bot` account is
+> flagged by GitHub (its profile 404s on the public API), so tokens cannot
+> be minted on it until that's resolved with GitHub support. Until then,
+> `RDB_TESTER_PAT_TOKEN` holds a PAT minted on `gnovak` instead (verifiable:
+> e2e test issues on rdb-test are authored by `gnovak`). If minting the
+> stopgap on `gnovak`, prefer a fine-grained PAT scoped to
+> `gnovak/remote-dev-bot-test` only (Contents/Issues/Pull requests
+> read-write + Actions read-write) with a long expiry — the 2026-08-05
+> full-suite failure was a 90-day stopgap token quietly expiring. Once the
+> bot account is restored, move the token back per the intended setup above.
 
 ### remote-dev-bot-tester details
 
@@ -81,7 +94,7 @@ Secrets stored on `gnovak/remote-dev-bot`:
 | `OPENAI_API_KEY` | OpenAI API key (for GPT models) |
 | `GEMINI_API_KEY` | Google AI API key (for Gemini models) |
 | `RDB_APP_PRIVATE_KEY` | GitHub App private key, for bot identity on comments/PRs. |
-| `RDB_TESTER_PAT_TOKEN` | PAT for `remote-dev-bot` account (collaborator on rdb-test). Used by e2e tests to post authorized trigger comments. |
+| `RDB_TESTER_PAT_TOKEN` | PAT for `remote-dev-bot` account (collaborator on rdb-test; temporarily a `gnovak` PAT — see account details). Used by e2e tests to post authorized trigger comments. |
 | `RDB_TESTER_UNAUTHORIZED_PAT_TOKEN` | PAT for `remote-dev-bot-tester` (not a collaborator). Used by security e2e tests to verify unauthorized users are blocked. |
 
 Variables stored on `gnovak/remote-dev-bot`:

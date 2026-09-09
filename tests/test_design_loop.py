@@ -174,6 +174,41 @@ class TestSystemPrompt:
         assert "gh" in DEFAULT_SYSTEM_PROMPT
 
 
+class TestDesignPromptFidelityRules:
+    """The design loop produces what eventually becomes the binding contract
+    for implementation (when delegate is used, or when the user manually
+    runs design → resolve). If the design hallucinates file locations or
+    treats methodology as a label rather than a contract, those errors
+    propagate. Source: bridge-analysis PR #438 postmortem."""
+
+    def test_requires_verifying_file_references(self):
+        """Design must grep / read_file before citing 'the existing
+        implementation lives in module X' — and must write the correct
+        path even if the issue author said something different."""
+        text = DEFAULT_SYSTEM_PROMPT.lower()
+        assert "verify" in text
+        # Concrete: the failure mode where the wrong citation results
+        # in a stub downstream.
+        assert "stub" in text
+
+    def test_warns_about_notebook_vs_module_failure_mode(self):
+        """The 'don't pretend it's in a clean module if it's in a notebook'
+        case is the exact bridge-analysis #438 failure. Naming it concretely
+        makes the rule easier to pattern-match against."""
+        text = DEFAULT_SYSTEM_PROMPT.lower()
+        assert "notebook" in text
+
+    def test_requires_acceptance_tests_for_methodology_claims(self):
+        text = DEFAULT_SYSTEM_PROMPT
+        assert "Acceptance test" in text or "acceptance test" in text.lower()
+        # Should provide a concrete example so the agent has a template.
+        assert "test_" in text and "tolerance" in text.lower()
+
+    def test_warns_methodology_without_test_is_just_a_label(self):
+        text = DEFAULT_SYSTEM_PROMPT.lower()
+        assert "label" in text and "contract" in text
+
+
 # ---------------------------------------------------------------------------
 # Distillation flag
 # ---------------------------------------------------------------------------

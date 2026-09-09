@@ -1,5 +1,40 @@
 # Changelog
 
+## v1.0.0 (Aug 2026)
+
+- **Model aliases: three capability tiers.** Aliases are now
+  `{provider}-{small,medium,large}`: small = best value-for-money
+  agentic-coding workhorse, medium = the provider's flagship, large =
+  frontier-above-flagship where one exists. Tiers are anchored on
+  capability at agentic coding (price is an expectation, not the
+  admission test) and the ladder is monotone — going up a tier never
+  gets a weaker model. The model landscape doesn't always map cleanly
+  onto three tiers, so aliases sometimes point at the same model rather
+  than leaving a tier undefined or pointing it at something that can't
+  do the job. Repointing rules and reasoning are documented in
+  `remote-dev-bot.yaml` and the README.
+- **Zero-config default model** (`default_model: auto`): fresh installs
+  run without configuring a model at all — the default resolves from
+  whichever provider API key secret is present. Explicit configuration
+  always wins.
+- **Lots of small fixes and cleanup in preparation for 1.0**: security
+  hardening, reliability and prompt-cache correctness, cost-accounting
+  accuracy, doc repair, and test-infrastructure work, driven by a
+  comprehensive pre-1.0 review (`comprehensive-review/2026-06-11/`).
+
+### Known issues
+
+- The gemini tiers point at `gemini-2.5-flash` rather than the newer
+  3.x models: litellm's Gemini 3.x thought-signature handling
+  intermittently breaks multi-turn tool calling (#654).
+- The gpt tiers point at `gpt-5.3-codex` rather than GPT-5.6 Sol: the
+  5.6 frontier family requires OpenAI's Responses API for tool use,
+  which rdb's litellm path doesn't use yet (#653).
+
+**Breaking changes:** model aliases renamed as part of the tier system
+(pre-1.0, no compatibility guarantee was in effect). Post-1.0, alias
+names are stable and the alias set is append-only.
+
 ## v0.9.0 — Delegate mode, reconcile mode, council reviews (May 2026)
 
 - **Delegate mode** (`/agent-delegate`): Full design-to-implementation pipeline

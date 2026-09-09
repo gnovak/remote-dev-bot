@@ -20,6 +20,18 @@ from lib.config import (
 )
 
 
+@pytest.fixture(autouse=True)
+def pin_provider_keys(monkeypatch):
+    """Pin provider API-key env state so `default_model: auto` resolution is
+    deterministic regardless of the developer's real environment: only
+    ANTHROPIC_API_KEY is set, so auto resolves to claude-small (the
+    historical default). Tests exercising other combinations override this.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+
 # --- deep_merge ---
 
 
@@ -2441,3 +2453,110 @@ class TestResolveConfig:
         )
         assert result["target_branch_explicit"] is True
         assert result["target_branch"] == "my-feature"
+
+
+# --- default_model: auto (API-key detection) ---
+
+
+class TestAutoDefaultModel:
+    """`default_model: auto` resolves from whichever provider API keys are set.
+
+    Priority: ANTHROPIC_API_KEY > OPENAI_API_KEY > GEMINI_API_KEY (anthropic
+    first preserves the historical claude-small default for multi-key
+    installs). Anything explicitly configured bypasses detection.
+    """
+
+    KEYS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY")
+
+    @pytest.fixture
+    def auto_config_dir(self, tmp_path, monkeypatch):
+        """Base config with default_model: auto; all provider keys unset."""
+        for key in self.KEYS:
+            monkeypatch.delenv(key, raising=False)
+        base = tmp_path / "base"
+        base.mkdir()
+        config = {
+            "default_model": "auto",
+            "models": {
+                "claude-small": {"id": "anthropic/claude-sonnet-4-6"},
+                "gpt-small": {"id": "openai/gpt-5.1-codex-mini"},
+                "gemini-small": {"id": "gemini/gemini-2.5-flash"},
+            },
+            "modes": {"resolve": {"max_iterations": 50}},
+            "agent": {"max_iterations": 50},
+        }
+        (base / "remote-dev-bot.yaml").write_text(yaml.dump(config))
+        return tmp_path, str(base / "remote-dev-bot.yaml")
+
+    def test_anthropic_key_only(self, auto_config_dir, monkeypatch):
+        _, base_path = auto_config_dir
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+        assert result["alias"] == "claude-small"
+        assert result["model"] == "anthropic/claude-sonnet-4-6"
+
+    def test_openai_key_only(self, auto_config_dir, monkeypatch):
+        _, base_path = auto_config_dir
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+        assert result["alias"] == "gpt-small"
+
+    def test_gemini_key_only(self, auto_config_dir, monkeypatch):
+        _, base_path = auto_config_dir
+        monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+        assert result["alias"] == "gemini-small"
+
+    def test_multiple_keys_anthropic_wins(self, auto_config_dir, monkeypatch):
+        _, base_path = auto_config_dir
+        for key in self.KEYS:
+            monkeypatch.setenv(key, "sk-test")
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+        assert result["alias"] == "claude-small"
+
+    def test_openai_and_gemini_openai_wins(self, auto_config_dir, monkeypatch):
+        _, base_path = auto_config_dir
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+        assert result["alias"] == "gpt-small"
+
+    def test_empty_key_does_not_count(self, auto_config_dir, monkeypatch):
+        """A key set to the empty string is treated as absent."""
+        _, base_path = auto_config_dir
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+        monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve")
+        assert result["alias"] == "gemini-small"
+
+    def test_no_keys_raises_actionable_error(self, auto_config_dir):
+        _, base_path = auto_config_dir
+        with pytest.raises(ValueError, match="no provider API key"):
+            resolve_config(base_path, "nonexistent.yaml", "resolve")
+
+    def test_explicit_override_config_wins(self, auto_config_dir, monkeypatch):
+        """A target repo's explicit default_model beats key detection."""
+        tmp_path, base_path = auto_config_dir
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        override = tmp_path / "override.yaml"
+        override.write_text(yaml.dump({"default_model": "gemini-small"}))
+        result = resolve_config(base_path, str(override), "resolve")
+        assert result["alias"] == "gemini-small"
+
+    def test_explicit_command_model_wins(self, auto_config_dir, monkeypatch):
+        """A model suffix on the command beats key detection."""
+        _, base_path = auto_config_dir
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        result = resolve_config(base_path, "nonexistent.yaml", "resolve-gpt-small")
+        assert result["alias"] == "gpt-small"
+
+    def test_unset_default_model_falls_back_to_auto(self, auto_config_dir, monkeypatch):
+        """A config with no default_model at all behaves like auto."""
+        tmp_path, base_path = auto_config_dir
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        config = yaml.safe_load(open(base_path))
+        del config["default_model"]
+        no_default = tmp_path / "no-default.yaml"
+        no_default.write_text(yaml.dump(config))
+        result = resolve_config(str(no_default), "nonexistent.yaml", "resolve")
+        assert result["alias"] == "gpt-small"

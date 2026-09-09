@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 # Cost formatting helpers — imported from shared lib/formatting.py
 # ---------------------------------------------------------------------------
 
-from lib.formatting import _fmt_tok, _fmt_ela, _fmt_bpd, _fmt_loc, _fmt_info, TABLE_HEADER
+from formatting import _fmt_tok, _fmt_ela, _fmt_bpd, _fmt_loc, _fmt_info, TABLE_HEADER
 
 
 def _build_cost_table(input_tokens, output_tokens, cost, elapsed, output_text):
@@ -46,6 +46,53 @@ def _build_cost_table(input_tokens, output_tokens, cost, elapsed, output_text):
     lines = ['---', '', '### 💰 Cost', '', '| Metric | Value |', '|--------|-------|']
     lines += [f'| {k} | {v} |' for k, v in rows]
     return '\n'.join(lines)
+
+
+def _build_stage_cost_block(
+    *,
+    github_repo,
+    issue_number,
+    input_tokens,
+    output_tokens,
+    cost,
+    elapsed,
+    output_text,
+):
+    """Build the per-step cost table for a delegate stage, followed by the
+    canonical cumulative cost table (only when there are prior cost markers
+    on the issue — i.e., this is not the first step to emit a cost block).
+
+    The cumulative table is produced by lib/cumulative_cost.compute_cumulative_table,
+    which is the same code paths individual /agent-resolve / /agent-design /
+    /agent-review invocations use, so a delegate run looks identical to the
+    sequence of manual invocations it expands into.
+    """
+    parts = [_build_cost_table(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost=cost,
+        elapsed=elapsed,
+        output_text=output_text,
+    )]
+    if github_repo and issue_number:
+        try:
+            from cumulative_cost import compute_cumulative_table
+            cum = compute_cumulative_table(
+                repo=github_repo,
+                number=str(issue_number),
+                current_cost=cost,
+                current_input_tokens=input_tokens,
+                current_output_tokens=output_tokens,
+            )
+            if cum:
+                parts.append('')
+                parts.append(cum)
+        except Exception as e:
+            # Cumulative-cost computation is best-effort visibility — never
+            # block a stage from posting its result if it fails.
+            import sys as _sys
+            print(f"  [delegate] Could not compute cumulative cost: {e}", file=_sys.stderr)
+    return '\n'.join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -358,8 +405,17 @@ def run_build_council(
     pr_diff,
     extra_instructions="",
     post_comment_fn=None,
+    banner_label="Build Stage 2 — Council Code Review",
+    attribution_label="/agent-build Stage 2",
+    completion_label="Build Stage 2 complete — awaiting human review",
 ):
-    """Run Stage 2 council code reviews for build mode.
+    """Run parallel council code reviews on a PR.
+
+    Used by:
+      - /agent-build Stage 2 (defaults)
+      - /agent-delegate Stage 5 (overrides labels for "Delegate Stage 5/6")
+      - /agent-review with council=true (overrides labels for plain
+        "Council Code Review", no build/delegate prefix)
 
     Runs each council model's review in parallel (non-agentic). Posts each
     review via post_comment_fn (defaults to print if None).
@@ -367,6 +423,11 @@ def run_build_council(
     extra_instructions is the mode-level extra_instructions string; each council
     member's model-level extra_instructions (from council_model["extra_instructions"])
     is appended per-reviewer.
+
+    banner_label, attribution_label, completion_label parameterize the
+    user-visible mode-specific text so the same parallel-review code can
+    serve build mode, delegate Stage 5, and /agent-review council=true
+    without each emitting "Build Stage 2 — ..." headers.
 
     Returns dict with council_results, total_input_tokens,
     total_output_tokens, total_cost.
@@ -382,8 +443,8 @@ def run_build_council(
 
     if not council_models:
         post(
-            "## 🏛️ Build Stage 2 — Council Code Review\n\n"
-            "⚠️ No council models configured. Skipping council code review.\n"
+            f"## 🏛️ {banner_label}\n\n"
+            f"⚠️ No council models configured. Skipping council code review.\n"
         )
         return {
             "council_results": [],
@@ -393,7 +454,7 @@ def run_build_council(
         }
 
     post(
-        f"## 🏛️ Build Stage 2 — Council Code Review\n\n"
+        f"## 🏛️ {banner_label}\n\n"
         f"Requesting code reviews from {len(council_models)} council member(s): "
         f"{', '.join('`' + m['alias'] + '`' for m in council_models)}...\n"
     )
@@ -465,12 +526,12 @@ def run_build_council(
                 f"🤖 **Council reviewer:** `{cr['model_alias']}` (`{cr['model_id']}`)\n\n"
                 f"{cr['review']}\n\n"
                 f"---\n"
-                f"_Council code review by `/agent-build` Stage 2 (`{cr['model_alias']}`)_"
+                f"_Council code review by `{attribution_label}` (`{cr['model_alias']}`)_"
             )
 
     n = len(council_results)
     post(
-        f"## Build Stage 2 complete — awaiting human review\n\n"
+        f"## {completion_label}\n\n"
         f"{n} model(s) have posted code reviews above. Please review the feedback "
         f"and address any concerns before merging.\n"
     )
@@ -634,9 +695,12 @@ def run_workshop(
         return {
             "design_result": design_result,
             "council_results": [],
-            "total_input_tokens": design_result.get("input_tokens", 0),
-            "total_output_tokens": design_result.get("output_tokens", 0),
-            "total_cost": design_result.get("cost", 0.0),
+            "total_input_tokens": design_result.get("input_tokens", 0)
+            + design_result.get("distill_input_tokens", 0),
+            "total_output_tokens": design_result.get("output_tokens", 0)
+            + design_result.get("distill_output_tokens", 0),
+            "total_cost": design_result.get("cost", 0.0)
+            + design_result.get("distill_cost", 0.0),
         }
 
     # Check for agent command loop
@@ -648,9 +712,12 @@ def run_workshop(
         return {
             "design_result": design_result,
             "council_results": [],
-            "total_input_tokens": design_result.get("input_tokens", 0),
-            "total_output_tokens": design_result.get("output_tokens", 0),
-            "total_cost": design_result.get("cost", 0.0),
+            "total_input_tokens": design_result.get("input_tokens", 0)
+            + design_result.get("distill_input_tokens", 0),
+            "total_output_tokens": design_result.get("output_tokens", 0)
+            + design_result.get("distill_output_tokens", 0),
+            "total_cost": design_result.get("cost", 0.0)
+            + design_result.get("distill_cost", 0.0),
         }
 
     # Post design analysis with embedded cost table
@@ -680,9 +747,12 @@ def run_workshop(
         return {
             "design_result": design_result,
             "council_results": [],
-            "total_input_tokens": design_result.get("input_tokens", 0),
-            "total_output_tokens": design_result.get("output_tokens", 0),
-            "total_cost": design_result.get("cost", 0.0),
+            "total_input_tokens": design_result.get("input_tokens", 0)
+            + design_result.get("distill_input_tokens", 0),
+            "total_output_tokens": design_result.get("output_tokens", 0)
+            + design_result.get("distill_output_tokens", 0),
+            "total_cost": design_result.get("cost", 0.0)
+            + design_result.get("distill_cost", 0.0),
         }
 
     post(
@@ -781,15 +851,23 @@ def run_workshop(
         f"- Post `/agent-resolve` to implement directly\n"
     )
 
-    # Aggregate totals
-    total_input = design_result.get("input_tokens", 0) + sum(
-        cr.get("input_tokens", 0) for cr in council_results
+    # Aggregate totals. The distillation pre-pass reports its tokens/cost
+    # separately from the loop's own fields, so include it here — resolve.py
+    # seeds its totals the same way.
+    total_input = (
+        design_result.get("input_tokens", 0)
+        + design_result.get("distill_input_tokens", 0)
+        + sum(cr.get("input_tokens", 0) for cr in council_results)
     )
-    total_output = design_result.get("output_tokens", 0) + sum(
-        cr.get("output_tokens", 0) for cr in council_results
+    total_output = (
+        design_result.get("output_tokens", 0)
+        + design_result.get("distill_output_tokens", 0)
+        + sum(cr.get("output_tokens", 0) for cr in council_results)
     )
-    total_cost = design_result.get("cost", 0.0) + sum(
-        cr.get("cost", 0.0) for cr in council_results
+    total_cost = (
+        design_result.get("cost", 0.0)
+        + design_result.get("distill_cost", 0.0)
+        + sum(cr.get("cost", 0.0) for cr in council_results)
     )
 
     return {
@@ -835,13 +913,47 @@ SPEC_DESIGN_SYSTEM_PROMPT = (
     "2. **Function signatures** — new functions with their signatures, modified "
     "functions with before/after\n"
     "3. **Data structures / schemas** — any new fields, types, or config entries\n"
-    "4. **Test strategy** — which existing tests need updates, which new tests to add\n"
+    "4. **Test strategy** — which existing tests need updates, which new tests "
+    "to add (see 'Tests for load-bearing methodology claims' below)\n"
     "5. **Edge cases and error handling** — specific scenarios to handle\n"
     "6. **Risks** — anything that could go wrong during implementation\n\n"
     "Be concrete: reference specific line numbers and existing patterns when "
     "possible. Precision matters more than prose. Do NOT re-litigate the design — "
     "implement it as given. If you find something in the codebase that makes the "
-    "design impossible, flag it explicitly rather than silently changing direction."
+    "design impossible, flag it explicitly rather than silently changing direction.\n\n"
+    "## Verify every file/function reference before citing it\n\n"
+    "Before claiming that a function `foo` lives in `module/bar.py`, use grep "
+    "or read_file to verify it actually does. If the design says 'extract the "
+    "existing BT logic from `bridge_analysis`' and your grep shows the BT "
+    "functions are actually in `notebooks/leaderboard.py`, write the spec with "
+    "the correct path — do NOT preserve the design's incorrect citation. A "
+    "spec that says 'functions already present in module X' when they are not "
+    "is the worst kind of spec error: the implementer agent will try the "
+    "obvious import, fail, and then write a stub rather than spend iterations "
+    "hunting for the real location.\n\n"
+    "## Do NOT use `...` placeholders in code templates\n\n"
+    "If you show a function signature with body `...` (or `# TODO: implement` "
+    "or similar), the implementer agent reads that as 'fill in something "
+    "reasonable here.' That's how simplified stand-ins get shipped for "
+    "load-bearing logic. Instead:\n"
+    "- Either spell out the body sufficiently for mechanical fill-in (concrete "
+    "SQL, the actual algorithm in pseudocode, the specific transformations), OR\n"
+    "- Write a structured semantic specification: 'Body must implement X "
+    "algorithm (see canonical impl at `path/file.py:line`); precondition: A; "
+    "postcondition: B; tolerance: C.' Name the canonical reference explicitly "
+    "so the implementer agent can port it, not improvise.\n\n"
+    "## Tests for load-bearing methodology claims\n\n"
+    "Any methodology claim in the spec — 'uses BT+EB ranking', 'applies "
+    "BH-FDR correction', 'softmax with temperature 1.0' — must come with a "
+    "named acceptance test in the test strategy section. Format:\n\n"
+    "    test_leaderboard_matches_bt_eb_reference_within_tolerance:\n"
+    "        Calls compute_leaderboard_results on a fixture and asserts the\n"
+    "        output rankings match the reference implementation in\n"
+    "        notebooks/leaderboard.py:bt_mm_players (output theta values\n"
+    "        within 1e-6).\n\n"
+    "Without such a test, the methodology claim is just a label, and the next "
+    "refactor can silently violate it. 'All existing tests pass' is necessary "
+    "but not sufficient — the spec must require tests that pin the new behavior."
 )
 
 
@@ -908,6 +1020,22 @@ SPEC_REVISION_SYSTEM_PROMPT = (
     "- Incorporates useful suggestions\n"
     "- Explains why you rejected any concerns you disagree with\n"
     "- Remains grounded in the approved design — do NOT re-open design questions\n\n"
+    "## Properties the revised spec MUST preserve or strengthen\n\n"
+    "These are non-negotiable — never weaken them based on council feedback "
+    "(council feedback that pushes in the opposite direction is wrong):\n\n"
+    "- **Every file/function reference must resolve to real code.** If a "
+    "citation in the original spec turns out to be wrong (e.g., 'in module X' "
+    "but actually 'in notebooks/Y'), fix the citation. Do not weaken it to "
+    "vague language like 'the existing implementation' — that just kicks the "
+    "hunt-for-the-real-location problem downstream.\n"
+    "- **No `...` placeholders in code templates.** If the original spec has "
+    "any, either fill them in OR replace with a structured semantic "
+    "specification that names the canonical reference (`path/file.py:line`) "
+    "and the precondition / postcondition / tolerance.\n"
+    "- **Load-bearing methodology claims must have named acceptance tests.** "
+    "Every 'uses X algorithm' claim must have a corresponding "
+    "`test_X_matches_reference_within_tolerance` entry in the test strategy. "
+    "If the original spec is missing one, add it.\n\n"
     "Output a complete, revised implementation spec (not just a diff from the original)."
 )
 
@@ -975,6 +1103,8 @@ def run_delegate(
     post_comment_fn=None,
     design_rounds=1,
     distill_enabled=True,
+    github_repo="",
+    issue_number="",
 ):
     """Run the full delegate pipeline (6 stages, no human checkpoints).
 
@@ -987,7 +1117,9 @@ def run_delegate(
         3c. Spec revision (one-shot) — conditional on design_rounds >= 2
         4. Implementation / resolve (agentic, same as /agent-resolve)
         5. Council code review (parallel, same as /agent-build Stage 2)
-        6. Code revision plan — main agent reads code reviews, describes fixes
+        6. Agentic code revision — the workflow re-invokes resolve.py on the
+           PR branch with the Stage 5 reviews (plus revised design/spec)
+           injected via EXTRA_FILES; the agent applies the fixes and commits
 
     Parameters
     ----------
@@ -1055,6 +1187,17 @@ def run_delegate(
     if max_design_iterations is None:
         max_design_iterations = max_iterations
 
+    # wrapup_iteration is computed by config.py against the code-stage budget
+    # (max_iterations, e.g. 40 of 50). Rescale it for the shorter design
+    # stages so the wrap-up nudge can actually fire there (e.g. 12 of 15) —
+    # passed unscaled it exceeds max_design_iterations and is unreachable.
+    if wrapup_iteration and max_iterations:
+        design_wrapup_iteration = int(
+            max_design_iterations * wrapup_iteration / max_iterations
+        )
+    else:
+        design_wrapup_iteration = wrapup_iteration
+
     all_input_tokens = 0
     all_output_tokens = 0
     all_cost = 0.0
@@ -1077,16 +1220,18 @@ def run_delegate(
         extra_context=extra_context,
         max_iterations=max_design_iterations,
         wrapup_enabled=wrapup_enabled,
-        wrapup_iteration=wrapup_iteration,
+        wrapup_iteration=design_wrapup_iteration,
         context_keep_tool_results=context_keep_tool_results,
         distill_enabled=distill_enabled,
     )
     design_elapsed = time.time() - design_start
 
     design_analysis = design_result.get("analysis", "")
-    all_input_tokens += design_result.get("input_tokens", 0)
-    all_output_tokens += design_result.get("output_tokens", 0)
-    all_cost += design_result.get("cost", 0.0)
+    # Include the distillation pre-pass, which the loop reports separately
+    # from its own token/cost fields (resolve.py seeds totals the same way).
+    all_input_tokens += design_result.get("input_tokens", 0) + design_result.get("distill_input_tokens", 0)
+    all_output_tokens += design_result.get("output_tokens", 0) + design_result.get("distill_output_tokens", 0)
+    all_cost += design_result.get("cost", 0.0) + design_result.get("distill_cost", 0.0)
 
     if not design_analysis:
         post(
@@ -1123,7 +1268,9 @@ def run_delegate(
             "total_cost": all_cost,
         }
 
-    design_cost_table = _build_cost_table(
+    design_cost_block = _build_stage_cost_block(
+        github_repo=github_repo,
+        issue_number=issue_number,
         input_tokens=design_result.get("input_tokens", 0),
         output_tokens=design_result.get("output_tokens", 0),
         cost=design_result.get("cost", 0.0),
@@ -1135,7 +1282,7 @@ def run_delegate(
         f"{design_analysis}\n\n"
         f"---\n"
         f"_Design analysis by `/agent-delegate` Stage 1 (`{model_alias}`)_\n\n"
-        f"{design_cost_table}"
+        f"{design_cost_block}"
     )
 
     # =======================================================================
@@ -1266,8 +1413,15 @@ def run_delegate(
             "⚠️ **Agent loop blocked!** The revised design contained "
             "`/agent` command(s). Blocked for safety."
         )
+        # Discard the contaminated revision, not just its posting — otherwise
+        # it still flows into Stages 3a/3b/3c and the workflow's Stage 4
+        # (Stage 3c already nulls its artifact the same way). Fall back to
+        # the Stage 1 design, which was /agent-checked before we got here.
+        revised_design = design_analysis
     else:
-        revision_cost_table = _build_cost_table(
+        revision_cost_block = _build_stage_cost_block(
+            github_repo=github_repo,
+            issue_number=issue_number,
             input_tokens=revision_result["input_tokens"],
             output_tokens=revision_result["output_tokens"],
             cost=revision_result["cost"],
@@ -1279,7 +1433,7 @@ def run_delegate(
             f"{revised_design}\n\n"
             f"---\n"
             f"_Revised design by `/agent-delegate` Stage 3 (`{model_alias}`)_\n\n"
-            f"{revision_cost_table}"
+            f"{revision_cost_block}"
         )
 
     # =======================================================================
@@ -1319,7 +1473,7 @@ def run_delegate(
             extra_context=spec_extra_context,
             max_iterations=max_design_iterations,
             wrapup_enabled=wrapup_enabled,
-            wrapup_iteration=wrapup_iteration,
+            wrapup_iteration=design_wrapup_iteration,
             context_keep_tool_results=context_keep_tool_results,
             distill_enabled=distill_enabled,
             system_prompt=SPEC_DESIGN_SYSTEM_PROMPT,
@@ -1327,9 +1481,9 @@ def run_delegate(
         spec_elapsed = time.time() - spec_start
 
         implementation_spec = spec_result.get("analysis", "")
-        all_input_tokens += spec_result.get("input_tokens", 0)
-        all_output_tokens += spec_result.get("output_tokens", 0)
-        all_cost += spec_result.get("cost", 0.0)
+        all_input_tokens += spec_result.get("input_tokens", 0) + spec_result.get("distill_input_tokens", 0)
+        all_output_tokens += spec_result.get("output_tokens", 0) + spec_result.get("distill_output_tokens", 0)
+        all_cost += spec_result.get("cost", 0.0) + spec_result.get("distill_cost", 0.0)
 
         if not implementation_spec:
             post(
@@ -1372,7 +1526,9 @@ def run_delegate(
                 "total_cost": all_cost,
             }
 
-        spec_cost_table = _build_cost_table(
+        spec_cost_block = _build_stage_cost_block(
+            github_repo=github_repo,
+            issue_number=issue_number,
             input_tokens=spec_result.get("input_tokens", 0),
             output_tokens=spec_result.get("output_tokens", 0),
             cost=spec_result.get("cost", 0.0),
@@ -1384,7 +1540,7 @@ def run_delegate(
             f"{implementation_spec}\n\n"
             f"---\n"
             f"_Implementation spec by `/agent-delegate` Stage 3a (`{model_alias}`)_\n\n"
-            f"{spec_cost_table}"
+            f"{spec_cost_block}"
         )
 
         # ---- Stage 3b: Council spec review ----
@@ -1529,7 +1685,9 @@ def run_delegate(
             )
             revised_spec = None
         else:
-            spec_revision_cost_table = _build_cost_table(
+            spec_revision_cost_block = _build_stage_cost_block(
+                github_repo=github_repo,
+                issue_number=issue_number,
                 input_tokens=spec_revision_result["input_tokens"],
                 output_tokens=spec_revision_result["output_tokens"],
                 cost=spec_revision_result["cost"],
@@ -1541,7 +1699,7 @@ def run_delegate(
                 f"{revised_spec}\n\n"
                 f"---\n"
                 f"_Revised implementation spec by `/agent-delegate` Stage 3c (`{model_alias}`)_\n\n"
-                f"{spec_revision_cost_table}"
+                f"{spec_revision_cost_block}"
             )
 
     # =======================================================================
@@ -1557,7 +1715,8 @@ def run_delegate(
     #   - Run Stages 1-3 (and optionally 3a-3c) here
     #   - Pass the revised design (and revised spec) to the resolve step
     #   - After resolve creates a PR, run Stage 5 (council code review)
-    #   - Post Stage 6 (code revision plan) as a comment
+    #   - Run Stage 6 (agentic code revision): resolve.py on the PR branch
+    #     with the Stage 5 reviews injected via EXTRA_FILES
 
     stages_done_label = "Stages 1-3c" if design_rounds >= 2 else "Stages 1-3"
     post(
@@ -1565,18 +1724,13 @@ def run_delegate(
         f"Proceeding to implementation (Stage 4)...\n"
     )
 
-    # Build aggregate cost table for the pre-resolve stages
-    stages_pre_resolve_cost_table = _build_cost_table(
-        input_tokens=all_input_tokens,
-        output_tokens=all_output_tokens,
-        cost=all_cost,
-        elapsed=time.time() - design_start,
-        output_text=revised_spec or revised_design,
-    )
-    post(
-        f"### 📊 Delegate {stages_done_label} Aggregate Cost\n\n"
-        f"{stages_pre_resolve_cost_table}"
-    )
+    # No separate aggregate-cost block here — each per-stage cost block above
+    # carries a canonical cumulative table (via compute_cumulative_table), so
+    # the cumulative on the last reported stage IS the running total. The old
+    # bespoke "Delegate Stages 1-3c Aggregate Cost" block used the per-step
+    # cost format (with bold **$X.XX**), which the cumulative-cost scanner
+    # would have picked up as a prior per-step cost — risking quadratic
+    # double-counting on any subsequent /agent-* invocation on the issue.
 
     return {
         "design_result": design_result,

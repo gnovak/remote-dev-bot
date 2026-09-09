@@ -21,7 +21,7 @@ to design agents that can autonomously handle real development tasks.
 ## How It Works
 
 1. Create a GitHub issue describing a feature or bug
-2. Comment `/agent-resolve` (or `/agent-resolve-claude-large`, etc.) to trigger
+2. Comment `/agent-resolve` (or `/agent-resolve-claude-medium`, etc.) to trigger
    implementation
 3. A GitHub Action spins up an AI agent that runs a custom LiteLLM agent loop
    that:
@@ -65,11 +65,11 @@ comment (no code changes).
 | Command                         | What it does                                         |
 | ------------------------------- | ---------------------------------------------------- |
 | `/agent-resolve`                | Resolve the issue and open a PR (default model)      |
-| `/agent-resolve-claude-large`   | Resolve with a specific model                        |
+| `/agent-resolve-claude-medium`  | Resolve with a specific model                        |
 | `/agent-design`                 | Explore codebase and post a design analysis comment  |
-| `/agent-design-claude-large`    | Design analysis with a specific model                |
+| `/agent-design-claude-medium`   | Design analysis with a specific model                |
 | `/agent-review`                 | Post a code review comment on a PR (no code changes) |
-| `/agent-review-claude-large`    | Code review with a specific model                    |
+| `/agent-review-claude-medium`   | Code review with a specific model                    |
 | `/agent-workshop[-<model>]`     | Design analysis + multi-model council critique       |
 | `/agent-build[-<model>]`        | Implement issue + multi-model council code review    |
 | `/agent-delegate[-<model>]`     | Full design-to-implementation cycle with no human pauses |
@@ -78,8 +78,8 @@ comment (no code changes).
 Modes and model aliases are configured in `remote-dev-bot.yaml`.
 
 **Mobile-friendly syntax:** Commands are case-insensitive and you can use spaces
-instead of dashes: `/agent resolve claude large` works the same as
-`/agent-resolve-claude-large`.
+instead of dashes: `/agent resolve claude medium` works the same as
+`/agent-resolve-claude-medium`.
 
 ### Per-Invocation Arguments
 
@@ -113,13 +113,30 @@ Model aliases (like `claude-small`) map to **LiteLLM model identifiers** in
 `remote-dev-bot.yaml`. Remote Dev Bot uses LiteLLM to talk to different LLM
 providers through a unified interface.
 
+Aliases come in three capability tiers per provider, so you never have to
+track model releases:
+
+| Tier       | Meaning                                              | Typical use |
+| ---------- | ---------------------------------------------------- | ----------- |
+| `*-small`  | Best value-for-money coding workhorse                | The default; most tasks |
+| `*-medium` | The provider's flagship                              | Complex multi-file features |
+| `*-large`  | Frontier model above the flagship, where one exists  | Hardest long-horizon work |
+
+Tiers are anchored on capability at agentic coding, not price, and the ladder
+is monotone — going up a tier never gets you a weaker model. Where a provider
+has no distinct model for a tier, the alias points at the tier below it, so
+every alias always runs. The model landscape doesn't always divide cleanly
+into three tiers; these mappings are judgment calls, and you can always
+define your own aliases (see "Adding Models" below) if you'd draw the lines
+differently. An abstraction doesn't have to be perfect to be useful.
+
 **Model ID format:** `provider/model-name`
 
 | Provider           | Prefix       | Example                       |
 | ------------------ | ------------ | ----------------------------- |
-| Anthropic (Claude) | `anthropic/` | `anthropic/claude-sonnet-4-5` |
-| OpenAI (GPT)       | `openai/`    | `openai/gpt-5.1-codex-mini`   |
-| Google (Gemini)    | `gemini/`    | `gemini/gemini-2.5-flash`     |
+| Anthropic (Claude) | `anthropic/` | `anthropic/claude-sonnet-5`   |
+| OpenAI (GPT)       | `openai/`    | `openai/gpt-5.3-codex`        |
+| Google (Gemini)    | `gemini/`    | `gemini/gemini-3.6-flash`     |
 
 ### Supported Providers
 
@@ -161,12 +178,15 @@ Prefix the model string with the provider name in `remote-dev-bot.yaml` (e.g.,
 **For most tasks:** Use the default (`/agent-resolve`). Claude Sonnet
 (`claude-small`) offers a good balance of capability and cost.
 
-**For complex multi-file features:** Use `/agent-resolve-claude-large` (Opus) or
-`/agent-resolve-gpt-large` (GPT Codex). These models handle larger contexts and
-more intricate reasoning.
+**For complex multi-file features:** Use `/agent-resolve-claude-medium` (Opus)
+or `/agent-resolve-gpt-medium`. Flagship models handle larger contexts and more
+intricate reasoning.
+
+**For the hardest long-horizon work:** `/agent-resolve-claude-large` (Fable)
+is the frontier tier — expect roughly 2-4x the cost of a medium run.
 
 **For coding-heavy tasks:** Models with "codex" in the name (e.g.,
-`openai/gpt-5.1-codex-mini`) are specifically tuned for code generation and may
+`openai/gpt-5.3-codex`) are specifically tuned for code generation and may
 perform better on implementation tasks.
 
 ### Commit Trailers
@@ -435,7 +455,7 @@ The agent ran, posted a comment with its evaluation, but didn't open a PR. This
 means the agent judged that it couldn't fully resolve the issue — it hit the
 iteration limit, got confused, or determined its changes were incomplete.
 
-Try a more capable model (`/agent-resolve-claude-large`) or add more detail to
+Try a more capable model (`/agent-resolve-claude-medium`) or add more detail to
 the issue description. The agent's evaluation comment will say what it attempted
 and why it stopped.
 

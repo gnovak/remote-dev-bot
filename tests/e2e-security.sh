@@ -58,6 +58,10 @@ check_graphql_quota() {
     fi
     remaining=$(echo "$result" | cut -d' ' -f1)
     reset_ts=$(echo "$result" | cut -d' ' -f2)
+    if ! [[ "$remaining" =~ ^[0-9]+$ ]]; then
+        echo "==> Warning: could not parse GraphQL rate limit response — proceeding anyway"
+        return
+    fi
     reset_time=$(python3 -c "
 import datetime
 ts = ${reset_ts}
@@ -73,6 +77,31 @@ print(f'{local_t.strftime(\"%H:%M:%S\")} local / {utc_t.strftime(\"%H:%M:%S\")} 
     fi
     echo "==> GraphQL quota: ${remaining} points remaining (resets ${reset_time})."
 }
+
+# Fail fast with a clear message when GH_TOKEN is dead — an expired
+# RDB_TESTER_PAT_TOKEN otherwise surfaces as confusing 401s on every
+# issue-creation call after the suite has already started.
+gh_login=$(gh api user --jq .login 2>/dev/null) || {
+    echo "ERROR: GH_TOKEN is invalid or expired (gh api user failed)." >&2
+    echo "ERROR: In CI this token comes from secrets.RDB_TESTER_PAT_TOKEN —" >&2
+    echo "ERROR: mint a new PAT with write access to the test repo and update the secret." >&2
+    exit 1
+}
+gh_exp=$(gh api user -i 2>/dev/null | grep -i "^github-authentication-token-expiration:" | cut -d" " -f2- | tr -d "\r")
+echo "==> Authenticated to GitHub as: ${gh_login}${gh_exp:+ (token expires: ${gh_exp})}"
+
+# Validate the unauthorized-user token too, when present — its failures
+# otherwise surface only mid-gating-test.
+if [[ -n "${UNAUTHORIZED_PAT:-}" ]]; then
+    ua_login=$(curl -fs -H "Authorization: token ${UNAUTHORIZED_PAT}" \
+        https://api.github.com/user 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['login'])" 2>/dev/null) || true
+    if [[ -z "${ua_login:-}" ]]; then
+        echo "ERROR: UNAUTHORIZED_PAT is invalid or expired (api.github.com/user failed)." >&2
+        echo "ERROR: In CI this is secrets.RDB_TESTER_UNAUTHORIZED_PAT_TOKEN (remote-dev-bot-tester account)." >&2
+        exit 1
+    fi
+    echo "==> Unauthorized-user token authenticates as: ${ua_login}"
+fi
 
 check_graphql_quota
 

@@ -3,11 +3,20 @@
 Gathers the target codebase, makes a single LLM call to extract only what's
 relevant to the task, and returns a focused context block for the agent.
 
-Three tiers:
-  1. Small repos (<= DISTILL_SMALL_REPO_LIMIT tokens): send full codebase
-  2. Medium repos (<= DISTILL_STRUCT_EXTRACT_LIMIT tokens): send structural
-     extract, identify relevant files, read those in full (second pass)
-  3. Large repos: skip distillation entirely (return original context)
+Two tiers:
+  1. Small repos (<= DISTILL_SMALL_REPO_LIMIT tokens): send the full codebase
+     in one call.
+  2. Larger repos: send a compact structural extract (function/class signatures
+     for Python, head-lines for other files), use a first LLM call to identify
+     relevant files, then read only those in full and pass them through a
+     second distillation call.
+
+There is no upper cap on repo size. The structural extract is roughly 10-15%
+of the codebase by tokens (varies with file mix), so the Tier-2 LLM input
+remains well below typical 1M-token model context windows for codebases up
+to several million tokens. If the extract ever does overflow the model's
+context window, the outer try/except returns the original (un-distilled)
+context as a graceful fallback.
 """
 
 import ast
@@ -19,9 +28,18 @@ from litellm import completion
 
 # --- Constants (all hardcoded — no user-facing config) ---
 
-# Token budget for the distillation call input
-DISTILL_SMALL_REPO_LIMIT = 100_000    # tokens — try to send whole codebase
-DISTILL_STRUCT_EXTRACT_LIMIT = 300_000  # tokens — for medium repos, use structural extract
+# Default token budget below which we skip the structural-extract step and
+# send the whole codebase to the distill LLM in one shot. Used as a fallback
+# when the model's context window can't be looked up. For models with a known
+# context window, the effective limit is computed by _small_repo_limit() as
+# DISTILL_SMALL_REPO_BUDGET_FRACTION × context_window — clamped between
+# DISTILL_SMALL_REPO_LIMIT_MIN and DISTILL_SMALL_REPO_LIMIT_MAX. This way a
+# 1M-token model gets the headroom to ingest a much bigger codebase in one
+# call, while a smaller model stays conservative.
+DISTILL_SMALL_REPO_LIMIT = 100_000      # fallback for unknown models
+DISTILL_SMALL_REPO_LIMIT_MIN = 50_000   # floor (don't go below this)
+DISTILL_SMALL_REPO_LIMIT_MAX = 500_000  # ceiling (don't get carried away)
+DISTILL_SMALL_REPO_BUDGET_FRACTION = 0.25  # share of input window we'll spend on codebase
 
 # Per-file size caps before truncation (in characters)
 SOURCE_FILE_CAP = 50_000    # for source/config files
@@ -74,6 +92,31 @@ STRUCT_OUTPUT_TOKENS = 16_384
 
 # First N lines to include for non-Python files in structural extract
 STRUCT_EXTRACT_HEAD_LINES = 30
+
+
+# --- Model-dependent thresholds ---
+
+def _small_repo_limit(model):
+    """Return the Tier-1-vs-Tier-2 cutoff for this model.
+
+    Larger context windows (1M tokens for current Claude/GPT/Gemini frontier
+    models) can comfortably ingest more of the codebase in one shot, so the
+    "small repo" threshold scales with the model's input window. Clamped to
+    [DISTILL_SMALL_REPO_LIMIT_MIN, DISTILL_SMALL_REPO_LIMIT_MAX].
+
+    Returns DISTILL_SMALL_REPO_LIMIT (the legacy 100K default) for any model
+    LiteLLM doesn't know about.
+    """
+    try:
+        import litellm
+        info = litellm.get_model_info(model)
+        window = int(info.get("max_input_tokens") or 0)
+    except Exception:
+        window = 0
+    if window <= 0:
+        return DISTILL_SMALL_REPO_LIMIT
+    raw = int(window * DISTILL_SMALL_REPO_BUDGET_FRACTION)
+    return max(DISTILL_SMALL_REPO_LIMIT_MIN, min(DISTILL_SMALL_REPO_LIMIT_MAX, raw))
 
 
 # --- File gathering ---
@@ -207,7 +250,7 @@ def _extract_python_signatures(content, include_line_numbers=False):
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
             # Get the function signature from source lines
-            sig = _format_function_sig(node, content)
+            sig = _format_function_sig(node)
             docstring = ast.get_docstring(node)
             if include_line_numbers:
                 parts.append(f"{sig}  # line {node.lineno}")
@@ -228,7 +271,7 @@ def _extract_python_signatures(content, include_line_numbers=False):
             # Include method signatures
             for item in ast.iter_child_nodes(node):
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    sig = _format_function_sig(item, content)
+                    sig = _format_function_sig(item)
                     if include_line_numbers:
                         parts.append(f"    {sig}  # line {item.lineno}")
                     else:
@@ -245,19 +288,19 @@ def _extract_python_signatures(content, include_line_numbers=False):
     return "\n".join(parts) if parts else content.split("\n")[:STRUCT_EXTRACT_HEAD_LINES]
 
 
-def _format_function_sig(node, source):
+def _format_function_sig(node):
     """Format a function/async function node as its signature line."""
     prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
-    # Try to get the source segment for just the signature
+    # ast.arguments nodes carry no position attributes, so
+    # ast.get_source_segment(source, node.args) always returns None —
+    # unparse the node instead to keep defaults, *args/**kwargs,
+    # keyword-only args, and annotations.
     try:
-        args = ast.get_source_segment(source, node.args)
-        if args:
-            return f"{prefix} {node.name}({args}):"
+        return f"{prefix} {node.name}({ast.unparse(node.args)}):"
     except Exception:
-        pass
-    # Fallback: reconstruct from AST
-    arg_names = [a.arg for a in node.args.args]
-    return f"{prefix} {node.name}({', '.join(arg_names)}):"
+        # Fallback: reconstruct bare positional names from the AST
+        arg_names = [a.arg for a in node.args.args]
+        return f"{prefix} {node.name}({', '.join(arg_names)}):"
 
 
 def format_structural_extract(files, include_line_numbers=False):
@@ -289,24 +332,41 @@ def format_structural_extract(files, include_line_numbers=False):
 
 DISTILL_SYSTEM_PROMPT = """\
 You are a code relevance filter. Given a codebase and a task description, \
-extract ONLY what is directly relevant to implementing the task:
-- Full content of files that will need to be modified
-- Signatures and docstrings (not full bodies) of functions that provide context \
-but won't be directly modified
-- Schema definitions, data structures, or config formats the task touches
-- Brief explanation of how each included item relates to the task
+produce a focused context block for a downstream coding agent.
 
-Your goal is to reduce the need for the downstream coding agent to explore and \
-understand the whole codebase. The agent should be able to read your output and \
-know exactly which files to modify, which functions to call, and what interfaces \
-to respect — without needing to read anything else.
+## Hard rule: files to be modified must be included in FULL
 
-Be explicit about boundaries: "you need to read this file", "you need this \
-function signature but don't need the full body", "don't bother reading X, \
-it's not relevant to this task".
+For any file the agent will need to modify, include the COMPLETE file content \
+verbatim — every line, top to bottom. Do NOT excerpt, summarize, or skip lines \
+even if the task references specific line numbers or function names. The agent \
+needs the surrounding code (imports, helpers, module-level state, neighbouring \
+functions) to understand how its changes interact with the rest of the file.
 
-Omit everything unrelated to the task. Be concise — the output feeds directly \
-into a coding agent's working context."""
+A request like "drop the threshold check in `_player_stats` at line 312" still \
+requires the FULL file — the agent has to see what `_player_stats` calls, what \
+calls `_player_stats`, what state it depends on, and so on. Returning only the \
+lines around 312 is worse than returning nothing: it gives the agent false \
+confidence that it has the relevant context when it doesn't.
+
+## What else to include
+
+- Signatures and docstrings (not full bodies) of functions in OTHER files \
+that the agent will need to call or whose interfaces it must respect.
+- Schema definitions, data structures, or config formats the task touches.
+- A one-line "why this file matters" note for each included file.
+
+## What to omit
+
+- Files unrelated to the task.
+- Full bodies of helper functions in non-modified files (signatures + \
+docstrings only).
+
+Be explicit about boundaries: \"you need to read this file\", \"you need \
+this function signature but don't need the full body\", \"don't bother \
+reading X, it's not relevant to this task\".
+
+Be concise on context, but never trim files that will be modified — \
+their full content is the foundation the agent's work rests on."""
 
 
 def distill(codebase_text, task_context, model):
@@ -323,10 +383,12 @@ def distill(codebase_text, task_context, model):
                 f"## Task\n\n{task_context}\n\n"
                 f"## Codebase\n\n{codebase_text}\n\n"
                 "## Instructions\n\n"
-                "Extract only what is relevant to the task above. Format as:\n\n"
+                "Produce a focused context block for the downstream coding "
+                "agent. Format as:\n\n"
                 "### Relevant Files\n\n"
                 "**`path/to/file.py`** — [one sentence: why this file matters]\n"
-                "```python\n[full content or relevant excerpt]\n```\n\n"
+                "```python\n[FULL file content, verbatim, no excerpting — see "
+                "the system prompt's hard rule]\n```\n\n"
                 "### Key Interfaces\n\n"
                 "[signatures and docstrings from other files that the task touches, "
                 "without full bodies]\n\n"
@@ -415,13 +477,16 @@ def _identify_relevant_files(extract_text, task_context, model):
 def maybe_distill(repo_context, issue_context, model, root="."):
     """Run context distillation pre-step.
 
-    Returns (context_text, input_tokens, output_tokens, cost, structural_extract).
-    On failure or skip, returns (repo_context, 0, 0, 0.0, "").
-    The structural_extract is a compact index of all functions/classes with line
-    numbers, intended to be included in the agent's system prompt alongside the
-    distilled context.
+    Returns (context_text, input_tokens, output_tokens, cost,
+             structural_extract, codebase_total_tokens).
+    On failure or skip, returns (repo_context, 0, 0, 0.0, "", 0).
+    The structural_extract is a compact index of all functions/classes with
+    line numbers, intended to be included in the agent's system prompt
+    alongside the distilled context. codebase_total_tokens is the estimated
+    size of the codebase that distillation scanned, so callers can compute
+    meaningful "tokens-saved-per-iteration" metrics.
     """
-    fallback = (repo_context, 0, 0, 0.0, "")
+    fallback = (repo_context, 0, 0, 0.0, "", 0)
 
     try:
         files = gather_repo_files(root=root)
@@ -445,18 +510,25 @@ def maybe_distill(repo_context, issue_context, model, root="."):
         total_output = 0
         total_cost = 0.0
 
-        if total_tokens <= DISTILL_SMALL_REPO_LIMIT:
-            # Tier 1: Small repo — send full codebase
-            print("  [Distill] Tier 1 (small repo): sending full codebase")
+        small_repo_limit = _small_repo_limit(model)
+        if total_tokens <= small_repo_limit:
+            # Tier 1: Small repo (relative to model's context window) — send
+            # full codebase in one call.
+            print(f"  [Distill] Tier 1 (small repo, ≤{small_repo_limit:,} tokens for this model): sending full codebase")
             codebase_text = format_codebase(files)
             result, inp, out, cost = distill(codebase_text, issue_context, model)
             total_input += inp
             total_output += out
             total_cost += cost
 
-        elif total_tokens <= DISTILL_STRUCT_EXTRACT_LIMIT:
-            # Tier 2: Medium repo — structural extract + second pass
-            print("  [Distill] Tier 2 (medium repo): structural extract + targeted read")
+        else:
+            # Tier 2: Larger repo — structural extract + second pass.
+            # No upper bound here: the structural extract is ~10-15% of total
+            # tokens, so this path scales to multi-million-token codebases
+            # before hitting model context limits. If the extract does
+            # overflow the model context, the outer try/except returns the
+            # un-distilled context as a graceful fallback.
+            print(f"  [Distill] Tier 2 (~{total_tokens:,} tokens): structural extract + targeted read")
             # The distillation input uses the extract without line numbers
             # (line numbers aren't useful for the distillation LLM's task of
             # identifying relevant files).
@@ -488,17 +560,12 @@ def maybe_distill(repo_context, issue_context, model, root="."):
             total_output += out
             total_cost += cost
 
-        else:
-            # Tier 3: Large repo — skip
-            print(f"  [Distill] Repo too large (~{total_tokens:,} tokens) — skipping distillation")
-            return fallback
-
         if not result or not result.strip():
             print("  [Distill] Empty distillation result — falling back")
             return fallback
 
         print(f"  [Distill] Distillation complete: ~{len(result) // 4:,} tokens output")
-        return result, total_input, total_output, total_cost, agent_structural_extract
+        return result, total_input, total_output, total_cost, agent_structural_extract, total_tokens
 
     except Exception as e:
         print(f"  [Distill] Distillation failed: {e} — proceeding with full repo context")

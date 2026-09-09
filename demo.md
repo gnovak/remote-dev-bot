@@ -121,8 +121,8 @@ This is the normal code review workflow — just with an AI making the fixes.
 | **Design** | `/agent-design`  | Analyzes the problem and posts a comment  |
 | **Review** | `/agent-review`  | Reviews a PR and posts feedback           |
 
-All modes support model variants: `/agent-resolve-claude-large`,
-`/agent-design-gpt-large`, etc.
+All modes support model variants: `/agent-resolve-claude-medium`,
+`/agent-design-gemini-small`, etc.
 
 ---
 

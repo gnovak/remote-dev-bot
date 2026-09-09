@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 
-from lib.tools import (
+from tools import (
     validate_path as _tools_validate_path,
     execute_read_file as _tools_execute_read_file,
     execute_gh as _tools_execute_gh,
@@ -206,7 +206,28 @@ DEFAULT_SYSTEM_PROMPT = (
     "3. **Proposed approach** with specific files and changes\n"
     "4. **Risks and considerations**\n"
     "5. **Open questions** if any\n\n"
-    "Calibrate your analysis to the level of abstraction signaled by the issue:\n\n"
+    "## Verify every file/function reference before citing it\n\n"
+    "If your design says 'the existing implementation in `module/X.py`' or "
+    "'extract the logic from `package.Y`', use grep or read_file to verify "
+    "the code actually lives where you say it does. A design that cites the "
+    "wrong path becomes a spec that cites the wrong path, becomes an "
+    "implementation that fails the obvious import and writes a stub. Be "
+    "precise: name files by their actual path, function by their actual "
+    "definition site. If the canonical implementation lives in a notebook "
+    "or other awkward location, say so explicitly — don't pretend it's in "
+    "a clean module if it isn't.\n\n"
+    "## Methodology claims need named acceptance tests\n\n"
+    "Any load-bearing methodology claim in your design — 'uses BT+EB', "
+    "'applies BH-FDR correction', 'softmax with temperature 1.0' — must "
+    "come with a proposed acceptance test in your analysis. Format:\n\n"
+    "    Acceptance test: test_leaderboard_matches_bt_eb_reference_within_tolerance\n"
+    "      Asserts that compute_rankings() output matches the reference\n"
+    "      implementation at notebooks/leaderboard.py:bt_mm_players (theta\n"
+    "      values within 1e-6).\n\n"
+    "Without that, the methodology claim is a label not a contract — and "
+    "the implementer agent can ship a simpler stand-in that the existing "
+    "test suite won't catch.\n\n"
+    "## Calibrate your analysis to the issue's level of abstraction\n\n"
     "- If the issue describes a **high-level goal** (e.g., 'add workshop mode'), "
     "focus on architecture: components, data flow, key interfaces. Do NOT write implementation-level code.\n"
     "- If the issue is an **implementation spec** (e.g., specific function signatures, config schemas), "
@@ -338,7 +359,10 @@ def run_design_loop(
                 + (f"\n\n## Discussion so far:\n{issue_comments}" if issue_comments else "")
             )
             print("Running context distillation pre-step (design loop)...")
-            distilled, distill_input_tokens, distill_output_tokens, distill_cost, structural_extract = maybe_distill(
+            # Note: design loop currently doesn't surface a per-iter savings
+            # metric, so we discard codebase_total_tokens here.
+            (distilled, distill_input_tokens, distill_output_tokens,
+             distill_cost, structural_extract, _codebase_total) = maybe_distill(
                 extra_context, issue_context_text, model
             )
             if distilled != extra_context:
@@ -364,6 +388,15 @@ def run_design_loop(
         {"role": "user", "content": user_content},
     ]
 
+    # Cache strategy: moving-tail cache_control marker on the LAST message
+    # before each API call, same as resolve.py and reconcile.py (see
+    # resolve.py for the full rationale). Without it, design loops — and
+    # workshop/delegate Stage 1/3a, which run through here — pay full input
+    # price every iteration on Anthropic models.
+    _use_cache_markers = model.startswith(("anthropic/", "claude", "gemini/", "vertex_ai/"))
+    # Gemini's cache semantics differ from Anthropic; explicit TTL is required.
+    _cache_ttl = "3600s" if model.startswith(("gemini/", "vertex_ai/")) else None
+
     total_input_tokens = 0
     total_output_tokens = 0
     total_cost = 0.0
@@ -371,11 +404,35 @@ def run_design_loop(
     total_cache_creation_tokens = 0
     final_analysis = None
     last_response = None
-    wrapup_injected = False
     iteration = 0
 
     for iteration in range(max_iterations):
         print(f"=== Iteration {iteration + 1}/{max_iterations} ===")
+
+        # Place the moving-tail cache_control marker on the last message.
+        # Strip every existing marker first to avoid accumulation past
+        # Anthropic's 4-marker limit.
+        if _use_cache_markers and messages:
+            for _msg in messages:
+                _c = _msg.get("content")
+                if isinstance(_c, list):
+                    for _blk in _c:
+                        if isinstance(_blk, dict):
+                            _blk.pop("cache_control", None)
+            _tail = messages[-1]
+            _tail_content = _tail.get("content")
+            _cc: dict = {"type": "ephemeral"}
+            if _cache_ttl:
+                _cc["ttl"] = _cache_ttl
+            if isinstance(_tail_content, str):
+                _tail["content"] = [
+                    {"type": "text", "text": _tail_content, "cache_control": _cc}
+                ]
+            elif isinstance(_tail_content, list) and _tail_content:
+                # Apply the marker to the last block of the list.
+                _last_blk = _tail_content[-1]
+                if isinstance(_last_blk, dict):
+                    _last_blk["cache_control"] = _cc
 
         response = completion_with_retries(
             litellm_completion,
@@ -394,7 +451,11 @@ def run_design_loop(
             prompt_details = getattr(usage, "prompt_tokens_details", None)
             if prompt_details:
                 total_cache_read_tokens += getattr(prompt_details, "cached_tokens", 0) or 0
-                total_cache_creation_tokens += getattr(prompt_details, "cache_creation_input_tokens", 0) or 0
+                # litellm's PromptTokensDetailsWrapper field is
+                # cache_creation_tokens (NOT cache_creation_input_tokens);
+                # the old name always read as 0, so cache-write tokens
+                # never appeared and cache-savings figures overstated.
+                total_cache_creation_tokens += getattr(prompt_details, "cache_creation_tokens", 0) or 0
         cost = getattr(response, "_hidden_params", {}).get("response_cost", None)
         if cost:
             total_cost += cost
@@ -446,10 +507,13 @@ def run_design_loop(
             break
 
         # Graceful wrapup injection
+        # Re-injected EVERY iteration past the threshold — deliberate
+        # escalation, same mechanics as resolve.py and reconcile.py: one
+        # nudge gets buried under subsequent tool results, repeated
+        # pressure keeps the agent wrapping up.
         if (
             wrapup_enabled
             and wrapup_iteration > 0
-            and not wrapup_injected
             and iteration + 1 >= wrapup_iteration
         ):
             remaining = max_iterations - (iteration + 1)
@@ -463,7 +527,6 @@ def run_design_loop(
                     "Do not start new lines of inquiry."
                 ),
             })
-            wrapup_injected = True
 
     analysis = final_analysis or last_response or ""
 
